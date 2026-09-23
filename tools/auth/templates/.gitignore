@@ -1,0 +1,5 @@
+# Decrypted master key: it opens the vault alone. Never commit it.
+master.key
+
+# Atomic-write leftovers
+*.tmp

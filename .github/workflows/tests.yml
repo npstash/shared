@@ -1,0 +1,59 @@
+name: Tests
+
+# Keep the same in each repository: see the tests-and-ci rule.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Find each folder with a tests/ folder and a run.sh, and emit it as a matrix entry.
+  # Submodules are not checked out, so each repository tests only its own folders.
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.find.outputs.projects }}
+      found: ${{ steps.find.outputs.found }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find
+        shell: bash
+        run: |
+          projects=$(find . -type d -name tests \
+            -not -path '*/.*' -not -path '*/node_modules/*' \
+            -exec sh -c '[ -f "$(dirname "$1")/run.sh" ]' _ {} \; -print \
+            | sed 's|^\./||; s|/tests$||' \
+            | sort \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "projects=$projects" >> "$GITHUB_OUTPUT"
+          if [ "$projects" = "[]" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No folders with tests/ and run.sh found - nothing to run."
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Discovered: $projects"
+          fi
+
+  test:
+    needs: discover
+    if: needs.discover.outputs.found == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJson(needs.discover.outputs.projects) }}
+    name: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # run.sh builds the project runtime (per-project-runtimes) and runs the suite.
+      - name: run.sh test
+        working-directory: ${{ matrix.project }}
+        run: bash run.sh test

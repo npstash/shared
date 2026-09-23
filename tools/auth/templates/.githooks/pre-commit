@@ -1,0 +1,93 @@
+#!/bin/sh
+# Stop a commit of a credentials.json that holds secret values. Uses only sh and awk.
+# "pre-commit --scan" reads one file from stdin and writes SYSTEM.KEY for each secret set.
+# Keep the rules the same as exposed_secrets() in credstore.py.
+
+scan() {
+    awk '
+    function fail(msg) { print "not valid JSON: " msg > "/dev/stderr"; exit 2 }
+    function ws() { while (i <= n && index(" \t\r\n", substr(doc, i, 1))) i++ }
+    function str(   s, c) {            # at the opening quote; gives the raw content
+        s = ""; i++
+        while (i <= n) {
+            c = substr(doc, i, 1)
+            if (c == "\\") { s = s c substr(doc, i + 1, 1); i += 2; continue }
+            if (c == "\"") { i++; return s }
+            s = s c; i++
+        }
+        fail("string has no end")
+    }
+    # Parse one value and give 1 if it is set (true for Python), else 0.
+    # level: 0 = top object, 1 = a system, 2 = its "credentials" object, 9 = other.
+    function value(level, sys,   c, k, s, set) {
+        ws(); c = substr(doc, i, 1)
+        if (c == "{") {
+            i++; ws()
+            if (substr(doc, i, 1) == "}") { i++; return 0 }
+            while (1) {
+                ws()
+                if (substr(doc, i, 1) != "\"") fail("key expected")
+                k = str(); ws()
+                if (substr(doc, i, 1) != ":") fail("colon expected")
+                i++
+                if (level == 0) value(1, k)
+                # A key with an escape can spell "credentials": check it as one.
+                else if (level == 1 && (k == "credentials" || k ~ /\\/)) value(2, sys)
+                else if (level == 2) { if (value(9, sys)) print sys "." k }
+                else value(9, sys)
+                ws(); c = substr(doc, i, 1); i++
+                if (c == "}") return 1
+                if (c != ",") fail("comma or } expected")
+            }
+        }
+        if (c == "[") {
+            i++; ws()
+            if (substr(doc, i, 1) == "]") { i++; return 0 }
+            while (1) {
+                value(9, sys); ws(); c = substr(doc, i, 1); i++
+                if (c == "]") return 1
+                if (c != ",") fail("comma or ] expected")
+            }
+        }
+        if (c == "\"") return str() != ""
+        if (substr(doc, i, 4) == "true") { i += 4; return 1 }
+        if (substr(doc, i, 5) == "false") { i += 5; return 0 }
+        if (substr(doc, i, 4) == "null") { i += 4; return 0 }
+        if (match(substr(doc, i), /^-?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?/)) {
+            s = substr(doc, i, RLENGTH); i += RLENGTH; return s + 0 != 0
+        }
+        fail("unexpected character at position " i)
+    }
+    { doc = doc $0 "\n" }
+    END {
+        n = length(doc); i = 1; ws()
+        if (i > n) exit 0              # an empty file is an empty index
+        value(0, ""); ws()
+        if (i <= n) fail("text after the end")
+    }'
+}
+
+if [ "${1:-}" = "--scan" ]; then
+    scan
+    exit $?
+fi
+
+git diff --cached --name-only --diff-filter=ACMR | {
+    status=0
+    while IFS= read -r path; do
+        case "$path" in credentials.json | */credentials.json) ;; *) continue ;; esac
+        if ! found=$(git show ":$path" | scan); then
+            echo "commit blocked - $path: not valid JSON" >&2
+            status=1
+            continue
+        fi
+        if [ -n "$found" ]; then   # system names can hold spaces: one secret for each line
+            printf '%s\n' "$found" | awk -v p="$path" '{ print "commit blocked - " p ": secret " $0 " is set" }' >&2
+            status=1
+        fi
+    done
+    if [ "$status" -ne 0 ]; then
+        echo "run sync with the vault tool, then git add the cleared file" >&2
+    fi
+    exit "$status"
+}

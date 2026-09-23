@@ -1,0 +1,19 @@
+# Python virtual environments and bytecode
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated / intermediate files (see rules/deliverables-only.md)
+.local_assets/
+
+# Node
+node_modules/
+
+# Test caches
+.pytest_cache/
+
+# Atomic-write leftovers
+*.tmp
+
+# Links that setup.sh makes to skills/
+.claude/skills/

@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.bat text eol=crlf
+
+# openssl enc ciphertext
+credentials.enc binary
+master.enc.key binary
