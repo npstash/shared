@@ -9,9 +9,10 @@ related: []
 
 # Runtimes are per-project
 
-- Runtime and dependencies live in the project folder (`.venv/`, `node_modules/`, …).
-- **Never modify a global runtime** (no global `pip install`, no `npm install -g`, no
-  system Python/Node). Ask the user first if one seems necessary.
-- Launch via `run.sh` and `run.bat` in the project. Both activate the runtime, create
-  or update it if missing, and are kept in sync.
-- Pin dependencies (`requirements.txt`, `package.json`, …).
+- Keep the runtime and the dependencies in the project folder (`.venv/`,
+  `node_modules/`…).
+- Never change a global runtime: no global `pip install`, no `npm install -g`, no
+  system Python/Node. If one seems necessary, ask the user first.
+- Launch with `run.sh` and `run.bat` of the project. Both create or update the runtime,
+  then activate it. Keep the two in sync.
+- Pin dependencies (`requirements.txt`, `package.json`…).

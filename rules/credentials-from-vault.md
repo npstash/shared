@@ -11,15 +11,15 @@ related: []
 
 # Credentials come only from the vault
 
-Secrets for external systems come only from the [tools/auth](../tools/auth/README.md)
-vault. Never read them, or write code that reads them, from env vars, `.env`,
-`~/.netrc`, `~/.git-credentials`, `~/.ssh`, `~/.aws`, the OS keychain / Credential
-Manager, or cached logins (`gh auth token`, `git credential fill`). The vault tool itself
-reads no environment variables; only the `credentials` skill may read
-`$CREDSTORE_PASSPHRASE`, to pass it to the tool as `--passphrase`.
+Get secrets for external systems only from the [vault](../tools/auth/README.md). Do not
+read them, or write code that reads them, from env vars, `.env`, `~/.netrc`,
+`~/.git-credentials`, `~/.ssh`, `~/.aws`, the OS keychain or cached logins
+(`gh auth token`, `git credential fill`).
 
-- Use the `credentials` skill if available; otherwise the `run.sh` of the vault tool in
-  the shell and `from credstore import get_credential` in scripts.
-- Never echo a secret into a transcript, log or file.
-- Secret missing, locked or empty: stop and ask the user to add it to the vault. No
-  fallback, and never ask for a secret in chat.
+- Use the `credentials` skill. Without it, use the `run.sh` of the vault tool in the
+  shell, and `from credstore import get_credential` in scripts.
+- Only the `credentials` skill can read `$CREDSTORE_PASSPHRASE`, to give it to the tool
+  as `--passphrase`.
+- Never write a secret into a transcript, log or file.
+- If a secret is missing, locked or empty, stop and ask the user to add it to the vault.
+  Use no fallback. Never ask for a secret in chat.

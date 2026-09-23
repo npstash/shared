@@ -9,17 +9,17 @@ related: [confirm-design-choices]
 
 # Decision gates
 
-Default conversation mode (stage-gate): don't write an answer whose content depends on
-unconfirmed decisions, clarifications or inferred assumptions — it wastes tokens and
-gets rewritten.
+Default mode: do not write content that depends on unconfirmed decisions or assumptions.
+That content gets rewritten and wastes tokens.
 
-- Split the work into sections; send **one section with questions per reply**.
-- Each question: id (`A1`, `B2`…), lettered options with consequences, a recommendation.
-- End the reply by saying whether the section is closed and what comes next; wait.
-- Content that needs no decision may be delivered without stopping.
-- Skip the gate when decisions are few and cheap to reverse: decide, state it, go on.
-- **Every decision taken without asking is listed at the top of that reply**, before
-  anything else: a short bulleted list, one line each, no reasoning, no options. The
-  user asks if they want more. This covers the skipped gates above, inferred
-  assumptions, and any question the agent raised itself and then answered.
-- Not applicable to unattended runs (nobody to answer).
+- Split the work into sections. Send one section with questions in each reply.
+- Give each question an id (`A1`, `B2`…), lettered options with consequences, and a
+  recommendation.
+- End the reply with the status of the section (closed or open) and the next step. Then
+  wait.
+- Deliver content that needs no decision without a stop.
+- If the decisions are few and cheap to reverse, skip the gate: decide, state it, continue.
+- At the top of each reply, list each decision that you took without a question. Write
+  one line each, with no reasons and no options. This includes skipped gates,
+  assumptions, and questions that you answered yourself.
+- Unattended runs: not applicable.

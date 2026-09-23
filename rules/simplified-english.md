@@ -8,16 +8,15 @@ related: []
 
 # Simplified English
 
-Write all text in the repository in Simplified Technical English (ASD-STE100): READMEs,
-documents, rule files, code comments and docstrings. Chat messages, commit messages and
-pull request descriptions keep usual English.
+Write all repository text in Simplified Technical English (ASD-STE100): READMEs,
+documents, rules, code comments, docstrings. Chat, commit messages and PR descriptions
+use usual English.
 
-Obey the basic STE rules. Do not enforce the list of approved words.
+Use the basic STE rules. Do not use the list of approved words.
 
-- Give one meaning to each word. Use the same word for the same thing each time.
+- Give each word one meaning. Use the same word for the same thing.
 - Write one instruction in each sentence. Use the active voice and the imperative.
-- Write a maximum of 20 words in each sentence, and a maximum of 6 sentences in each
-  paragraph.
-- Do not put more than one word that ends in "-ing" together. Do not remove articles.
-- Be brief. Write only the necessary information. Do not repeat what another file says;
-  give a link to it. Delete each word that adds no information.
+- Write a maximum of 20 words in each sentence and 6 sentences in each paragraph.
+- Do not put two words that end in "-ing" together. Keep the articles.
+- Be brief. Write only the necessary information. Give a link to other files; do not
+  repeat them. Delete each word that adds no information.

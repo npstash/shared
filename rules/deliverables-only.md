@@ -9,7 +9,7 @@ related: []
 
 # Deliverables only
 
-Never commit what can be regenerated: build output, caches, virtualenvs, logs,
-downloads, scratch scripts, notes, test artifacts. Intermediate and generated files go
-into the project's gitignored `.local_assets/` (e.g. `tools/auth/.local_assets/`);
-repo-wide scratch into `./.local_assets/`.
+Do not commit what you can regenerate: build output, caches, virtualenvs, logs,
+downloads, scratch scripts, notes, test artifacts. Put intermediate and generated files
+into the gitignored `.local_assets/` of the project. Put repo-wide scratch into
+`./.local_assets/`.

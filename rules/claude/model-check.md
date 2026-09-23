@@ -8,6 +8,6 @@ related: []
 
 # Model check
 
-On the first response of each calendar day in a chat, check the running model. Opus or
-higher: continue silently. Lower: state the model and ask whether to proceed or switch
-with `/model opus`. Only once per day per chat.
+In the first reply of each calendar day in a chat, check the model. Opus or higher:
+continue silently. Lower: state the model, and ask to continue or to switch with
+`/model opus`.

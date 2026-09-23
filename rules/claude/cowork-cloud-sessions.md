@@ -8,9 +8,9 @@ related: []
 
 # Cowork cloud sessions
 
-Only in a Cowork **cloud** sandbox — `systemd-detect-virt` reports `docker` and no local
-drive is mounted. On desktop and local sessions use `gh` normally.
+Applies only in a Cowork **cloud** sandbox: `systemd-detect-virt` gives `docker`, and no
+local drive is mounted. In other sessions, use `gh` normally.
 
-`api.github.com/graphql` does not pass the egress proxy, so `gh pr create`, `gh pr list`,
-`gh issue` and `gh repo view --json` fail. Use `gh api <rest/path>` or `curl` instead —
-e.g. `POST /repos/{owner}/{repo}/pulls` to open a PR. `git push` over HTTPS is unaffected.
+The egress proxy blocks `api.github.com/graphql`, so `gh pr create`, `gh pr list`,
+`gh issue` and `gh repo view --json` fail. Use `gh api <rest/path>` or `curl`, e.g.
+`POST /repos/{owner}/{repo}/pulls` for a PR. `git push` over HTTPS works.

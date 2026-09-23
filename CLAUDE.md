@@ -1,15 +1,15 @@
 # shared — Claude Code index
 
-Claude Code-only rules, binding in addition to the ones in [AGENTS.md](AGENTS.md):
+Claude Code-only rules, in addition to [AGENTS.md](AGENTS.md):
 
-- **claude/model-check** — once per day per chat, confirm with the user before working if running below Opus. @rules/claude/model-check.md
-- **claude/nothing-outside-repo** — no auto-memory, no scratchpad or `/tmp`. @rules/claude/nothing-outside-repo.md
-- **claude/cowork-cloud-sessions** — in a Cowork cloud session reach GitHub over REST, GraphQL is blocked. @rules/claude/cowork-cloud-sessions.md
+- **claude/model-check** — below Opus, ask once per day. @rules/claude/model-check.md
+- **claude/nothing-outside-repo** — no auto-memory, scratchpad or `/tmp`. @rules/claude/nothing-outside-repo.md
+- **claude/cowork-cloud-sessions** — in a Cowork cloud session use the GitHub REST API. @rules/claude/cowork-cloud-sessions.md
 
 ## Skills to use automatically
 
-Invoke these skills automatically when their trigger applies — no need for the user to ask.
+Use these skills when the trigger applies, without a request from the user.
 
-| Skill | Use it when |
+| Skill | Trigger |
 | --- | --- |
-| `credentials` | A task needs a username, password, token or key for any external system — before reaching for env vars, a keychain or `gh auth`. See credentials-from-vault. |
+| `credentials` | A task needs a secret for an external system. Use it before env vars, a keychain or `gh auth`. |

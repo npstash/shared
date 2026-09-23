@@ -8,6 +8,6 @@ related: [nothing-outside-repo]
 
 # Nothing outside the repo — Claude Code
 
-[nothing-outside-repo](../nothing-outside-repo.md) applies. Never use the auto-memory
-directory (`~/.claude/projects/…/memory/`), the session scratchpad or `/tmp`: store
-rules as rule files, and scratch in `.local_assets/`.
+[nothing-outside-repo](../nothing-outside-repo.md) applies. Do not use the auto-memory
+folder (`~/.claude/projects/…/memory/`), the session scratchpad or `/tmp`. Put rules into
+rule files, and scratch into `.local_assets/`.
