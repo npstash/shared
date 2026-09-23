@@ -4,7 +4,7 @@ summary: Secrets come only from the tools/auth vault, never from this machine.
 applies-to: all-agents
 requires:
   - tools/auth                    # the vault tool
-  - private-data                  # the vault files, a separate repository; see tools/auth/README.md
+  - a vault home                  # the vault files, a separate repository; see tools/auth/README.md
   - skills/credentials            # optional, Claude Code and Kilo
 related: []
 ---

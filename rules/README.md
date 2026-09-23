@@ -3,8 +3,7 @@
 One file per rule, so any rule can be copied into another workspace on its own.
 
 Rules, tools and skills live in **containers**. A container is a folder with `rules/`,
-`skills/`, `tools/` and an index, e.g. `shared/` or `local/` of the repository that
-uses this one.
+`skills/`, `tools/` and an index. This repository is one container.
 
 - `rules/<id>.md` — binding for every agent; indexed in the container's
   [AGENTS.md](../AGENTS.md).

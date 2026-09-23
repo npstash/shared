@@ -1,7 +1,7 @@
 #!/bin/sh
 # Stop a commit of a credentials.json that holds secret values. Uses only sh and awk.
 # "pre-commit --scan" reads one file from stdin and writes SYSTEM.KEY for each secret set.
-# Keep the rules the same as exposed_secrets() in credstore.py.
+# Keep the rules the same as exposed_secrets() of the vault tool.
 
 scan() {
     awk '
