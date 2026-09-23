@@ -1,7 +1,6 @@
 # shared — index
 
-Rules, tools and skills for all repositories. Each rule lives in its own file under
-[rules/](rules/README.md) and is **binding**. Rules are cited by id, never by number.
+Each rule lives in its own file under [rules/](rules/README.md) and is **binding**. Rules are cited by id, never by number.
 Claude Code-only rules are indexed in [CLAUDE.md](CLAUDE.md).
 
 ## Rules
