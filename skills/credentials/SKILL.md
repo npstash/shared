@@ -31,10 +31,10 @@ needs no passphrase.
 GH_TOKEN=$($TOOL/run.sh --passphrase "$CREDSTORE_PASSPHRASE" get github --secret token) gh pr list
 ```
 
-In a script or tool, or for more than one secret, use Python:
+In a script or tool, or for more than one secret, use Python. Add `$TOOL/src` to
+`PYTHONPATH`, e.g. `PYTHONPATH="$TOOL/src" python script.py`, or in the `run.sh` of the calling tool.
 
 ```python
-sys.path.insert(0, str(TOOL))
 from credstore import get_credential
 jira = get_credential("jira", vault_home=VAULT_HOME)   # syncs, then decrypts
 session.auth = (jira.secrets()["username"], jira.secrets()["password"])

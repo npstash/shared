@@ -1,14 +1,11 @@
 import json
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
-PROJECT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT))
-import credstore as cs  # noqa: E402
+import credstore as cs
 
 PW = "test-passphrase"
 SYS = "Github npstash/all 01"

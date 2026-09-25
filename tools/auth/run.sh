@@ -14,4 +14,4 @@ if [[ "${1:-}" == "test" ]]; then
     "$dir/.venv/bin/python" -m pip install --quiet -r "$dir/requirements-dev.txt"
     exec "$dir/.venv/bin/python" -m pytest "$dir/tests" "$@"
 fi
-exec "$dir/.venv/bin/python" "$dir/credstore.py" "$@"
+exec "$dir/.venv/bin/python" "$dir/src/credstore.py" "$@"

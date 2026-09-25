@@ -11,7 +11,7 @@ if errorlevel 1 (
     copy /y "%DIR%requirements.txt" "%DIR%.venv\requirements.txt" >nul
 )
 if /i "%~1"=="test" goto :tests
-"%PY%" "%DIR%credstore.py" %*
+"%PY%" "%DIR%src\credstore.py" %*
 goto :eof
 :tests
 REM Dev dependencies stay out of the runtime venv until tests are actually asked for.

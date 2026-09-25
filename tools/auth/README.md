@@ -1,6 +1,6 @@
 # tools/auth — credential vault
 
-Requirements and design decisions: [request.md](request.md). Everything lives in [credstore.py](credstore.py).
+Requirements and design decisions: [request.md](request.md). Everything lives in [src/credstore.py](src/credstore.py).
 
 The vault files are not in this folder. They are in the **vault home**, a separate git
 repository (usually the `private-data` submodule of the repository that uses the vault).
@@ -99,7 +99,7 @@ openssl enc -d -aes-256-cbc -pbkdf2 -in private-data/credentials.enc -pass file:
 ```
 
 It prints the whole document, secrets included. Both commands rely on openssl's default
-`-pbkdf2` work factor (10000 iterations, HMAC-SHA256); `credstore.py` derives the key and
+`-pbkdf2` work factor (10000 iterations, HMAC-SHA256); `credstore` derives the key and
 IV the same way, so files written by either side are readable by the other. The format is
 AES-256-CBC without a MAC: a wrong key or a damaged file shows up as a padding or JSON
 error, not as a cryptographic integrity failure.
@@ -107,8 +107,9 @@ error, not as a cryptographic integrity failure.
 With neither, every command that needs a secret fails with a message naming both routes.
 `list` still works: it only reads `credentials.json`.
 
+To use the module from Python, add `shared/tools/auth/src` to `PYTHONPATH`:
+
 ```python
-sys.path.insert(0, "shared/tools/auth")
 from credstore import get_credential, list_systems
 c = get_credential("Github npstash/all 01", vault_home="private-data")
 c.url, c.authority_info, c.secrets()["token"]   # secrets() is an immutable map

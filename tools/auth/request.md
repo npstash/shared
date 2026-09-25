@@ -41,7 +41,7 @@ Collected from the user's requests.
 ## Decisions made without confirmation (you were unavailable; please review)
 
 - **Change check.** Encrypting the same content twice gives different bytes (the salt is random), so the tool compares decrypted contents, not files. `credentials.json` is also rewritten only when it changes.
-- **Files.** `credstore.py` (API and CLI) and `templates/` here. The vault home holds `master.enc.key`, `credentials.enc`, `credentials.json`, its `.gitattributes` (vault as binary) and the `sh`/`awk` pre-commit hook. `init` writes them.
+- **Files.** `src/credstore.py` (API and CLI) and `templates/` here. The vault home holds `master.enc.key`, `credentials.enc`, `credentials.json`, its `.gitattributes` (vault as binary) and the `sh`/`awk` pre-commit hook. `init` writes them.
 - **Commands.** `init`, `sync`, `list`, `get [--secret]`, `set`, `rename`, `rotate-key`, `change-passphrase`.
 - **Hook.** See "Vault in its own repository" below.
 - **Rotation safety.** `rotate-key` and `change-passphrase` copy the key and the vault into `.local_assets/` of the tool folder before writing, because a crash between writing the key and writing the vault would leave the vault unreadable.
@@ -68,7 +68,7 @@ Decisions, all confirmed by the user:
   private, and the threat model has no attacker with write access to it.
 - **openssl's default work factor.** `-pbkdf2` with 10000 iterations, not a hardened
   `-iter`, so the command in the README stays short. Still ~5x the old 2048.
-- **The KDF is reimplemented, not shelled out.** `credstore.py` derives key and IV exactly
+- **The KDF is reimplemented, not shelled out.** `credstore` derives key and IV exactly
   as `openssl enc -pbkdf2` does (PBKDF2-HMAC-SHA256, 48 bytes -> 32-byte key + 16-byte IV),
   so no `openssl` binary is needed at runtime or in CI. A test checks both directions
   against the real binary and skips when it is absent.

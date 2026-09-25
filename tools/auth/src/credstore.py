@@ -16,7 +16,7 @@ credentials.json is the source of truth for structure; the vault is stale data t
 in secrets. Commands read credentials.json first and decrypt only when values are needed.
 Files are rewritten only when their content changes.
 
-    from credstore import get_credential          # sys.path must include this folder
+    from credstore import get_credential          # PYTHONPATH must include this folder
     c = get_credential("jira", vault_home="private-data"); c.secrets()["token"]
 """
 
@@ -34,7 +34,7 @@ from secrets import token_bytes
 from types import MappingProxyType
 from typing import Mapping
 
-TOOL = Path(__file__).resolve().parent
+TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
 VAULT_DIR = "private-data"            # the default vault home, looked up by find_vault_home()
 BACKUPS = TOOL / ".local_assets"      # rotate-key and change-passphrase copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that init puts next to a new vault
