@@ -347,11 +347,9 @@ def test_backups_go_to_the_tool_folder_not_the_vault(home, tmp_path):
     assert backup.parent == tmp_path / "backups" and not (home / ".local_assets").exists()
 
 
-def test_setup_template_is_the_same_as_the_setup_of_this_repository():
-    root = PROJECT.parents[1]
-    for name in ("setup.sh", "setup.bat"):
-        if (root / name).exists():
-            assert (cs.TEMPLATES / name).read_bytes() == (root / name).read_bytes(), name
+def test_init_copies_the_setup_scripts_of_the_shared_repository(home):
+    for source in cs.SETUP:
+        assert (home / source.name).read_bytes() == source.read_bytes(), source.name
 
 
 # -- pre-commit hook -------------------------------------------------------------------------

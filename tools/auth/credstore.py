@@ -38,6 +38,7 @@ TOOL = Path(__file__).resolve().parent
 VAULT_DIR = "private-data"            # the default vault home, looked up by find_vault_home()
 BACKUPS = TOOL / ".local_assets"      # rotate-key and change-passphrase copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that init puts next to a new vault
+SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # init copies them too
 
 
 class CredentialError(RuntimeError):
@@ -211,7 +212,7 @@ class Store:
         return self._passphrase
 
     def init(self) -> list[Path]:
-        """A new vault: master key, example credentials.json, and the files from templates/.
+        """A new vault: master key, example credentials.json, the files from templates/, setup scripts.
 
         Stops if any vault file exists already. Template files that exist are kept.
         """
@@ -222,11 +223,12 @@ class Store:
         self._new_key(self._passphrase or _prompt_new_passphrase())
         _write(self.index, (json.dumps(EXAMPLE, indent=2) + "\n").encode())
         written = [self.key_enc, self.index]
-        for template in sorted(p for p in TEMPLATES.rglob("*") if p.is_file()):
-            target = self.home / template.relative_to(TEMPLATES)
+        sources = [(p, p.relative_to(TEMPLATES)) for p in sorted(TEMPLATES.rglob("*")) if p.is_file()]
+        for source, name in sources + [(p, Path(p.name)) for p in SETUP]:
+            target = self.home / name
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(template, target)
+                shutil.copy2(source, target)
                 written.append(target)
         return written
 

@@ -55,9 +55,10 @@ run.sh --vault-home DIR ...                  # the vault home (see above)
 ## A new vault
 
 `init` asks for a new passphrase (typed twice) and writes the master key, an example
-`credentials.json` and the files in [templates/](templates/). It stops if a vault exists
-already. The example entry has blank secrets, so `sync` fails until you fill them in or
-remove the entry. Then make the folder a git repository and run its `setup.sh` once for
+`credentials.json`, the files in [templates/](templates/) and the
+[setup.sh](../../setup.sh) and [setup.bat](../../setup.bat) of `shared`. It stops if a
+vault exists already. The example entry has blank secrets, so `sync` fails until you fill
+them in or remove the entry. Then make the folder a git repository and run its `setup.sh` once for
 each clone, to turn the hook on.
 
 ## Rotating

@@ -102,8 +102,8 @@ Decisions, all confirmed by the user:
   it; the default lookup is `./private-data`, then `private-data` next to the script.
   If both exist, the working directory wins.
 - **`init` replaces `keygen`.** It writes the key, an example `credentials.json` with blank
-  secrets and the files in `templates/`. It stops if a vault exists already. `rotate-key`
-  covers a new key.
+  secrets, the files in `templates/` and the setup scripts of `shared`. It stops if a vault
+  exists already. `rotate-key` covers a new key.
 - **Backups** go to `.local_assets/` of the tool folder, not the vault home.
 - **Hook.** `.githooks/pre-commit` is committed in the vault repository. It uses only `sh`
   and `awk`, so it needs no Python and does not depend on where this tool is. Tests keep it
