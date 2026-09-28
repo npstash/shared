@@ -3,7 +3,7 @@
 Requirements and design decisions: [request.md](request.md). Everything lives in [src/credstore.py](src/credstore.py).
 
 The vault files are not in this folder. They are in the **vault home**, a separate git
-repository (usually the `private-data` submodule of the repository that uses the vault).
+repository (usually the `vault-home` submodule of the repository that uses the vault).
 
 | File in the vault home | Contents |
 | --- | --- |
@@ -17,8 +17,8 @@ repository (usually the `private-data` submodule of the repository that uses the
 ## Finding the vault home
 
 1. `--vault-home DIR` (CLI) or `vault_home=` (Python), if given.
-2. Else `./private-data` in the working directory.
-3. Else `private-data` in this folder.
+2. Else `./vault-home` in the working directory.
+3. Else `vault-home` in this folder.
 
 If none exists, the tool stops and asks for `--vault-home`.
 
@@ -40,7 +40,7 @@ read `credentials.json` first and decrypt only when values are needed. Files are
 only when their content changes. Use `rename` instead of editing a name in place.
 
 ```bash
-run.sh init                                  # new vault in ./private-data (or --vault-home)
+run.sh init                                  # new vault in ./vault-home (or --vault-home)
 run.sh sync
 run.sh list                                  # name, url, secret names — no passphrase
 run.sh get NAME [--secret KEY]
@@ -80,8 +80,8 @@ Two ways, and only two. The tool never reads environment variables.
    so it stays out of your shell history):
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -in private-data/master.enc.key -out private-data/master.key
-chmod 600 private-data/master.key
+openssl enc -d -aes-256-cbc -pbkdf2 -in vault-home/master.enc.key -out vault-home/master.key
+chmod 600 vault-home/master.key
 ```
 
 `master.key` is gitignored and must never be committed: it opens the vault on its
@@ -95,7 +95,7 @@ The vault is a plain `openssl enc` file, so the decrypted master key opens it in
 command - useful when Python, the venv or this script are not available:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -in private-data/credentials.enc -pass file:private-data/master.key
+openssl enc -d -aes-256-cbc -pbkdf2 -in vault-home/credentials.enc -pass file:vault-home/master.key
 ```
 
 It prints the whole document, secrets included. Both commands rely on openssl's default
@@ -111,7 +111,7 @@ To use the module from Python, add `shared/tools/auth/src` to `PYTHONPATH`:
 
 ```python
 from credstore import get_credential, list_systems
-c = get_credential("Github npstash/all 01", vault_home="private-data")
+c = get_credential("Github npstash/all 01", vault_home="vault-home")
 c.url, c.authority_info, c.secrets()["token"]   # secrets() is an immutable map
 ```
 

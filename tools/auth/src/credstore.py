@@ -1,6 +1,6 @@
 """credstore - credential vault for the tools in this repository.
 
-The vault home (--vault-home, default: ./private-data, then <this folder>/private-data) holds:
+The vault home (--vault-home, default: ./vault-home, then <this folder>/vault-home) holds:
 
 credentials.json  committed index: system -> url, authority_info, credentials (values cleared)
 credentials.enc   committed vault: the same document, with secret values, encrypted with
@@ -17,7 +17,7 @@ in secrets. Commands read credentials.json first and decrypt only when values ar
 Files are rewritten only when their content changes.
 
     from credstore import get_credential          # PYTHONPATH must include this folder
-    c = get_credential("jira", vault_home="private-data"); c.secrets()["token"]
+    c = get_credential("jira", vault_home="vault-home"); c.secrets()["token"]
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
-VAULT_DIR = "private-data"            # the default vault home, looked up by find_vault_home()
+VAULT_DIR = "vault-home"              # the default vault home, looked up by find_vault_home()
 BACKUPS = TOOL / ".local_assets"      # rotate-key and change-passphrase copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that init puts next to a new vault
 SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # init copies them too
@@ -178,7 +178,7 @@ def _read_key(data: bytes, path: Path) -> str:
 
 
 def find_vault_home(vault_home: Path | str | None = None) -> Path:
-    """The given folder, else ./private-data, else private-data next to this script."""
+    """The given folder, else ./vault-home, else vault-home next to this script."""
     if vault_home:
         return Path(vault_home)
     for candidate in (Path.cwd() / VAULT_DIR, TOOL / VAULT_DIR):

@@ -18,7 +18,7 @@ def backups(tmp_path, monkeypatch):
 
 @pytest.fixture
 def home(tmp_path):
-    vault = tmp_path / "private-data"
+    vault = tmp_path / "vault-home"
     cs.Store(vault, PW).init()
     return vault
 
@@ -299,12 +299,12 @@ def test_new_passphrase_is_typed_twice(monkeypatch):
 # -- vault home and init -------------------------------------------------------------------
 
 def test_vault_home_is_found_in_the_working_directory_first(tmp_path, monkeypatch):
-    here, beside = tmp_path / "cwd" / "private-data", tmp_path / "tool" / "private-data"
+    here, beside = tmp_path / "cwd" / "vault-home", tmp_path / "tool" / "vault-home"
     here.mkdir(parents=True)
     beside.mkdir(parents=True)
     monkeypatch.setattr(cs, "TOOL", tmp_path / "tool")
     monkeypatch.chdir(tmp_path / "cwd")
-    assert cs.find_vault_home() == Path.cwd() / "private-data"
+    assert cs.find_vault_home() == Path.cwd() / "vault-home"
     here.rmdir()
     assert cs.find_vault_home() == beside
     beside.rmdir()
@@ -331,10 +331,10 @@ def test_init_refuses_an_existing_vault(home):
         cs.Store(home, PW).init()
 
 
-def test_init_defaults_to_private_data_in_the_working_directory(tmp_path, monkeypatch):
+def test_init_defaults_to_vault_home_in_the_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert cs.main(["--passphrase", PW, "init"]) == 0
-    assert (tmp_path / "private-data" / "master.enc.key").is_file()
+    assert (tmp_path / "vault-home" / "master.enc.key").is_file()
 
 
 def test_backups_go_to_the_tool_folder_not_the_vault(home, tmp_path):

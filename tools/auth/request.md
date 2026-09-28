@@ -28,7 +28,7 @@ Collected from the user's requests.
 18. Every command reads `credentials.json` first, and decrypts only when secret values are needed. `list` therefore needs no passphrase: it reports systems, URLs and secret **names** from the index, not which values are filled.
 19. A secret that is blank in `credentials.json` **and** has no value in the vault is an error. Only non-blank secrets are synced into the vault; blank ones keep the stored value. This stops `list` from advertising a secret that holds nothing.
 20. If every secret of a system is blank and nothing else changed, the system is not re-synced. If its URL or authority info changed, the vault is updated and the stored secrets are kept.
-21. The vault home is a command-line argument (`--vault-home`), never an environment variable. Without it, the tool uses `./private-data`, then `private-data` next to the script, and else stops.
+21. The vault home is a command-line argument (`--vault-home`), never an environment variable. Without it, the tool uses `./vault-home`, then `vault-home` next to the script, and else stops.
 22. The Python API hands out secrets as an immutable map from a method (`credential.secrets()`); the credential is a class, not a dictionary.
 
 ### Key rotation and local decryption
@@ -98,8 +98,8 @@ Decisions, all confirmed by the user:
 Decisions, all confirmed by the user:
 
 - **Vault home.** The key and both credential files live flat in a separate repository,
-  `private-data`, a submodule of the repository that uses the vault. `--vault-home` finds
-  it; the default lookup is `./private-data`, then `private-data` next to the script.
+  `vault-home`, a submodule of the repository that uses the vault. `--vault-home` finds
+  it; the default lookup is `./vault-home`, then `vault-home` next to the script.
   If both exist, the working directory wins.
 - **`init` replaces `keygen`.** It writes the key, an example `credentials.json` with blank
   secrets, the files in `templates/` and the setup scripts of `shared`. It stops if a vault

@@ -11,7 +11,7 @@ secret from the environment of the machine (see "Forbidden sources").
 - `TOOL` is `tools/auth` next to the `skills/` folder of this skill. The skill folder can
   be a link, so resolve it: `TOOL="$(realpath <skill folder>)/../../tools/auth"`.
 - The **vault home** is a separate folder with the vault files. The tool finds
-  `./private-data` itself. Else add `--vault-home DIR`.
+  `./vault-home` itself. Else add `--vault-home DIR`.
 
 ## 1. See what is stored
 
@@ -52,7 +52,7 @@ For each error: stop and ask. Do not use an env var or a file of the machine ins
 | `no way to open the vault` | No passphrase and no decrypted key. | If `$CREDSTORE_PASSPHRASE` is set, give it with `--passphrase`. Else ask the user to export it, or to decrypt the key to `master.key` in the vault home. |
 | `unknown system 'X'` | No entry. | Show the `list` output and ask which system to use, or ask the user to add it (`run.sh set X --secret token=...`). |
 | `secret 'K' is blank and the vault has no value for it` | The key has no value. | Ask the user to fill it (`run.sh set X --secret K=...`). Never use a different secret. |
-| `no vault found in ./private-data ...` | No vault home found. | Run from the folder that holds `private-data/`, or give `--vault-home`. For an empty submodule, run `setup.sh` of the repository. |
+| `no vault found in ./vault-home ...` | No vault home found. | Run from the folder that holds `vault-home/`, or give `--vault-home`. For an empty submodule, run `setup.sh` of the repository. |
 | `could not decrypt the master key` | Wrong passphrase. | Tell the user. Do not try other values. |
 | `both ... master.key and a passphrase were given` | Two ways to open the vault. | Run again without `--passphrase`. |
 
