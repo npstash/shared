@@ -19,9 +19,9 @@ That content gets rewritten and wastes tokens.
   wait.
 - Deliver content that needs no decision without a stop.
 - If the decisions are few and cheap to reverse, skip the gate: decide, state it, continue.
-- At the top of each reply, list your own decisions under "Agent decisions". Write one
-  line each, with no reasons and no options. This includes skipped gates, assumptions,
-  and questions that you answered yourself.
+- At the top of each reply, under the heading "Agent decisions", list the decisions that
+  the agent took without the user. Write one line each, with no reasons and no options.
+  This includes skipped gates, assumptions, and questions that the agent answered itself.
 - Do not list the decisions of the user. An answer of the user is a user decision, also
-  if you recommended the option.
+  if the agent recommended the option.
 - Unattended runs: not applicable.
