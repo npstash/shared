@@ -10,7 +10,7 @@ Claude Code-only rules, in addition to [AGENTS.md](AGENTS.md):
 
 Use these skills only when the user asks.
 
-- [extract-decisions](skills/claude/extract-decisions/SKILL.md) — add the decisions of old chats to the `DR.md` files.
+- [extract-decisions](skills/claude/extract-decisions/SKILL.md) — add the decisions of old chats to the `ADL.md` files.
 
 ## Skills to use automatically
 
