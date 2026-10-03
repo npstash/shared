@@ -3,7 +3,7 @@ REM Set up this repository, then run setup.bat in each submodule. You can run it
 REM Give verbs to select the steps. Without a verb, all steps run. "setup.bat help" shows the verbs.
 REM 1. submodules: check out the submodules that have no checkout. Others stay as they are.
 REM 2. hooks: use .githooks\ as the hooks folder, if the repository has one.
-REM 3. links: link each skills\<name>\ and <folder>\skills\<name>\ into .claude\skills\ (junctions).
+REM 3. links: link each skills\[claude\]<name>\ and <folder>\skills\[claude\]<name>\ into .claude\skills\ (junctions).
 REM    A parent setup gives --nested to a submodule: then only the parent's .claude\skills\ gets links.
 REM The same verbs then run in each submodule.
 REM Keep the same as setup.sh and as the copies in the other repositories.
@@ -58,9 +58,9 @@ if exist ".githooks\" (
 :links
 if not defined do_links goto :recurse
 if defined nested goto :recurse
-for /d %%s in (skills\*) do call :link "%%s"
+for /d %%s in (skills\* skills\claude\*) do call :link "%%s"
 REM "*" also gives dot folders such as .claude; "%%~nc" is empty for them, as in sh.
-for /d %%c in (*) do if not "%%~nc"=="" for /d %%s in ("%%c\skills\*") do call :link "%%s"
+for /d %%c in (*) do if not "%%~nc"=="" for /d %%s in ("%%c\skills\*" "%%c\skills\claude\*") do call :link "%%s"
 for /d %%l in (.claude\skills\*) do (
     if not exist "%%l\SKILL.md" fsutil reparsepoint query "%%l" >nul 2>&1 && rmdir "%%l"
 )
@@ -76,7 +76,7 @@ echo Usage: setup.bat [verb...]
 echo Verbs. They run in this order, whatever the order that you give:
 echo   submodules  Check out the submodules that have no checkout.
 echo   hooks       Use .githooks\ as the hooks folder, if the repository has one.
-echo   links       Link each skills\NAME\ and FOLDER\skills\NAME\ into .claude\skills\.
+echo   links       Link each skills\[claude\]NAME\ and FOLDER\skills\[claude\]NAME\ into .claude\skills\.
 echo   all         Do all the steps above. This is the default.
 echo   help        Show this text.
 echo The same verbs then run in each submodule. "links" runs only in the top repository.

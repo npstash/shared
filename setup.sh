@@ -3,7 +3,7 @@
 # Give verbs to select the steps. Without a verb, all steps run. "setup.sh help" shows the verbs.
 # 1. submodules: check out the submodules that have no checkout. Others stay as they are.
 # 2. hooks: use .githooks/ as the hooks folder, if the repository has one.
-# 3. links: link each skills/<name>/ and <folder>/skills/<name>/ into .claude/skills/. A parent
+# 3. links: link each skills/[claude/]<name>/ and <folder>/skills/[claude/]<name>/ into .claude/skills/. A parent
 #    setup gives --nested to a submodule: then only the parent's .claude/skills/ gets links.
 # The same verbs then run in each submodule.
 # Keep the same as setup.bat and as the copies in the other repositories.
@@ -16,7 +16,7 @@ Usage: setup.sh [verb...]
 Verbs. They run in this order, whatever the order that you give:
   submodules  Check out the submodules that have no checkout.
   hooks       Use .githooks/ as the hooks folder, if the repository has one.
-  links       Link each skills/<name>/ and <folder>/skills/<name>/ into .claude/skills/.
+  links       Link each skills/[claude/]<name>/ and <folder>/skills/[claude/]<name>/ into .claude/skills/.
   all         Do all the steps above. This is the default.
   help        Show this text.
 The same verbs then run in each submodule. "links" runs only in the top repository.
@@ -58,7 +58,7 @@ if [ "$do_hooks" = true ]; then
 fi
 
 if [ "$do_links" = true ] && [ "$nested" = false ]; then
-    for skill in skills/*/ */skills/*/; do
+    for skill in skills/*/ skills/claude/*/ */skills/*/ */skills/claude/*/; do
         [ -f "${skill}SKILL.md" ] || continue
         link=".claude/skills/$(basename "$skill")"
         mkdir -p .claude/skills

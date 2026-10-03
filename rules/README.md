@@ -34,7 +34,8 @@ Rule text.
 
 ## Skills
 
-Put a skill into `skills/<name>/SKILL.md` and add it to the index. Then run `setup.sh`
+Put a skill into `skills/<name>/SKILL.md` and add it to [AGENTS.md](../AGENTS.md). Put a
+Claude Code-only skill into `skills/claude/<name>/SKILL.md` and add it to [CLAUDE.md](../CLAUDE.md). Then run `setup.sh`
 (or `setup.bat`) of the repository root. It links the skill into `.claude/skills/`,
 where Claude Code and Kilo find it.
 
