@@ -21,7 +21,12 @@ that item: the decisions of the user and the decisions of an agent.
   documentation.
 - Write one line for each decision: `- <yyyy-mm-dd> <author> <decision>`.
   The list item keeps one line for each decision when Markdown renders the file.
-- Author: for the user, the git `user.name`. For an agent, `<tool>/<model>`. Use no spaces.
+- Author: the one who made the decision. Use no spaces.
+  - The user: the name of the user in git. An agent environment can set `user.name` to
+    the agent; then use the user's name from the commits of the user.
+  - An agent: `<tool>/<model>`.
+- A decision of the user includes an answer to a question and the choice of an option
+  that an agent recommended. A decision of an agent is a choice without the user.
 - Write the decision only. Do not write reasons, options or other metadata.
 - Keep the lines sorted by date, oldest first. Keep the order of decisions on the same date.
 - Never change or delete a line. If a decision changes, add a new line.

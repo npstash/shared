@@ -34,13 +34,18 @@ secrets. Never copy a secret into an `ADL.md` or into the reply.
 
 Record these:
 
-- an answer of the user to a question,
+- an answer of the user to a question, also if the agent recommended the option,
 - a choice that the user made without a question,
-- a decision that the agent took itself, e.g. in a "decisions taken without a question" list.
+- a decision that the agent took itself, e.g. in an "Agent decisions" list.
 
 Record only the decisions that the rule accepts. Do not record decisions that the chat
-changed again before its end; record only the final one. Use the date and the author of
-the message that holds the decision. For an agent decision, use the author that `show` writes.
+changed again before its end; record only the final one.
+
+Give each decision the date and the author of the message that made it, not of a message
+that repeats it. An agent reply can repeat the decisions of the user. Older chats list
+them as "decisions taken without a question". Before you give an agent as author, make
+sure that no earlier user message made or chose that decision. For an agent decision,
+use the author that `show` writes.
 
 ## 4. Find the ADL.md files
 
