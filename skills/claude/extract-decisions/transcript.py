@@ -14,6 +14,8 @@ TRANSCRIPTS = pathlib.Path.home() / ".claude" / "projects" / re.sub(r"[^A-Za-z0-
 PROCESSED = REPO / ".local_assets" / "extract-decisions" / "processed.txt"
 SECRET_WORDS = re.compile(r"passphrase|password|secret|token|api.?key|credential", re.I)
 PATH_KEYS = ("file_path", "notebook_path", "path")
+# IDE context blocks hold no decisions and can show file contents with secrets.
+IDE_BLOCK = re.compile(r"<(ide_selection|ide_opened_file)>.*?</\1>", re.S)
 
 
 def author(model):
@@ -94,8 +96,9 @@ def cmd_show(sid):
             content = [{"type": "text", "text": content}]
         for block in content or []:
             t = block.get("type")
-            if t == "text" and block["text"].strip():
-                out(f"{date} {who}: {block['text'].strip()}")
+            text = IDE_BLOCK.sub("", block.get("text", "")).strip() if t == "text" else ""
+            if text:
+                out(f"{date} {who}: {text}")
             elif t == "tool_use":
                 inp = block.get("input", {})
                 paths = [str(inp[k]) for k in PATH_KEYS if k in inp]
