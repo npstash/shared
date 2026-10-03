@@ -19,11 +19,16 @@ IDE_BLOCK = re.compile(r"<(ide_selection|ide_opened_file)>.*?</\1>", re.S)
 
 
 def author(model):
-    """Make the author name from a model id, e.g. claude-opus-5-5 -> ClaudeCode/Opus-5.5."""
+    """Make the model name from a model id, e.g. claude-opus-5-5 -> Opus-5.5."""
     m = re.fullmatch(r"claude-([a-z]+)-(\d+(?:-\d)?)(?:-\d{8})?", model or "")
     if not m:
-        return "ClaudeCode/" + (model or "unknown")
-    return f"ClaudeCode/{m[1].capitalize()}-{m[2].replace('-', '.')}"
+        return model or "unknown"
+    return f"{m[1].capitalize()}-{m[2].replace('-', '.')}"
+
+
+def stamp(timestamp):
+    """Make the UTC time of an entry ID, e.g. 2026-09-19T12:34:56.789Z -> 20260919-123456."""
+    return re.sub(r"[-:]", "", timestamp[:19]).replace("T", "-")
 
 
 def records(sid):
@@ -89,7 +94,7 @@ def cmd_show(sid):
         kind, msg = rec.get("type"), rec.get("message")
         if kind not in ("user", "assistant") or not isinstance(msg, dict):
             continue
-        date = rec["timestamp"][:10]
+        date = stamp(rec["timestamp"])
         who = "USER" if kind == "user" else author(msg.get("model"))
         content = msg.get("content")
         if isinstance(content, str):

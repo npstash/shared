@@ -1,10 +1,10 @@
 ---
 id: decision-gates
 summary: Ask for open decisions before generating the rest; one question section per reply;
-  agent decisions listed at the top of the reply.
+  generated decisions listed at the top of the reply.
 applies-to: all-agents
 requires: []
-related: [confirm-design-choices]
+related: [agent-identity, confirm-design-choices]
 ---
 
 # Decision gates
@@ -19,10 +19,11 @@ That content gets rewritten and wastes tokens.
 - End the reply with the status of the section (closed or open) and the next step. Then
   wait.
 - Deliver content that needs no decision without a stop.
-- If the decisions are few and cheap to reverse, skip the gate: decide, state it, continue.
-- At the top of each reply, under the heading "Agent decisions", list the decisions that
-  the agent took without the user. Write one line each, with no reasons and no options.
-  This includes skipped gates, assumptions, and questions that the agent answered itself.
-- Do not list the decisions of the user. An answer of the user is a user decision, also
-  if the agent recommended the option.
+- If the decisions are few and cheap to reverse, skip the gate: generate the decisions,
+  list them, continue.
+- At the top of each reply, under the heading "Generated decisions", list the decisions
+  without the participation or the explicit consent of the user. Write one line each,
+  with no reasons and no options. This includes skipped gates, assumptions, and questions
+  that the agent answered. See [agent-identity](agent-identity.md).
+- Do not list the user decisions.
 - Unattended runs: not applicable.

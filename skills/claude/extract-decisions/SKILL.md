@@ -26,7 +26,7 @@ processed ones. Use the chats that the user names. Else use all unprocessed chat
 python3 S/transcript.py show <ID>
 ```
 
-It writes one line for each message: date, author, text. It also writes the file paths
+It writes one line for each message: UTC time (`yyyymmdd-hhmmss`), author, text. It also writes the file paths
 of tool calls and the answers to questions. It removes answers to questions about
 secrets. Never copy a secret into an `ADL.md` or into the reply.
 
@@ -36,16 +36,21 @@ Record these:
 
 - an answer of the user to a question, also if the agent recommended the option,
 - a choice that the user made without a question,
-- a decision that the agent took itself, e.g. in an "Agent decisions" list.
+- a generated decision, e.g. in a "Generated decisions" list.
 
 Record only the decisions that the rule accepts. Do not record decisions that the chat
 changed again before its end; record only the final one.
 
-Give each decision the date and the author of the message that made it, not of a message
-that repeats it. An agent reply can repeat the decisions of the user. Older chats list
-them as "decisions taken without a question". Before you give an agent as author, make
-sure that no earlier user message made or chose that decision. For an agent decision,
-use the author that `show` writes.
+Give each decision the time of the message that made it, not of a message that repeats
+it. An agent reply can repeat the decisions of the user. Older chats list them as
+"decisions taken without a question" or "Agent decisions". Before you write `generated`,
+make sure that no earlier user message made or chose that decision.
+
+- `authored`: use the git name of the user, not `USER`.
+- `generated`: use the model name that `show` writes.
+- `commit`: use the last commit before that time, in the repository of the `ADL.md`:
+  `git rev-list -1 --before=<UTC time> HEAD`. Use the earlier repository for an item that
+  moved. Skip the decision if no commit exists.
 
 ## 4. Find the ADL.md files
 
@@ -53,12 +58,12 @@ use the author that `show` writes.
 - Add a decision to the `ADL.md` of each project and tool that it affects.
 - Skip a decision that affects no project or tool, e.g. a rule or the repository structure.
 - If a project or tool no longer exists, skip its decisions.
-- Skip a decision if the same `ADL.md` has an entry with the same date and meaning.
+- Skip a decision if the same `ADL.md` has an entry with the same meaning.
 
 ## 5. Confirm and write
 
 1. Show the new entries, grouped by `ADL.md`. Wait for the confirmation of the user.
-2. Insert each entry at its date position. Keep the lines sorted by date.
+2. Insert each entry at its ID position. Keep the lines sorted by ID.
 3. Mark the chats as processed:
 
    ```bash
