@@ -4,7 +4,7 @@ summary: Ask for open decisions before generating the rest; one question section
   generated decisions listed at the top of the reply.
 applies-to: all-agents
 requires: []
-related: [agent-identity, confirm-design-choices]
+related: [agent-identity, confirm-design-choices, voice-mode]
 ---
 
 # Decision gates
