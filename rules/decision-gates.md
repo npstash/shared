@@ -4,7 +4,7 @@ summary: Ask for open decisions before generating the rest; one question section
   generated decisions listed at the top of the reply.
 applies-to: all-agents
 requires: []
-related: [agent-identity, confirm-design-choices]
+related: [agent-identity, confirm-design-choices, voice-mode]
 ---
 
 # Decision gates
@@ -13,7 +13,6 @@ Default mode: do not write content that depends on unconfirmed decisions or assu
 That content gets rewritten and wastes tokens.
 
 - Split the work into sections. Send one section with questions in each reply.
-- In voice mode, ask one question in each reply. Get the answer, then ask the next question.
 - Give each question an id (`A1`, `B2`…), lettered options with consequences, and a
   recommendation.
 - End the reply with the status of the section (closed or open) and the next step. Then

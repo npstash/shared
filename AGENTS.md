@@ -13,6 +13,7 @@ rules: [CLAUDE.md](CLAUDE.md).
 - **simplified-english** — repository text in STE (ASD-STE100), brief. @rules/simplified-english.md
 - **confirm-design-choices** — the user confirms each design choice. @rules/confirm-design-choices.md
 - **decision-gates** — ask open decisions first; one question section per reply. @rules/decision-gates.md
+- **voice-mode** — in voice mode the reply is spoken: short, one question at a time, no visual formatting. @rules/voice-mode.md
 - **agent-identity** — an agent is not a person: not an author, no decisions, no feelings. @rules/agent-identity.md
 - **architecture-decision-log** — an `ADL.md` log of architecture decisions and business rules in each project and tool. @rules/architecture-decision-log.md
 
