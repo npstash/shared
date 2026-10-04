@@ -13,6 +13,7 @@ rules: [CLAUDE.md](CLAUDE.md).
 - **simplified-english** — repository text in STE (ASD-STE100), brief. @rules/simplified-english.md
 - **confirm-design-choices** — the user confirms each design choice. @rules/confirm-design-choices.md
 - **decision-gates** — ask open decisions first; one question section per reply. @rules/decision-gates.md
+- **agent-identity** — an agent is not a person: not an author, no decisions, no feelings. @rules/agent-identity.md
 - **architecture-decision-log** — an `ADL.md` log of architecture decisions and business rules in each project and tool. @rules/architecture-decision-log.md
 
 ## Tools
@@ -22,6 +23,7 @@ rules: [CLAUDE.md](CLAUDE.md).
 ## Skills
 
 - [credentials](skills/credentials/SKILL.md) — get a secret from the vault.
+- [create-adr](skills/create-adr/SKILL.md) — write an ADR for an ADL entry. Use only when the user asks.
 
 ## Setup
 

@@ -1,33 +1,43 @@
 ---
 id: architecture-decision-log
-summary: Each project and tool has an ADL.md, a one-line-per-decision log of architecture decisions and business rules, sorted by date.
+summary: Each project and tool has an ADL.md, a one-line-per-decision log of architecture decisions and business rules; an ADR file only on request.
 applies-to: all-agents
 requires: []
-related: [confirm-design-choices, decision-gates]
+related: [agent-identity, confirm-design-choices, decision-gates]
 ---
 
 # Architecture decision log
 
 Keep an `ADL.md` in the folder of each project and each tool. Record the decisions about
-that item: the decisions of the user and the decisions of an agent.
+that item. Create `ADL.md` with the first decision.
 
 ```markdown
-- 2026-10-03 Nestor Use SQLite for the cache
-- 2026-10-03 ClaudeCode/Opus-5.5 Run the import as a weekly job
+- 20261004-224512-00 authored Nestor 4abf63da3ce0 Use SQLite for the cache
+- 20261004-224512-01 generated Opus-5.5 4abf63da3ce0 Run the import as a weekly job
 ```
 
 - Record only architectural decisions and business rules. Skip decisions about file
   organisation, source control, versions, configuration values, development tooling and
   documentation.
-- Write one line for each decision: `- <yyyy-mm-dd> <author> <decision>`.
-  The list item keeps one line for each decision when Markdown renders the file.
-- Author: the one who made the decision. Use no spaces.
-  - The user: the name of the user in git. An agent environment can set `user.name` to
-    the agent; then use the user's name from the commits of the user.
-  - An agent: `<tool>/<model>`.
-- A decision of the user includes an answer to a question and the choice of an option
-  that an agent recommended. A decision of an agent is a choice without the user.
-- Write the decision only. Do not write reasons, options or other metadata.
-- Keep the lines sorted by date, oldest first. Keep the order of decisions on the same date.
-- Never change or delete a line. If a decision changes, add a new line.
-- Create `ADL.md` with the first decision.
+- Write one line for each decision: `- <id> <type> <name> <commit> <decision>`.
+  Separate the fields with one space. Only `<decision>` can contain spaces.
+  - `id`: the UTC time of the decision, `yyyymmdd-hhmmss-xx`. It identifies the entry.
+  - `xx`: a counter for entries with the same time, from `00`. After `99`, add digits.
+  - `type`: `authored` for a user decision, `generated` for a generated decision. See
+    [agent-identity](agent-identity.md).
+  - `name`: for `authored`, the git name of the user; for `generated`, the model name,
+    e.g. `Opus-5.5`. An agent environment can set `user.name` to the agent; then use the
+    name from the commits of the user.
+  - `commit`: the 12-character ID of the last commit in the repository of the `ADL.md`
+    at the time of the decision. For an entry from before the item moved to this
+    repository, use the last commit of the earlier repository.
+  - `decision`: the decision only. Do not write reasons, options or other metadata.
+- Keep the lines sorted by ID. Never change or delete a line. If a decision changes, add
+  a new line.
+
+## ADR
+
+- Write an ADR only when the user asks. Use the `create-adr` skill.
+- Put it into `adr/ADR-<id>.md` beside the `ADL.md`. `<id>` is the ID of the ADL entry.
+- Suggest an ADR for a decision that changes the architecture much and changes earlier
+  decisions.

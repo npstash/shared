@@ -1,11 +1,11 @@
-- 2026-09-22 Nestor Keep the key, credentials.enc and credentials.json in a separate private-data submodule repository
-- 2026-09-22 Nestor Take the location of the vault files as an argument; default ./private-data
-- 2026-09-22 Nestor Add an init command that makes the key and an example credentials file
-- 2026-09-23 Nestor --vault-home only finds the vault; without it, look in ./private-data, then next to the tool, else stop and suggest the flag
-- 2026-09-23 Nestor If both folders exist, use the one in the current directory
-- 2026-09-23 Nestor init replaces keygen; it refuses if a file exists; no --force; the example entry has blank secrets
-- 2026-09-23 Nestor Put the vault files flat into the vault home
-- 2026-09-23 Nestor The pre-commit hook is an sh and awk script in .githooks/ of the vault repo; no Python
-- 2026-09-23 ClaudeCode/Opus-5.5 Remove install-hook and check-staged; the setup scripts turn on the hook
-- 2026-09-23 ClaudeCode/Opus-5.5 init also copies .gitignore, .gitattributes, the hook and the setup scripts from templates/; it keeps existing files
-- 2026-09-25 Nestor Callers set PYTHONPATH to src/ in their launchers; no sys.path changes in code
+- 20260922-000000-00 authored Nestor 77549d35b66f Keep the key, credentials.enc and credentials.json in a separate private-data submodule repository
+- 20260922-000000-01 authored Nestor 77549d35b66f Take the location of the vault files as an argument; default ./private-data
+- 20260922-000000-02 authored Nestor 77549d35b66f Add an init command that makes the key and an example credentials file
+- 20260923-000000-00 authored Nestor 6277779501b1 --vault-home only finds the vault; without it, look in ./private-data, then next to the tool, else stop and suggest the flag
+- 20260923-000000-01 authored Nestor 6277779501b1 If both folders exist, use the one in the current directory
+- 20260923-000000-02 authored Nestor 6277779501b1 init replaces keygen; it refuses if a file exists; no --force; the example entry has blank secrets
+- 20260923-000000-03 authored Nestor 6277779501b1 Put the vault files flat into the vault home
+- 20260923-000000-04 authored Nestor 6277779501b1 The pre-commit hook is an sh and awk script in .githooks/ of the vault repo; no Python
+- 20260923-000000-05 generated Opus-5.5 6277779501b1 Remove install-hook and check-staged; the setup scripts turn on the hook
+- 20260923-000000-06 generated Opus-5.5 6277779501b1 init also copies .gitignore, .gitattributes, the hook and the setup scripts from templates/; it keeps existing files
+- 20260925-000000-00 authored Nestor 74bdb2b0a703 Callers set PYTHONPATH to src/ in their launchers; no sys.path changes in code
