@@ -41,10 +41,7 @@ Record these:
 Record only the decisions that the rule accepts. Do not record decisions that the chat
 changed again before its end; record only the final one.
 
-Give each decision the time of the message that made it, not of a message that repeats
-it. An agent reply can repeat the decisions of the user. Older chats list them as
-"decisions taken without a question" or "Agent decisions". Before you write `generated`,
-make sure that no earlier user message made or chose that decision.
+Give each decision the time of the message that made it.
 
 - `authored`: use the git name of the user, not `USER`.
 - `generated`: use the model name that `show` writes.

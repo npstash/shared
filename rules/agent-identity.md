@@ -22,10 +22,10 @@ An agent is not a person and not a legal entity. Apply these consequences.
 ## Decisions
 
 - The user makes decisions. An agent does not make decisions.
-- A user decision is an answer of the user to a question, also if an agent recommended
-  the option. It is also a choice that the user made without a question.
-- A generated decision is a decision without the participation or the explicit consent
-  of the user. Do not write that an agent "decided" or "took" a decision.
+- A user decision is a decision with input from the user, e.g. an answer to a question.
+  A recommendation of an agent does not change this.
+- A generated decision is a decision without input from the user. Do not write that an
+  agent "decided" or "took" a decision.
 
 ## Dialogue
 

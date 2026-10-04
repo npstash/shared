@@ -22,8 +22,8 @@ That content gets rewritten and wastes tokens.
 - If the decisions are few and cheap to reverse, skip the gate: generate the decisions,
   list them, continue.
 - At the top of each reply, under the heading "Generated decisions", list the decisions
-  without the participation or the explicit consent of the user. Write one line each,
-  with no reasons and no options. This includes skipped gates, assumptions, and questions
-  that the agent answered. See [agent-identity](agent-identity.md).
+  without input from the user. Write one line each, with no reasons and no options. This
+  includes skipped gates, assumptions, and questions that the agent answered. See
+  [agent-identity](agent-identity.md).
 - Do not list the user decisions.
 - Unattended runs: not applicable.
