@@ -77,7 +77,7 @@ Two ways, and only two. The tool never reads environment variables.
    Python. Note that a command-line value is visible in the process list and your shell
    history.
 2. **Decrypt the master key once** and keep it locally (openssl asks for the passphrase,
-   so it stays out of your shell history):
+   so it stays out of your shell history). Run from the folder that holds `vault-home`:
 
 ```bash
 openssl enc -d -aes-256-cbc -pbkdf2 -in vault-home/master.enc.key -out vault-home/master.key
@@ -92,7 +92,8 @@ choosing between them - drop `--passphrase`, or delete the decrypted key. After
 ## Reading the vault without this tool
 
 The vault is a plain `openssl enc` file, so the decrypted master key opens it in one
-command - useful when Python, the venv or this script are not available:
+command - useful when Python, the venv or this script are not available. Run it from
+the folder that holds `vault-home`:
 
 ```bash
 openssl enc -d -aes-256-cbc -pbkdf2 -in vault-home/credentials.enc -pass file:vault-home/master.key
@@ -107,7 +108,8 @@ error, not as a cryptographic integrity failure.
 With neither, every command that needs a secret fails with a message naming both routes.
 `list` still works: it only reads `credentials.json`.
 
-To use the module from Python, add `shared/tools/auth/src` to `PYTHONPATH`:
+To use the module from Python, add the `src` folder of this tool to `PYTHONPATH`
+(`shared/tools/auth/src` from the workspace root):
 
 ```python
 from credstore import get_credential, list_systems
