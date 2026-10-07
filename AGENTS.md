@@ -26,7 +26,6 @@ agents.
 ## Claude Code
 
 ### Rules
-- **claude/model-check** — below Opus, ask once per day. @rules/claude/model-check.md
 - **claude/nothing-outside-repo** — no auto-memory, scratchpad or `/tmp`. @rules/claude/nothing-outside-repo.md
 - **claude/cowork-cloud-sessions** — in a Cowork cloud session use the GitHub REST API. @rules/claude/cowork-cloud-sessions.md
 
