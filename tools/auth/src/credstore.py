@@ -16,6 +16,9 @@ credentials.json is the source of truth for structure; the vault is stale data t
 in secrets. Commands read credentials.json first and decrypt only when values are needed.
 Files are rewritten only when their content changes.
 
+A system with "alias_of" takes the secrets of its target. Its own secrets add to them or
+replace them. get() and list give the resolved secrets.
+
     from credstore import get_credential          # PYTHONPATH must include this folder
     c = get_credential("jira", vault_home="vault-home"); c.secrets()["token"]
 """
@@ -28,7 +31,7 @@ import json
 import shutil
 import sys
 from base64 import b64encode
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from secrets import token_bytes
 from types import MappingProxyType
@@ -62,6 +65,7 @@ class Credential:
     url: str | None = None
     authority_info: tuple[str, ...] = ()
     _secrets: dict[str, str] = field(default_factory=dict, repr=False)
+    alias_of: str | None = field(default=None, repr=False)  # the system that gives the secrets
 
     def secrets(self) -> Mapping[str, str]:
         return MappingProxyType(self._secrets)
@@ -73,10 +77,12 @@ def _parse(raw, source: str) -> dict[str, Credential]:
     systems = {}
     for name, e in raw.items():
         creds, info = (e.get("credentials"), e.get("authority_info")) if isinstance(e, dict) else (None, None)
-        if not isinstance(e, dict) or not isinstance(creds or {}, dict) or not isinstance(info or [], list):
+        alias = e.get("alias_of") if isinstance(e, dict) else None
+        if not isinstance(e, dict) or not isinstance(creds or {}, dict) or not isinstance(info or [], list) \
+                or not isinstance(alias or "", str):
             raise CredentialError(f"{source}: system {name!r} is malformed")
         systems[name] = Credential(name, e.get("url"), tuple(str(i) for i in info or []),
-                                   {str(k): str(v or "") for k, v in (creds or {}).items()})
+                                   {str(k): str(v or "") for k, v in (creds or {}).items()}, alias or None)
     return systems
 
 
@@ -88,7 +94,10 @@ def _document(systems: dict[str, Credential], redact: bool = False) -> dict:
             entry["url"] = c.url
         if c.authority_info:
             entry["authority_info"] = list(c.authority_info)
-        entry["credentials"] = {k: "" if redact else v for k, v in c._secrets.items()}
+        if c.alias_of:
+            entry["alias_of"] = c.alias_of
+        if c._secrets or not c.alias_of:
+            entry["credentials"] = {k: "" if redact else v for k, v in c._secrets.items()}
         doc[name] = entry
     return doc
 
@@ -114,8 +123,25 @@ def _merge(index: dict[str, Credential], stored: dict[str, Credential]) -> dict[
                     f"system {name!r}: secret {key!r} is blank and the vault has no value for it - "
                     f"fill it in credentials.json, or remove the key")
             secrets[key] = kept
-        merged[name] = Credential(name, e.url, e.authority_info, secrets)
+        merged[name] = replace(e, _secrets=secrets)
+    _resolve(merged)
     return merged
+
+
+def _resolve(systems: dict[str, Credential]) -> dict[str, Credential]:
+    """Each alias with the secrets of its target, then its own secrets on top."""
+    resolved = {}
+    for name, c in systems.items():
+        if c.alias_of is None:
+            resolved[name] = c
+            continue
+        target = systems.get(c.alias_of)
+        if target is None or target.alias_of is not None:
+            raise CredentialError(
+                f"system {name!r} is an alias of {c.alias_of!r}, which is "
+                f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
+        resolved[name] = replace(c, _secrets={**target._secrets, **c._secrets}, alias_of=None)
+    return resolved
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -333,7 +359,7 @@ class Store:
         return self._save(_merge(self.read_index(), self._read_vault()))
 
     def get(self, system: str) -> Credential:
-        systems = self.sync()
+        systems = _resolve(self.sync())
         if system not in systems:
             raise CredentialError(f"unknown system {system!r} (known: {', '.join(systems) or 'none'})")
         return systems[system]
@@ -342,11 +368,17 @@ class Store:
             secrets: dict | None = None) -> Credential:
         systems = dict(self.sync())
         old = systems.get(system)
+        if old and old.alias_of:
+            inherited = set(systems[old.alias_of]._secrets) - set(old._secrets)
+            if inherited & set(secrets or {}):
+                raise CredentialError(f"system {system!r} is an alias of {old.alias_of!r}; "
+                                      f"set {', '.join(sorted(inherited & set(secrets)))} there")
         systems[system] = Credential(
             system,
             url if url is not None else (old.url if old else None),
             tuple(authority_info) if authority_info is not None else (old.authority_info if old else ()),
             {**(old._secrets if old else {}), **{k: v for k, v in (secrets or {}).items()}},
+            old.alias_of if old else None,
         )
         return self._save(systems)[system]
 
@@ -365,24 +397,25 @@ class Store:
                 raise CredentialError(f"system {new!r} already exists")
             if system in index and new in index:
                 raise CredentialError(f"{self.index} holds both {system!r} and {new!r}")
+            aliases = sorted({n for d in (stored, index) for n, c in d.items() if c.alias_of == system})
+            if aliases:
+                raise CredentialError(f"cannot rename {system!r}: {', '.join(aliases)} are aliases of it")
             rename = lambda d: {(new if n == system else n): (c if n != system else  # noqa: E731
-                                Credential(new, c.url, c.authority_info, c._secrets)) for n, c in d.items()}
+                                replace(c, name=new)) for n, c in d.items()}
             stored, index, target = rename(stored), rename(index), new
         else:
             keys = stored[system]._secrets
             if secret not in keys or new in keys:
                 raise CredentialError(f"cannot rename secret {secret!r} to {new!r} in system {system!r}")
             swap = lambda s: {(new if k == secret else k): v for k, v in s.items()}  # noqa: E731
-            stored[system] = Credential(system, stored[system].url, stored[system].authority_info, swap(keys))
+            stored[system] = replace(stored[system], _secrets=swap(keys))
             if system in index:
                 if secret in index[system]._secrets and new in index[system]._secrets:
                     raise CredentialError(f"{self.index} holds both {secret!r} and {new!r} for {system!r}")
-                index[system] = Credential(system, index[system].url, index[system].authority_info,
-                                           swap(index[system]._secrets))
+                index[system] = replace(index[system], _secrets=swap(index[system]._secrets))
             target = system
         if target not in index:  # the index does not describe it yet; mirror it in
-            c = stored[target]
-            index[target] = Credential(target, c.url, c.authority_info, {k: "" for k in c._secrets})
+            index[target] = replace(stored[target], _secrets={k: "" for k in stored[target]._secrets})
         self._save(_merge(index, stored))
 
 
@@ -453,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "sync":
             print(f"synced {len(store.sync())} system(s)")
         elif a.cmd == "list":
-            for name, c in store.read_index().items():
+            for name, c in _resolve(store.read_index()).items():
                 print(f"{name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
         elif a.cmd == "get":
             c = store.get(a.system)

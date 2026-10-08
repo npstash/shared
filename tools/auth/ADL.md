@@ -9,3 +9,11 @@
 - 20260923-000000-05 generated Opus-5.5 6277779501b1 Remove install-hook and check-staged; the setup scripts turn on the hook
 - 20260923-000000-06 generated Opus-5.5 6277779501b1 init also copies .gitignore, .gitattributes, the hook and the setup scripts from templates/; it keeps existing files
 - 20260925-000000-00 authored Nestor 74bdb2b0a703 Callers set PYTHONPATH to src/ in their launchers; no sys.path changes in code
+- 20261008-095728-00 authored Nestor a09496bfde43 A system can be an alias of another system with the field alias_of
+- 20261008-095728-01 authored Nestor a09496bfde43 An alias takes the secrets of its target; its own secrets add to them or replace them
+- 20261008-095728-02 authored Nestor a09496bfde43 The target of an alias must exist and must not be an alias
+- 20261008-095728-03 authored Nestor a09496bfde43 set refuses a secret that an alias takes from its target
+- 20261008-095728-04 authored Nestor a09496bfde43 rename refuses a system that has aliases
+- 20261008-095728-05 authored Nestor a09496bfde43 list and get show the resolved secrets of an alias and do not show that it is an alias
+- 20261008-095728-06 generated Opus-5.5 a09496bfde43 set writes a new or own secret of an alias into the alias
+- 20261008-095728-07 generated Opus-5.5 a09496bfde43 The vault stores alias_of and only the own secrets of an alias

@@ -39,6 +39,27 @@ vault knows nothing about is an error, so `list` never advertises an empty secre
 read `credentials.json` first and decrypt only when values are needed. Files are rewritten
 only when their content changes. Use `rename` instead of editing a name in place.
 
+## Aliases
+
+Give `"alias_of": "TARGET"` to a system to use the secrets of `TARGET`. The secrets of
+the alias add to the target secrets, or replace them. The alias keeps its own `url` and
+`authority_info`. `get` and `list` show the resolved secrets.
+
+```json
+{
+  "CORP LDAP": { "credentials": { "username": "", "password": "" } },
+  "GitHub Enterprise": {
+    "url": "https://github.example.com",
+    "alias_of": "CORP LDAP",
+    "credentials": { "token": "" }
+  }
+}
+```
+
+- The target must exist and must not be an alias.
+- `set` refuses a secret that the alias takes from the target. Set it on the target.
+- `rename` refuses a target that has aliases.
+
 ```bash
 run.sh init                                  # new vault in ./vault-home (or --vault-home)
 run.sh sync

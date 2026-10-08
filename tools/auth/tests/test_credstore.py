@@ -183,6 +183,68 @@ def test_rename_refuses_conflicts(home):
             cs.Store(home, PW).rename(system, new, secret=secret)
 
 
+# -- aliases -----------------------------------------------------------------------------
+
+def alias(target, url="https://a", info=("alias scope",), **secrets):
+    e = {"url": url, "authority_info": list(info), "alias_of": target}
+    return {**e, "credentials": dict(secrets)} if secrets else e
+
+
+def test_alias_takes_the_secrets_of_its_target(home):
+    write_index(home, {"LDAP": entry(username="u", password="p"), "wiki": alias("LDAP")})
+    cs.Store(home, PW).sync()
+    assert read_index(home)["wiki"] == alias("LDAP")      # no credentials block of its own
+    c = cs.Store(home, PW).get("wiki")
+    assert (c.name, c.url, c.authority_info) == ("wiki", "https://a", ("alias scope",))
+    assert dict(c.secrets()) == {"username": "u", "password": "p"}
+    write_index(home, {"LDAP": entry(username="", password="new"), "wiki": alias("LDAP")})
+    assert cs.Store(home, PW).get("wiki").secrets()["password"] == "new"
+
+
+def test_alias_secrets_add_to_and_replace_the_target_secrets(home):
+    write_index(home, {"LDAP": entry(username="u", password="p"), "gh": alias("LDAP", username="x", token="t")})
+    cs.Store(home, PW).sync()
+    assert read_index(home)["gh"]["credentials"] == {"username": "", "token": ""}
+    assert dict(cs.Store(home, PW).get("gh").secrets()) == {"username": "x", "password": "p", "token": "t"}
+    assert dict(cs.Store(home, PW).get("LDAP").secrets()) == {"username": "u", "password": "p"}
+
+
+@pytest.mark.parametrize("doc", [{"wiki": alias("missing")},
+                                 {"LDAP": entry(p="p"), "a": alias("LDAP"), "b": alias("a")},
+                                 {"a": alias("a")}])
+def test_alias_target_must_exist_and_not_be_an_alias(home, doc):
+    write_index(home, doc)
+    with pytest.raises(cs.CredentialError, match="is an alias of"):
+        cs.Store(home, PW).sync()
+
+
+def test_set_refuses_an_inherited_secret_of_an_alias(home):
+    write_index(home, {"LDAP": entry(password="p"), "gh": alias("LDAP", token="t")})
+    with pytest.raises(cs.CredentialError, match="alias of 'LDAP'; set password there"):
+        cs.Store(home, PW).set("gh", secrets={"password": "x"})
+    cs.Store(home, PW).set("gh", url="https://new", secrets={"token": "t2", "extra": "e"})
+    c = cs.Store(home, PW).get("gh")
+    assert (c.url, dict(c.secrets())) == ("https://new", {"password": "p", "token": "t2", "extra": "e"})
+
+
+def test_rename_refuses_a_target_with_aliases(home):
+    write_index(home, {"LDAP": entry(password="p"), "wiki": alias("LDAP")})
+    cs.Store(home, PW).sync()
+    with pytest.raises(cs.CredentialError, match="wiki are aliases of it"):
+        cs.Store(home, PW).rename("LDAP", "AD")
+    cs.Store(home, PW).rename("wiki", "docs")
+    assert read_index(home)["docs"]["alias_of"] == "LDAP"
+    assert cs.Store(home, PW).get("docs").secrets()["password"] == "p"
+
+
+def test_list_shows_the_resolved_secrets_of_an_alias(home, capsys):
+    write_index(home, {"LDAP": entry(password="p"), "gh": alias("LDAP", token="t")})
+    cs.Store(home, PW).sync()
+    capsys.readouterr()
+    assert cs.main(["--vault-home", str(home), "list"]) == 0
+    assert capsys.readouterr().out == "LDAP\thttps://g\tpassword\ngh\thttps://a\tpassword,token\n"
+
+
 # -- errors, CLI -------------------------------------------------------------------------
 
 def test_error_messages(home):

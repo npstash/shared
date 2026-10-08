@@ -31,6 +31,12 @@ Collected from the user's requests.
 21. The vault home is a command-line argument (`--vault-home`), never an environment variable. Without it, the tool uses `./vault-home`, then `vault-home` next to the script, and else stops.
 22. The Python API hands out secrets as an immutable map from a method (`credential.secrets()`); the credential is a class, not a dictionary.
 
+### Aliases
+
+22a. A system can be an alias of another system (`alias_of`). It takes the secrets of its target. Its own secrets add to them or replace them.
+22b. The target must exist and must not be an alias. `set` refuses an inherited secret; `rename` refuses a target with aliases.
+22c. `list` and `get` show the resolved secrets and do not mark aliases.
+
 ### Key rotation and local decryption
 
 23. `rotate-key`: new master key on demand, vault decrypted with the old key and re-encrypted with the new one, **same passphrase**.
