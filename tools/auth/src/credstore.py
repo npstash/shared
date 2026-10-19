@@ -504,17 +504,25 @@ def _caller() -> str:
     return exe
 
 
+LOG_HEADER = "\t".join(["time", "event", "vault", "system", "secrets", "method", "caller"])
+
+
 def _log(home: Path, event: str, vault: str, system: str = "", secrets=(), method: str = "") -> None:
-    clean = lambda s: re.sub(r"[\t\r\n]", " ", s)  # noqa: E731
+    """One tab-separated line. The system and the caller are in quotes: they can hold spaces."""
+    clean = lambda s: re.sub(r"[\t\r\n\"]", " ", s)  # noqa: E731
     line = "\t".join([datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), event, clean(vault),
-                      clean(system), clean(",".join(secrets)), method, f'"{clean(_caller())}"'])
+                      f'"{clean(system)}"', clean(",".join(secrets)), method, f'"{clean(_caller())}"'])
+    path = home / LOG
     try:
-        if not (home / LOG).exists():
+        if not path.exists():
             _ensure_ignored(home)
-        with (home / LOG).open("a", encoding="utf-8") as f:
+        old = path.read_text(encoding="utf-8") if path.exists() else ""
+        if not old.startswith(LOG_HEADER + "\n"):   # a new log, or one from before the header
+            _write(path, (LOG_HEADER + "\n" + old).encode())
+        with path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
     except OSError as exc:
-        print(f"warning: cannot write {home / LOG}: {exc}", file=sys.stderr)
+        print(f"warning: cannot write {path}: {exc}", file=sys.stderr)
 
 
 # -- the store ------------------------------------------------------------------------------

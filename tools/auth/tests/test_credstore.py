@@ -657,7 +657,7 @@ def test_provider_entries_tell_the_vaults_apart(two, fake):
     assert store.key_list() == [("fake", "a/x"), ("fake", "x")]
     assert store.key_remove(["a/x"]) == [("fake", "a/x")]
     assert not (two / "subvaults" / "a" / "clone.x.key").exists() and (two / "clone.x.key").exists()
-    assert log_lines(two)[-1][1:6] == ["key-remove", "a", "x", "", "fake"]
+    assert log_lines(two)[-1][1:6] == ["key-remove", "a", '"x"', "", "fake"]
 
 
 def test_revoking_from_a_sub_vault_needs_no_passphrase(two, tmp_path):
@@ -689,7 +689,16 @@ def test_rotating_the_main_key_keeps_sub_vaults_open(two):
 # -- access log ------------------------------------------------------------------------------
 
 def log_lines(home):
-    return [line.split("\t") for line in (home / "access.log").read_text().splitlines()]
+    lines = (home / "access.log").read_text().splitlines()
+    assert lines[0] == "time\tevent\tvault\tsystem\tsecrets\tmethod\tcaller"   # the header
+    return [line.split("\t") for line in lines[1:]]
+
+
+def test_a_log_from_before_the_header_gets_it(home):
+    (home / "access.log").write_text("2026-10-19T20:56:45Z\tenrol\tmain\tx\t\tpassphrase\t\"bash\"\n")
+    cs._log(home, "get", "main", "a b", ["k"], "passphrase")
+    lines = (home / "access.log").read_text().splitlines()
+    assert lines[0] == cs.LOG_HEADER and len(lines) == 3 and lines[2].split("\t")[3] == '"a b"'
 
 
 def test_access_log(two):
@@ -699,9 +708,9 @@ def test_access_log(two):
     with pytest.raises(cs.CredentialError):
         cs.Store(two).sync()
     events = log_lines(two)
-    assert events[0][1:5] == ["enrol", "main", "main", ""] and events[0][5] == "passphrase"
+    assert events[0][1:5] == ["enrol", "main", '"main"', ""] and events[0][5] == "passphrase"
     get = events[1]
-    assert get[1:] == ["get", "main", SYS, "token", "clone-key:main:plain", '"test_credstore.py"']
+    assert get[1:] == ["get", "main", f'"{SYS}"', "token", "clone-key:main:plain", '"test_credstore.py"']
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", get[0])
     assert events[-1][1:3] == ["open-failed", "main"]
 
@@ -709,7 +718,7 @@ def test_access_log(two):
 def test_cli_get_logs_only_the_secret_it_prints(two, capsys):
     assert cs.main(["--vault-home", str(two), "get", "jira", "--secret", "password"]) == 0
     assert capsys.readouterr().out == "p\n"
-    assert log_lines(two)[-1][1:5] == ["get", "main", "jira", "password"]
+    assert log_lines(two)[-1][1:5] == ["get", "main", '"jira"', "password"]
 
 # -- vault home and init -------------------------------------------------------------------
 

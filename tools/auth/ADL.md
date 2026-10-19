@@ -80,3 +80,6 @@
 - 20261019-192810-03 generated Opus-5.5 c037d2b01130 Backups do not copy key files
 - 20261019-192810-04 generated Opus-5.5 c037d2b01130 When the main vault opens a sub-vault, the log method is main: and the method of the main vault
 - 20261019-203559-00 generated Opus-5.5 cee997b4d833 An alias in a sub-vault needs its target in the same sub-vault
+- 20261019-211123-00 authored Nestor 3903e251a373 The access log has a header line
+- 20261019-211123-01 authored Nestor 3903e251a373 The access log writes the system name in quotes
+- 20261019-211123-02 generated Opus-5.5 3903e251a373 The tool adds the header to a log from before the header

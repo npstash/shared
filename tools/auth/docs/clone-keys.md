@@ -261,19 +261,23 @@ Each sub-vault step needs only a clone key.
 
 ## Access log
 
-`access.log` is in the main vault home, also for a sub-vault. It is gitignored. Write one
-tab-separated line for each event:
+`access.log` is in the main vault home, also for a sub-vault. It is gitignored. Its first
+line is the header. Write one tab-separated line for each event:
 
 ```
-<UTC time>  <event>  <vault>  <system>  <secrets>  <method>  "<caller>"
+time	event	vault	system	secrets	method	caller
+<UTC time>	<event>	<vault>	"<system>"	<secrets>	<method>	"<caller>"
 ```
+
+- The tool adds the header to a new log, and to a log from before the header.
+- Tabs, line breaks and quotes in a value become spaces.
 
 | Field | Values |
 | --- | --- |
 | UTC time | ISO 8601. |
 | event | `get`, `enrol`, `approve`, `revoke`, `rotate-key`, `change-passphrase`, `key-remove`, `open-failed`. |
 | vault | `main`, or the sub-vault name. |
-| system | The system name, or empty. |
+| system | The system name in quotes, or `""`. For `enrol`, `approve`, `revoke` and `key-remove`: the recipient name. |
 | secrets | The names of the secrets given out, separated by commas, or empty. |
 | method | `passphrase`, or `clone-key:<name>:<plain\|provider>`: the key of `<name>` in the vault of the line. For a sub-vault that the main vault opens: `main:` and the method of the main vault. |
 | caller | A file name in quotes. No path, arguments or function. |
@@ -284,19 +288,20 @@ key with the same name comes after a `revoke` and an `enrol` line. The log shows
 Example:
 
 ```
-2026-10-19T18:30:02Z	enrol	main	laptop			"bash"
-2026-10-19T18:30:04Z	approve	main	laptop		passphrase	"bash"
-2026-10-19T18:30:06Z	get	main	jira	password	clone-key:laptop:keyring	"sync.py"
-2026-10-19T18:31:00Z	enrol	proj	laptop		main:clone-key:laptop:keyring	"bash"
-2026-10-19T18:31:10Z	get	proj	jira	password	clone-key:laptop:plain	"sync.py"
-2026-10-19T18:32:00Z	get	proj	jira	password	main:clone-key:laptop:keyring	"report.py"
-2026-10-19T18:33:00Z	key-remove	proj	laptop		keyring	"bash"
-2026-10-19T18:34:00Z	open-failed	main				"bash"
+time	event	vault	system	secrets	method	caller
+2026-10-19T18:30:02Z	enrol	main	"laptop"			"bash"
+2026-10-19T18:30:04Z	approve	main	"laptop"		passphrase	"bash"
+2026-10-19T18:30:06Z	get	main	"jira"	password	clone-key:laptop:keyring	"sync.py"
+2026-10-19T18:31:00Z	enrol	proj	"laptop"		main:clone-key:laptop:keyring	"bash"
+2026-10-19T18:31:10Z	get	proj	"jira"	password	clone-key:laptop:plain	"sync.py"
+2026-10-19T18:32:00Z	get	proj	"jira"	password	main:clone-key:laptop:keyring	"report.py"
+2026-10-19T18:33:00Z	key-remove	proj	"laptop"		keyring	"bash"
+2026-10-19T18:34:00Z	open-failed	main	""			"bash"
 ```
 
-- Line 3: the key `laptop` of the main vault.
-- Lines 4 and 6: the key `laptop` of the main vault opens the sub-vault `proj` through the main vault.
-- Line 5: the key `laptop` of the sub-vault `proj`.
+- Line 4: the key `laptop` of the main vault.
+- Lines 5 and 7: the key `laptop` of the main vault opens the sub-vault `proj` through the main vault.
+- Line 6: the key `laptop` of the sub-vault `proj`.
 
 The tool finds the caller itself. The API has no caller parameter.
 
