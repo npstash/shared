@@ -1,5 +1,6 @@
 #!/bin/sh
-# Stop a commit of a credentials.json that holds secret values. Uses only sh and awk.
+# Stop a commit of a credentials.json that holds secret values, and of a private key or
+# the access log. Uses only sh and awk.
 # "pre-commit --scan" reads one file from stdin and writes SYSTEM.KEY for each secret set.
 # Keep the rules the same as exposed_secrets() of the vault tool.
 
@@ -75,7 +76,14 @@ fi
 git diff --cached --name-only --diff-filter=ACMR | {
     status=0
     while IFS= read -r path; do
-        case "$path" in credentials.json | */credentials.json) ;; *) continue ;; esac
+        case "$path" in
+            clone.*.key | */clone.*.key | access.log | */access.log | master.key | */master.key)
+                echo "commit blocked - $path: private key or access log" >&2
+                status=1
+                continue ;;
+            credentials.json | */credentials.json) ;;
+            *) continue ;;
+        esac
         if ! found=$(git show ":$path" | scan); then
             echo "commit blocked - $path: not valid JSON" >&2
             status=1
