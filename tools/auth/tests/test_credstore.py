@@ -870,3 +870,29 @@ def test_an_alias_in_a_sub_vault_needs_its_target_there(home):
         {"username": "u", "password": "p", "token": "t"}
     with pytest.raises(cs.CredentialError, match="alias of 'ldap'"):
         cs.Store(home).create_vault("alone", ["git"])
+
+
+def test_rotate_key_keeps_the_order_of_the_index(home):
+    write_index(home, {"b": entry(token="1"), "a": entry(token="2")})
+    cs.Store(home, PW).sync()
+    before = (home / "credentials.json").read_bytes()
+    cs.Store(home, PW).rotate_key()
+    assert (home / "credentials.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("cmdline, caller", [
+    (["/bin/bash", "--init-file", "/x/shellIntegration-bash.sh"], "bash"),
+    (["-bash"], "bash"),
+    (["bash", "./run.sh", "odswiez"], "run.sh"),
+    (["bash", "-c", "run.sh get x"], "bash"),
+    (["/usr/bin/python3", "-m", "pytest"], "python3"),
+    (["/usr/bin/python3", "sync.py"], "sync.py"),
+])
+def test_cli_caller_from_the_parent_process(monkeypatch, cmdline, caller):
+    real = Path.read_bytes
+    monkeypatch.setattr(cs, "_CLI", True)
+    monkeypatch.setattr(cs.sys, "platform", "linux")
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: "1 (python) S 4242 1 1")
+    monkeypatch.setattr(Path, "read_bytes", lambda self: "\0".join(cmdline).encode() + b"\0"
+                        if str(self) == "/proc/4242/cmdline" else real(self))
+    assert cs._caller() == caller

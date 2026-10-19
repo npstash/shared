@@ -473,6 +473,7 @@ def _ensure_ignored(home: Path) -> None:
 
 _CLI = False   # main() sets it: then the caller is the parent process, not a Python frame
 SHELLS = re.compile(r"(ba|da|z|k|fi)?sh|python[0-9.]*|node|pwsh|perl|ruby")
+WITH_VALUE = {"--init-file", "--rcfile", "-o", "-O", "-W", "-X", "-m"}   # options that take the next argument
 
 
 def _caller() -> str:
@@ -494,9 +495,12 @@ def _caller() -> str:
         return "?"
     exe = Path(args[0].lstrip("-")).name
     if SHELLS.fullmatch(exe) and "-c" not in args:
-        script = next((a for a in args[1:] if not a.startswith("-")), None)
-        if script:
-            return Path(script).name
+        rest = iter(args[1:])
+        for a in rest:
+            if a in WITH_VALUE:
+                next(rest, None)       # e.g. bash --init-file <file> of an interactive terminal
+            elif not a.startswith("-"):
+                return Path(a).name
     return exe
 
 
@@ -764,7 +768,8 @@ class Store:
             self._sync_subvault(force=True)
             _log(self.main_home, "rotate-key", self.label, method=self.method)
             return backup
-        systems = self._read_vault()
+        stored, order = self._read_vault(), list(self.read_index())
+        systems = {**{n: stored[n] for n in order if n in stored}, **stored}   # keep the index order
         passphrase = self._confirm_passphrase()
         subs = [self._sub(name) for name in self.subvault_names()]
         for sub in subs:
