@@ -1,4 +1,8 @@
-# Decrypted master key: it opens the vault alone. Never commit it.
+# Private keys of clones, and the access log. Never commit them.
+clone.*.key
+access.log
+
+# A decrypted master key of an older version of the tool. Never commit it.
 master.key
 
 # Atomic-write leftovers

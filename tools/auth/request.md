@@ -41,8 +41,8 @@ Collected from the user's requests.
 
 23. `rotate-key`: new master key on demand, vault decrypted with the old key and re-encrypted with the new one, **same passphrase**.
 24. `change-passphrase`: re-encrypt the master key under a new passphrase, typed twice at a prompt. The two commands work separately or together.
-25. Two ways to open the vault: the passphrase passed in, or `master.key` that the user decrypts themselves (gitignored, local only). If both are given the tool warns and stops. The README explains the `openssl` command.
-26. **The tool never reads environment variables.** The passphrase arrives as a CLI argument (`--passphrase`) or an API parameter (`Store(passphrase=...)`), and there is no prompt for it. Only the `credentials` skill may read `$CREDSTORE_PASSPHRASE`, and it passes the value to the CLI. When neither route is available, the error names both.
+25. (Superseded: see [docs/clone-keys.md](docs/clone-keys.md).) Two ways to open the vault: the passphrase passed in, or `master.key` that the user decrypts themselves (gitignored, local only). If both are given the tool warns and stops. The README explains the `openssl` command.
+26. (Superseded: see [docs/clone-keys.md](docs/clone-keys.md).) **The tool never reads environment variables.** The passphrase arrives as a CLI argument (`--passphrase`) or an API parameter (`Store(passphrase=...)`), and there is no prompt for it. Only the `credentials` skill may read `$CREDSTORE_PASSPHRASE`, and it passes the value to the CLI. When neither route is available, the error names both.
 
 ## Decisions made without confirmation (you were unavailable; please review)
 
@@ -115,3 +115,7 @@ Decisions, all confirmed by the user:
   and `awk`, so it needs no Python and does not depend on where this tool is. Tests keep it
   in agreement with `exposed_secrets()`. `setup.sh` / `setup.bat` turn it on per clone.
   `install-hook` and `check-staged` are gone.
+
+## Clone keys
+
+Each clone opens the vault with its own key pair. Design: [docs/clone-keys.md](docs/clone-keys.md).

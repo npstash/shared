@@ -16,10 +16,12 @@ read them, or write code that reads them, from env vars, `.env`, `~/.netrc`,
 `~/.git-credentials`, `~/.ssh`, `~/.aws`, the OS keychain or cached logins
 (`gh auth token`, `git credential fill`).
 
-- Use the `credentials` skill. Without it, use the `run.sh` of the vault tool in the
-  shell, and `from credstore import get_credential` in scripts.
-- Only the `credentials` skill can read `$CREDSTORE_PASSPHRASE`, to give it to the tool
-  as `--passphrase`.
+- Use the `credentials` skill. Without it, use `from credstore import get_credential` in
+  scripts, and the `run.sh` of the vault tool for key and vault commands.
+- The vault opens with the clone key of this clone, or with the passphrase in a terminal of
+  the user. An agent never gives, reads or asks for the passphrase.
+- Exception: the vault tool reads and writes its own key passphrases in the OS keyring. Do not
+  read them in another way.
 - Never write a secret into a transcript, log or file.
 - If a secret is missing, locked or empty, stop and ask the user to add it to the vault.
   Use no fallback. Never ask for a secret in chat.
