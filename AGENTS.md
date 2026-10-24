@@ -29,6 +29,7 @@ agents.
 ### Rules
 - **claude/nothing-outside-repo** — no auto-memory, scratchpad or `/tmp`. @rules/claude/nothing-outside-repo.md
 - **claude/cowork-cloud-sessions** — in a Cowork cloud session use the GitHub REST API. @rules/claude/cowork-cloud-sessions.md
+- **claude/explore-before-declining** — find the supported solution first; the user must not have to find it elsewhere. @rules/claude/explore-before-declining.md
 
 ### Skills
 - [extract-decisions](skills/claude/extract-decisions/SKILL.md) — add the decisions of old chats to the `ADL.md` files.
