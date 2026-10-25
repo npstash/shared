@@ -131,6 +131,11 @@ Do not read secrets, suggest to read them, or write code that reads them, from:
 
 If a secret is only there, ask the user to put it into the vault.
 
+Exception: for `git` and `gh`, you can also use a token from another source that is available,
+e.g. a git credential helper, the askpass of the editor, `gh auth token` or
+`git credential fill` (rule credentials-from-vault). Never write the token into the
+transcript, a log or a file.
+
 ## After a secret changes
 
 After a manual edit of `credentials.json`, run `$TOOL/run.sh sync`: it moves the value into
