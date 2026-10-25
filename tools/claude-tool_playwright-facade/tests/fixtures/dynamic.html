@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Dynamic form</title></head>
+<body>
+  <h1>Dynamic form</h1>
+  <!-- The page reacts to key events and changes the form. -->
+  <p><label for="search">Search</label> <input id="search" type="text"></p>
+  <p id="keys">Keys: 0</p>
+  <p id="greeting"></p>
+  <p><label><input id="has-company" type="checkbox"> I represent a company</label></p>
+  <p id="company-row" hidden><label for="company">Company</label> <input id="company" type="text"></p>
+  <p id="submitted"></p>
+  <script>
+    const search = document.getElementById('search');
+    let keys = 0;
+    search.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        document.getElementById('submitted').textContent = 'Searched for: ' + search.value;
+        return;
+      }
+      keys += 1;
+      document.getElementById('keys').textContent = 'Keys: ' + keys;
+    });
+    search.addEventListener('input', () => {
+      document.getElementById('greeting').textContent = 'Hello, ' + search.value;
+    });
+    document.getElementById('has-company').addEventListener('change', (event) => {
+      document.getElementById('company-row').hidden = !event.target.checked;
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "Fixture site": { "url": "http://127.0.0.1/", "credentials": { "username": "fixture-user", "password": "Fixture-Pa55-word" } },
+  "Fixture other": { "url": "http://localhost/", "credentials": { "token": "other-token" } },
+  "Example A": { "url": "https://example.com/a", "credentials": { "password": "pass-a" } },
+  "Example B": { "url": "https://example.com/a/b", "credentials": { "password": "pass-b" } },
+  "Example C": { "url": "https://example.com/c", "credentials": { "password": "pass-c" } },
+  "No url": { "credentials": { "password": "no-url" } }
+}
