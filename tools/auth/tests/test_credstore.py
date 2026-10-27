@@ -406,7 +406,7 @@ def test_the_tool_never_reads_the_environment(home, monkeypatch):
     with pytest.raises(cs.CredentialError, match="no way to open the vault"):
         cs.Store(home).get(SYS)         # the variable is set, and ignored
     source = Path(cs.__file__).read_text()
-    assert not any(call in source for call in ("os.environ", "getenv", "import os"))
+    assert not any(call in source for call in ("os.environ", "import environ", "getenv", "import os"))
 
 
 def test_new_passphrase_is_typed_twice(monkeypatch):
@@ -470,13 +470,61 @@ def test_a_request_is_approved_in_a_trusted_clone(home, tmp_path):
     cs.Store(home, PW).enrol("trusted", None)
     new = clone(home, tmp_path / "new")
     name, fp, approved = cs.Store(new).enrol(None, None)   # no passphrase: a request
-    assert not approved and re.fullmatch(r"auto-\d{8}-[0-9a-f]{8}", name)
+    assert not approved and re.fullmatch(r"auto-.*-\d{8}(-\d+)?", name)
     with pytest.raises(cs.NoWayToOpen):
         cs.Store(new).get(SYS)
     pull(new, home)
     assert cs.Store(home).approve(name) == fp               # the fingerprints match
     pull(home, new)
     assert dict(cs.Store(new).get(SYS).secrets()) == {"token": "t"}
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-c", "protocol.file.allow=always", "-C", str(cwd), *args],
+                   check=True, capture_output=True)
+
+
+def test_a_request_has_an_inf_file_that_approve_shows(home, tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(cs, "_git", lambda *a: "")         # tmp_path is in this repository
+    cs.Store(home, PW).enrol("trusted", None)
+    new = clone(home, tmp_path / "new")
+    name, fp, _ = cs.Store(new).enrol("req", None)
+    info = (new / "recipients" / "req.inf").read_text()
+    assert info.startswith(f"[clone]\nname = req\nvault = main\ncreated = ")
+    assert f"fingerprint = {fp}\n" in info and "computer = " in info and "os = " in info
+    assert "clone_path" not in info and "repository" not in info   # no git repository: no value
+    pull(new, home)
+    capsys.readouterr()
+    assert cs.main(["--vault-home", str(home), "approve", "req"]) == 0
+    assert capsys.readouterr().out.startswith(f"approved req\n{info}fingerprint\t{fp}\n")
+
+
+def test_generated_names_fit_and_do_not_repeat(monkeypatch):
+    info = {"computer": "DESKTOP-ABCDEFG12345", "user": "Nestor", "repository": "git@github.com:o/my_repo.git"}
+    name = cs._auto_name(info, lambda n: False)
+    assert re.fullmatch(r"auto-desktopabcdefg1-nestor-my_repo-\d{8}", name)
+    assert len(name) - len("auto-") - len("-yyyymmdd") == cs.ID_LIMIT   # auto- and the date do not count
+    assert cs._auto_name(info, lambda n: n in (name, name + "-2")) == name + "-3"
+    assert re.fullmatch(r"auto-pc-\d{8}", cs._auto_name({"computer": "PC", "user": "?"}, lambda n: False))
+    assert cs._fit(["a" * 20, "bb", "c" * 20], 30) == ["a" * 13, "bb", "c" * 13]
+
+
+def test_the_root_repository_is_the_top_superproject(tmp_path):
+    vault = tmp_path / "vault-src"
+    vault.mkdir()
+    git(vault, "init", "-q")
+    git(vault, "remote", "add", "origin", "https://u:secret@github.com/o/vault.git")
+    git(vault, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x")
+    assert cs._clone_info(vault)["repository"] == "https://github.com/o/vault.git"   # no credentials
+    root = tmp_path / "root"
+    root.mkdir()
+    git(root, "init", "-q")
+    git(root, "remote", "add", "upstream", "https://github.com/o/root.git")
+    git(root, "submodule", "add", "-q", str(vault), "vault-home")
+    info = cs._clone_info(root / "vault-home")
+    assert Path(info["clone_path"]).resolve() == root.resolve()
+    assert info["repository"] == "https://github.com/o/root.git"
+    assert "-root-" in cs._auto_name(info, lambda n: False)
 
 
 def test_a_recipient_name_of_another_clone_is_refused(home, tmp_path):

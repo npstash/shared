@@ -27,6 +27,7 @@ Each clone opens the vault with its own key pair. Do not copy the master key to 
 | `master.enc.key` | yes | As before: the master key, encrypted with the passphrase. |
 | `recipients/<name>.pub` | yes | RSA-3072 public key of the recipient `<name>`. |
 | `recipients/<name>.master.enc` | yes | The master key, encrypted for `<name>` with RSA-OAEP and SHA-256. |
+| `recipients/<name>.inf` | yes | Information about the clone of `<name>`. See "Clone information". |
 | `clone.<name>.key` | no | Private key of the recipient `<name>` of the main vault. PEM, mode 600. Plain, or encrypted with a key passphrase. |
 | `access.log` | no | The access log. |
 | `subvaults/<vault>/` | yes | A sub-vault. Its key files `clone.<name>.key` are in this folder and are not committed. |
@@ -37,6 +38,7 @@ Each clone opens the vault with its own key pair. Do not copy the master key to 
 - The pre-commit hook stops a commit of `clone.*.key`, `access.log` and `master.key`.
 - Each vault keeps the key files of its recipients in its own folder. See "One name in more vaults".
 - An approved recipient has `<name>.pub` and `<name>.master.enc`. A request has only `<name>.pub`.
+  Both can also have `<name>.inf`. `revoke` deletes it with the other two files.
 
 ## Key files
 
@@ -62,8 +64,45 @@ Each clone opens the vault with its own key pair. Do not copy the master key to 
 
 - Each clone has a unique recipient name.
 - One clone can have more than one key pair, e.g. one for Windows and one for WSL in the same folder.
-- `enrol` without a name generates one: `auto-<yyyymmdd>-<8 hex digits>`. Thus a cloud session
-  can enrol without user input.
+- `enrol` without a name generates one. Thus a cloud session can enrol without user input.
+
+### Generated names
+
+Form: `auto-<computer>-<user>-<repo>-<yyyymmdd>[-<N>]`, e.g. `auto-razer18-nestor-personal_worksp-20261027`.
+
+- `<computer>`, `<user>` and `<repo>` are the identification fields. They come from the clone
+  information. `<repo>` is the last part of the repository URL, without `.git`.
+- Each field is in lowercase and keeps only `a-z`, `0-9`, `.` and `_`. Skip an empty field.
+- The identification fields and the `-` between them have a maximum of `ID_LIMIT` (30)
+  characters. `auto-`, the date and `-<N>` do not count.
+- If they are too long, cut the longest fields first. Short fields stay complete.
+- `<yyyymmdd>` is the UTC date.
+- If the name has a `.pub` or a key file in the target vault, add `-2`, then `-3` and so on.
+
+## Clone information
+
+`enrol` writes `recipients/<name>.inf` beside the `.pub`. The approver reads it to identify the
+clone. Each `enrol` writes the file again. The format is INI with one section `[clone]`.
+
+| Key | Value |
+| --- | --- |
+| `name`, `vault` | The recipient name and the vault (`main` or the sub-vault name). |
+| `created` | UTC time of the `enrol`. |
+| `fingerprint` | The fingerprint of the public key. See "Approval of a request". |
+| `computer` | The host name. |
+| `user` | The OS user name. The tool reads no environment variable for it. |
+| `os`, `os_release`, `os_version`, `machine`, `platform` | `uname` and the platform string. |
+| `distro`, `distro_id`, `distro_version` | Linux only: the distribution from `/etc/os-release`. |
+| `wsl` | `WSL1` or `WSL2`, only if the tool detects WSL. |
+| `ip_addresses` | The addresses of the outbound routes and of the host name. No loopback, no link-local. |
+| `clone_path` | The working tree of the root repository. |
+| `repository` | The URL of `origin` of the root repository, else of its first remote. The tool removes user names and tokens from it. |
+
+- The root repository is the top superproject of the vault home. If the vault home is not a
+  submodule, it is the root repository.
+- The tool writes no key with an empty value, e.g. without git.
+- The `.inf` comes with the `.pub` in the same push. Thus it does not prove the identity of
+  the clone. Compare the fingerprint through another channel.
 
 ## One name in more vaults
 
@@ -151,7 +190,7 @@ The default location is as before: `./vault-home`, then `vault-home` next to the
 1. `enrol` lists the entries of this tool in each available provider.
 2. For each entry, it asks if the entry is to be deleted. It deletes each entry that the user
    selects, and the matching key file of this clone. That key file cannot open any more.
-3. It makes the key pair and writes `recipients/<name>.pub`.
+3. It makes the key pair and writes `recipients/<name>.pub` and `recipients/<name>.inf`.
 4. If a provider is available, it asks if the key passphrase goes into it.
    - Yes: it writes an encrypted key file and the provider entry.
    - No: it writes a plain key file.
@@ -165,7 +204,7 @@ pair. In another vault, the same name gets a new key pair.
 
 ### Without a TTY
 
-1. `enrol` makes the key pair and writes `recipients/<name>.pub`.
+1. `enrol` makes the key pair and writes `recipients/<name>.pub` and `recipients/<name>.inf`.
 2. It uses the first available provider: encrypted key file and provider entry. If no provider
    is available, it writes a plain key file.
 3. If a clone key opens the vault, it writes `recipients/<name>.master.enc`. Else the result
@@ -174,9 +213,9 @@ pair. In another vault, the same name gets a new key pair.
 
 ### Approval of a request
 
-1. The new clone commits and pushes `recipients/<name>.pub`.
-2. A trusted clone pulls, then runs `approve <name>`. It prints the fingerprint. Compare it
-   with the fingerprint from `enrol`.
+1. The new clone commits and pushes `recipients/<name>.pub` and `recipients/<name>.inf`.
+2. A trusted clone pulls, then runs `approve <name>`. It prints the `.inf` and the fingerprint.
+   Compare the fingerprint with the fingerprint from `enrol`.
 3. The trusted clone commits and pushes `recipients/<name>.master.enc`.
 4. The new clone pulls. Then the vault opens.
 

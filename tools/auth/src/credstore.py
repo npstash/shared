@@ -7,7 +7,8 @@ credentials.json        committed index: system -> url, authority_info, credenti
 credentials.enc         committed vault: the same document, with secret values, encrypted with
                         the master key (the `openssl enc -aes-256-cbc -pbkdf2` format)
 master.enc.key          the master key, encrypted with the passphrase
-recipients/<name>.pub   public key of a clone; <name>.master.enc is the master key for it
+recipients/<name>.pub   public key of a clone; <name>.master.enc is the master key for it;
+                        <name>.inf tells the approver which clone made the request
 clone.<name>.key        gitignored private key of a clone for this vault: plain, or encrypted
                         with a key passphrase that a provider (the OS keyring) holds
 access.log              gitignored access log
@@ -31,18 +32,24 @@ replace them. get() and list give the resolved secrets.
 from __future__ import annotations
 
 import argparse
+import configparser
 import getpass
 import hmac
+import io
+import ipaddress
 import json
+import platform
 import re
 import shutil
+import socket
+import subprocess
 import sys
 from base64 import b64encode
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from secrets import token_bytes, token_hex
+from secrets import token_bytes
 from types import MappingProxyType
 from typing import Mapping
 
@@ -58,6 +65,7 @@ IGNORED = ("clone.*.key", LOG)        # the vault home must ignore these; see _e
 KEY_BITS = 3072
 PROVIDER_LINE = "credstore-provider:"  # first line of a key file that a provider unlocks
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+ID_LIMIT = 30                         # generated names: computer-user-repo, without auto- and the date
 
 
 class CredentialError(RuntimeError):
@@ -190,9 +198,140 @@ def _check_name(name: str, what: str) -> str:
     return name
 
 
-def _auto_name() -> str:
-    """A unique recipient name, for a clone that enrols with no user input."""
-    return f"auto-{datetime.now(timezone.utc):%Y%m%d}-{token_hex(4)}"
+# -- clone information (recipients/<name>.inf and generated names) ---------------------
+
+def _git(cwd: Path, *args: str) -> str:
+    """The output of a git command, or "" if git or the repository is missing."""
+    try:
+        done = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _root_repo(home: Path) -> Path | None:
+    """The top superproject of the repository that holds `home`; the vault home if it is the root."""
+    top = _git(home, "rev-parse", "--show-toplevel")
+    while top:
+        parent = _git(Path(top), "rev-parse", "--show-superproject-working-tree")
+        if not parent:
+            return Path(top)
+        top = parent
+    return None
+
+
+def _repo_url(root: Path) -> str:
+    """The URL of origin, else of the first remote; without credentials."""
+    remotes = _git(root, "remote").split()
+    if not remotes:
+        return ""
+    url = _git(root, "remote", "get-url", "origin" if "origin" in remotes else remotes[0])
+    return re.sub(r"^([a-z][a-z0-9+.-]*://)[^/@]*@", r"\1", url, flags=re.I)
+
+
+def _user_name() -> str:
+    """The OS user name, without environment variables (getpass.getuser() reads them)."""
+    try:
+        if sys.platform == "win32":
+            from os import getlogin   # GetUserNameW
+            return getlogin()
+        from os import getuid
+        from pwd import getpwuid
+        return getpwuid(getuid()).pw_name
+    except (OSError, KeyError, ImportError):
+        return ""
+
+
+def _ip_addresses() -> list[str]:
+    """The addresses of the outbound routes and of the host name; no loopback. No packet is sent."""
+    found = set()
+    for family, probe in ((socket.AF_INET, "192.0.2.1"), (socket.AF_INET6, "2001:db8::1")):
+        try:
+            with socket.socket(family, socket.SOCK_DGRAM) as s:
+                s.connect((probe, 9))   # a UDP connect only selects the route
+                found.add(s.getsockname()[0])
+        except OSError:
+            pass
+    try:
+        found.update(info[4][0] for info in socket.getaddrinfo(socket.gethostname(), None))
+    except OSError:
+        pass
+    addresses = []
+    for a in found:
+        try:
+            ip = ipaddress.ip_address(a.split("%")[0])
+        except ValueError:
+            continue
+        if not (ip.is_loopback or ip.is_unspecified or ip.is_link_local):
+            addresses.append(ip)
+    return [str(ip) for ip in sorted(addresses, key=lambda ip: (ip.version, ip))]
+
+
+def _os_info() -> dict[str, str]:
+    """uname, the Linux distribution and WSL, if detected."""
+    u = platform.uname()
+    info = {"os": u.system, "os_release": u.release, "os_version": u.version, "machine": u.machine,
+            "platform": platform.platform()}
+    if u.system == "Linux":
+        try:
+            release = platform.freedesktop_os_release()
+        except OSError:
+            release = {}
+        info |= {"distro": release.get("PRETTY_NAME") or release.get("NAME", ""),
+                 "distro_id": release.get("ID", ""), "distro_version": release.get("VERSION_ID", "")}
+        try:
+            kernel = Path("/proc/version").read_text(errors="replace")
+        except OSError:
+            kernel = u.release
+        if "microsoft" in kernel.lower():
+            info["wsl"] = "WSL2" if "wsl2" in kernel.lower() or "microsoft-standard" in kernel.lower() else "WSL1"
+    return info
+
+
+def _clone_info(home: Path) -> dict[str, str]:
+    """The facts about this clone that recipients/<name>.inf records. Empty values are dropped."""
+    root = _root_repo(home)
+    url = _repo_url(root) if root else ""
+    info = {"computer": socket.gethostname(), "user": _user_name(), **_os_info(),
+            "ip_addresses": ", ".join(_ip_addresses()), "clone_path": str(root) if root else "",
+            "repository": url}
+    return {k: v for k, v in info.items() if v}
+
+
+def _repo_name(url: str) -> str:
+    return re.sub(r"\.git$", "", re.split(r"[/:]", url.rstrip("/"))[-1]) if url else ""
+
+
+def _fit(fields: list[str], limit: int) -> list[str]:
+    """Cut the longest fields first, so that the fields and the '-' between them fit in limit."""
+    budget = limit - (len(fields) - 1)
+    cap = max(map(len, fields), default=0)
+    while cap > 0 and sum(min(len(f), cap) for f in fields) > budget:
+        cap -= 1
+    return [f[:cap] for f in fields if f[:cap]]
+
+
+def _auto_name(info: dict[str, str], taken) -> str:
+    """auto-<computer>-<user>-<repo>-<yyyymmdd>[-N], for a clone that enrols with no user input.
+
+    Only the identification fields count for ID_LIMIT. taken(name) tells a used name."""
+    fields = [re.sub(r"[^a-z0-9._]", "", v.lower())
+              for v in (info.get("computer", ""), info.get("user", ""), _repo_name(info.get("repository", "")))]
+    base = "-".join(["auto", *_fit([f for f in fields if f], ID_LIMIT), f"{datetime.now(timezone.utc):%Y%m%d}"])
+    name, n = base, 1
+    while taken(name):
+        n += 1
+        name = f"{base}-{n}"
+    return name
+
+
+def _write_info(path: Path, info: dict[str, str]) -> None:
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    parser["clone"] = {k: v.replace("\n", " ") for k, v in info.items()}
+    buffer = io.StringIO()
+    parser.write(buffer)
+    _write(path, buffer.getvalue().rstrip("\n").encode() + b"\n")
 
 
 # -- crypto (imported lazily: `list` needs no cryptography package) -------------------
@@ -812,9 +951,12 @@ class Store:
         provider: "auto" takes the first available provider; None writes a plain key file.
         If this vault opens here, the master key is wrapped for the new key at once
         (self-enrolment). Else the result is a request for `approve` in a trusted clone.
+        Writes recipients/<name>.inf with the facts about this clone, for the approver.
         Returns (name, fingerprint, approved).
         """
-        name = _check_name(name or _auto_name(), "recipient")
+        clone = _clone_info(self.main_home)
+        name = _check_name(name or _auto_name(clone, lambda n: (self.recipients / f"{n}.pub").exists()
+                                              or (self.home / f"clone.{n}.key").exists()), "recipient")
         path = self.home / f"clone.{name}.key"
         pub = self.recipients / f"{name}.pub"
         if pub.exists() and not path.exists():
@@ -835,6 +977,9 @@ class Store:
         self.recipients.mkdir(parents=True, exist_ok=True)
         if not pub.exists():
             _write(pub, public)
+        _write_info(self.recipients / f"{name}.inf",
+                    {"name": name, "vault": self.label, "created": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
+                     "fingerprint": fingerprint(public), **clone})
         approved = (self.recipients / f"{name}.master.enc").is_file()
         if not approved:
             try:
@@ -856,10 +1001,15 @@ class Store:
         _log(self.main_home, "approve", self.label, name, method=self.method)
         return fingerprint(pub.read_bytes())
 
+    def request_info(self, name: str) -> str:
+        """The content of recipients/<name>.inf, or "" if the request has none."""
+        path = self.recipients / f"{_check_name(name, 'recipient')}.inf"
+        return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
     def revoke(self, name: str) -> Path:
         """Delete the recipient `name`, then make a new master key. Returns the backup."""
-        files = [self.recipients / f"{_check_name(name, 'recipient')}{ext}" for ext in (".pub", ".master.enc")]
-        if not any(p.exists() for p in files):
+        files = [self.recipients / f"{_check_name(name, 'recipient')}{ext}" for ext in (".pub", ".master.enc", ".inf")]
+        if not any(p.exists() for p in files[:2]):
             raise CredentialError(f"unknown recipient {name!r} in {self.recipients}")
         if self.subvault:
             self._main()._load_key()
@@ -1149,7 +1299,8 @@ def main(argv: list[str] | None = None) -> int:
         if a.cmd == "enrol":
             _enrol_cli(store, a.name)
         elif a.cmd == "approve":
-            print(f"approved {a.name}\nfingerprint\t{store.approve(a.name)}\n"
+            info = store.request_info(a.name) or "no request info\n"
+            print(f"approved {a.name}\n{info}fingerprint\t{store.approve(a.name)}\n"
                   f"compare it with the output of enrol, then commit and push {store.recipients}")
         elif a.cmd == "revoke":
             backup = store.revoke(a.name)

@@ -13,6 +13,7 @@ repository (usually the `vault-home` submodule of the repository that uses the v
 | `master.enc.key` | yes | The master key (256 random bits, base64), encrypted with the passphrase. |
 | `recipients/<name>.pub` | yes | Public key (RSA-3072) of the clone `<name>`. |
 | `recipients/<name>.master.enc` | yes | The master key, encrypted for `<name>` (RSA-OAEP, SHA-256). |
+| `recipients/<name>.inf` | yes | Information about the clone of `<name>`: OS, WSL, IP addresses, path, repository URL. See [docs/clone-keys.md](docs/clone-keys.md#clone-information). |
 | `clone.<name>.key` | no | Private key of a clone for the main vault. Plain, or encrypted with a key passphrase in the OS keyring. |
 | `access.log` | no | One line for each secret given out, key operation and failed open. |
 | `subvaults/<vault>/` | yes | Sub-vaults. Each keeps the `clone.<name>.key` files of its recipients (not committed). See [docs/clone-keys.md](docs/clone-keys.md). |
@@ -107,10 +108,12 @@ Each clone gets its own key pair. Do not copy keys between clones.
 - **One name, more vaults:** `run.sh --subvault V enrol NAME` makes another key pair for the
   sub-vault, also if `NAME` is in the main vault. Each key file opens only its own vault.
 - **Without a terminal** (agent, cloud): `run.sh enrol` uses the keyring if there is one, and
-  writes a request. With no name, it generates one: `auto-<yyyymmdd>-<8 hex digits>`.
-- **Approval of a request:** push `recipients/<name>.pub`. In a trusted clone, pull and run
-  `run.sh approve <name>`. Compare the fingerprint with the one from `enrol`. Push. Pull in
-  the new clone.
+  writes a request. With no name, it generates one: `auto-<computer>-<user>-<repo>-<yyyymmdd>[-<N>]`.
+  See [docs/clone-keys.md](docs/clone-keys.md#generated-names).
+- **Clone information:** each `enrol` writes `recipients/<name>.inf` beside the `.pub`.
+- **Approval of a request:** push `recipients/<name>.pub` and `recipients/<name>.inf`. In a
+  trusted clone, pull and run `run.sh approve <name>`. It shows the `.inf`. Compare the
+  fingerprint with the one from `enrol`. Push. Pull in the new clone.
 
 The tool sets mode 600 on each key file. If WSL ignores file modes on `/mnt/<drive>`, the tool
 shows the fix: `options = "metadata"` under `[automount]` in `/etc/wsl.conf`, then

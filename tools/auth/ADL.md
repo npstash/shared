@@ -83,3 +83,16 @@
 - 20261019-211123-00 authored Nestor 3903e251a373 The access log has a header line
 - 20261019-211123-01 authored Nestor 3903e251a373 The access log writes the system name in quotes
 - 20261019-211123-02 generated Opus-5.5 3903e251a373 The tool adds the header to a log from before the header
+- 20261027-194351-00 authored Nestor 94add1b00e31 enrol writes recipients/<name>.inf beside the public key with information about the clone
+- 20261027-194351-01 authored Nestor 94add1b00e31 The .inf has OS info (uname), the Linux distribution and version, WSL if detected, IP addresses, clone path, computer name, user name and the URL of the root repository
+- 20261027-194351-02 authored Nestor 94add1b00e31 The .inf is INI with one [clone] section
+- 20261027-194351-03 authored Nestor 94add1b00e31 The .inf also has the recipient name, the vault, the creation time and the fingerprint
+- 20261027-194351-04 authored Nestor 94add1b00e31 IP addresses come from the standard library: outbound routes and host name resolution
+- 20261027-194351-05 authored Nestor 94add1b00e31 Generated recipient names have the form auto-<computer>-<user>-<repo>-<yyyymmdd>, with -N for a duplicate
+- 20261027-194351-06 authored Nestor 94add1b00e31 The identification fields of a generated name have a maximum of 30 characters; auto- and the date do not count; empty fields are skipped
+- 20261027-194351-07 authored Nestor 94add1b00e31 If the identification fields are too long, cut the longest fields first
+- 20261027-194351-08 authored Nestor 94add1b00e31 approve shows the .inf of the request
+- 20261027-194351-09 generated Opus-5.5 94add1b00e31 The root repository is the top superproject of the vault home; its URL is that of origin, else of the first remote, without credentials
+- 20261027-194351-10 generated Opus-5.5 94add1b00e31 The user name comes from pwd on POSIX and GetUserNameW on Windows; no environment variables
+- 20261027-194351-11 generated Opus-5.5 94add1b00e31 Each enrol writes the .inf again; revoke deletes it
+- 20261027-194351-12 generated Opus-5.5 94add1b00e31 A name is a duplicate if its .pub or key file exists in the target vault; the first duplicate gets -2
