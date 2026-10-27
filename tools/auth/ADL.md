@@ -96,3 +96,4 @@
 - 20261027-194351-10 generated Opus-5.5 6c9479e96b5f The user name comes from pwd on POSIX and GetUserNameW on Windows; no environment variables
 - 20261027-194351-11 generated Opus-5.5 6c9479e96b5f Each enrol writes the .inf again; revoke deletes it
 - 20261027-194351-12 generated Opus-5.5 6c9479e96b5f A name is a duplicate if its .pub or key file exists in the target vault; the first duplicate gets -2
+- 20261027-210202-00 authored Nestor 47467967acb9 Each vault is a repository vault-<name> in the folder vaults/; the default vault home is ./vaults/vault-main, then vaults/vault-main next to the tool; ./vault-home is no longer looked up

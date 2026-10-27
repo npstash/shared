@@ -11,8 +11,9 @@ environment of the machine (see "Forbidden sources").
 
 - `TOOL` is `tools/auth` next to the `skills/` folder of this skill. The skill folder can
   be a link, so resolve it: `TOOL="$(realpath <skill folder>)/../../tools/auth"`.
-- The **vault home** is a separate folder with the vault files. The tool finds
-  `./vault-home` itself. Else add `--vault-home DIR`.
+- The **vault home** is a separate folder with the vault files: a repository `vault-<name>`
+  in `vaults/`. The tool finds `./vaults/vault-main` itself. For another vault, add
+  `--vault-home vaults/vault-<name>`.
 - A **sub-vault** is `subvaults/<name>/` of the vault home. Select it with `--subvault NAME`
   (CLI) or `subvault="NAME"` (API).
 
@@ -47,9 +48,9 @@ script, through the API. The script uses the secret and does not print it.
 ```python
 from credstore import get_credential, CredentialError
 
-jira = get_credential("jira")                          # the main vault, ./vault-home
+jira = get_credential("jira")                          # the main vault, ./vaults/vault-main
 jira = get_credential("jira", subvault="expenses")     # a sub-vault
-jira = get_credential("jira", vault_home="path/to/vault-home", subvault="expenses")
+jira = get_credential("jira", vault_home="vaults/vault-other", subvault="expenses")
 session.auth = (jira.secrets()["username"], jira.secrets()["password"])
 ```
 
@@ -114,7 +115,7 @@ For each error: stop and ask. Do not use an env var or a file of the machine ins
 | `Skipped keys: ...` | A key file is from another machine, or its keyring entry is missing. | Tell the user. Enrol again with a new name if the user agrees. |
 | `unknown system 'X'` | No entry. | Show the `list` output and ask which system to use, or ask the user to add it. |
 | `secret 'K' is blank and the vault has no value for it` | The key has no value. | Ask the user to fill it. Never use a different secret. |
-| `no vault found in ./vault-home ...` | No vault home found. | Run from the folder that holds `vault-home/`, or give `--vault-home`. For an empty submodule, run `setup.sh` of the repository. |
+| `no vault found in ./vaults/vault-main ...` | No vault home found. | Run from the folder that holds `vaults/`, or give `--vault-home`. For an empty submodule, run `setup.sh` of the repository. |
 | `recipient name 'X' is taken` | Another clone has this name in this vault. | Enrol with no name, or with another name. |
 | `this command needs the master passphrase` | The command needs the passphrase. | Give the user the command to run in a terminal. |
 

@@ -771,12 +771,12 @@ def test_cli_get_logs_only_the_secret_it_prints(two, capsys):
 # -- vault home and init -------------------------------------------------------------------
 
 def test_vault_home_is_found_in_the_working_directory_first(tmp_path, monkeypatch):
-    here, beside = tmp_path / "cwd" / "vault-home", tmp_path / "tool" / "vault-home"
+    here, beside = tmp_path / "cwd" / "vaults" / "vault-main", tmp_path / "tool" / "vaults" / "vault-main"
     here.mkdir(parents=True)
     beside.mkdir(parents=True)
     monkeypatch.setattr(cs, "TOOL", tmp_path / "tool")
     monkeypatch.chdir(tmp_path / "cwd")
-    assert cs.find_vault_home() == Path.cwd() / "vault-home"
+    assert cs.find_vault_home() == Path.cwd() / "vaults" / "vault-main"
     here.rmdir()
     assert cs.find_vault_home() == beside
     beside.rmdir()
@@ -803,11 +803,11 @@ def test_init_refuses_an_existing_vault(home):
         cs.Store(home, PW).init()
 
 
-def test_init_defaults_to_vault_home_in_the_working_directory(tmp_path, monkeypatch):
+def test_init_defaults_to_vaults_vault_main_in_the_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cs, "_prompt_new_passphrase", lambda: PW)
     assert cs.main(["init"]) == 0
-    assert (tmp_path / "vault-home" / "master.enc.key").is_file()
+    assert (tmp_path / "vaults" / "vault-main" / "master.enc.key").is_file()
 
 
 def test_backups_go_to_the_tool_folder_not_the_vault(home, tmp_path):

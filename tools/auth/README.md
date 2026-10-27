@@ -4,7 +4,8 @@ Requirements: [request.md](request.md). Design of clone keys and sub-vaults:
 [docs/clone-keys.md](docs/clone-keys.md). Code: [src/credstore.py](src/credstore.py).
 
 The vault files are not in this folder. They are in the **vault home**, a separate git
-repository (usually the `vault-home` submodule of the repository that uses the vault).
+repository (usually the `vaults/vault-main` submodule of the repository that uses the vault).
+Each vault is a repository `vault-<name>` in the folder `vaults/`.
 
 | File in the vault home | Committed | Contents |
 | --- | --- | --- |
@@ -23,8 +24,8 @@ repository (usually the `vault-home` submodule of the repository that uses the v
 ## Finding the vault
 
 1. `--vault-home DIR` (CLI) or `vault_home=` (Python), if given.
-2. Else `./vault-home` in the working directory.
-3. Else `vault-home` in this folder.
+2. Else `./vaults/vault-main` in the working directory.
+3. Else `vaults/vault-main` in this folder.
 
 `--subvault NAME` (CLI) or `subvault=` (Python) selects `subvaults/NAME` of that vault home.
 
@@ -132,19 +133,19 @@ old vault files. Change those secrets at the source if necessary.
 
 ## Reading the vault without this tool
 
-Run these commands from the folder that holds `vault-home`. With a plain clone key:
+Run these commands from the vault home, e.g. `vaults/vault-main`. With a plain clone key:
 
 ```bash
-KEY=$(openssl pkeyutl -decrypt -inkey vault-home/clone.NAME.key \
-  -in vault-home/recipients/NAME.master.enc \
+KEY=$(openssl pkeyutl -decrypt -inkey clone.NAME.key \
+  -in recipients/NAME.master.enc \
   -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256)
-openssl enc -d -aes-256-cbc -pbkdf2 -in vault-home/credentials.enc -pass "pass:$KEY"
+openssl enc -d -aes-256-cbc -pbkdf2 -in credentials.enc -pass "pass:$KEY"
 ```
 
 With the passphrase:
 
 ```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -in vault-home/master.enc.key   # prints the master key
+openssl enc -d -aes-256-cbc -pbkdf2 -in master.enc.key   # prints the master key
 ```
 
 Both print secrets. The format is AES-256-CBC without a MAC: a wrong key or a damaged file
@@ -157,7 +158,7 @@ root):
 
 ```python
 from credstore import get_credential, list_systems
-c = get_credential("Github npstash/all 01", vault_home="vault-home")     # clone key
+c = get_credential("Github npstash/all 01", vault_home="vaults/vault-main")     # clone key
 c = get_credential("jira", subvault="expenses")                          # a sub-vault
 c = get_credential("jira", passphrase=value_the_script_asked_for)        # no clone key
 c.url, c.authority_info, c.secrets()["token"]   # secrets() is an immutable map

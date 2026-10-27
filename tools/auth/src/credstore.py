@@ -1,7 +1,7 @@
 """credstore - credential vault for the tools in this repository.
 
-Design: docs/clone-keys.md. The vault home (--vault-home, default: ./vault-home, then
-<this folder>/vault-home) holds:
+Design: docs/clone-keys.md. The vault home (--vault-home, default: ./vaults/vault-main, then
+<this folder>/vaults/vault-main) holds:
 
 credentials.json        committed index: system -> url, authority_info, credentials (values cleared)
 credentials.enc         committed vault: the same document, with secret values, encrypted with
@@ -54,7 +54,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
-VAULT_DIR = "vault-home"              # the default vault home, looked up by find_vault_home()
+VAULT_DIR = "vaults/vault-main"       # the default vault home, looked up by find_vault_home()
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that init puts next to a new vault
 SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # init copies them too
@@ -667,7 +667,7 @@ def _log(home: Path, event: str, vault: str, system: str = "", secrets=(), metho
 # -- the store ------------------------------------------------------------------------------
 
 def find_vault_home(vault_home: Path | str | None = None) -> Path:
-    """The given folder, else ./vault-home, else vault-home next to this script."""
+    """The given folder, else ./vaults/vault-main, else vaults/vault-main next to this script."""
     if vault_home:
         return Path(vault_home)
     for candidate in (Path.cwd() / VAULT_DIR, TOOL / VAULT_DIR):

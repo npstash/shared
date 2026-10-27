@@ -111,8 +111,8 @@ pair for that name.
 
 | Vault | Key file | Public key |
 | --- | --- | --- |
-| main | `vault-home/clone.<name>.key` | `vault-home/recipients/<name>.pub` |
-| sub-vault V | `vault-home/subvaults/V/clone.<name>.key` | `vault-home/subvaults/V/recipients/<name>.pub` |
+| main | `<vault home>/clone.<name>.key` | `<vault home>/recipients/<name>.pub` |
+| sub-vault V | `<vault home>/subvaults/V/clone.<name>.key` | `<vault home>/subvaults/V/recipients/<name>.pub` |
 
 - A recipient is a vault and a name. Commands that take `NAME` act on the selected vault only.
 - A key file opens only its own vault. A wrapped master key is encrypted for the `.pub` beside it.
@@ -157,7 +157,7 @@ The API has the parameters `vault_home` and `subvault`. The CLI has `--vault-hom
 | no | name | `subvaults/<name>` of the main vault at the default location. |
 | path | name | `<path>/subvaults/<name>`. |
 
-The default location is as before: `./vault-home`, then `vault-home` next to the tool.
+The default location is `./vaults/vault-main`, then `vaults/vault-main` next to the tool.
 
 ## Commands
 
@@ -261,7 +261,7 @@ and `<sub-vault>/<name>` in a sub-vault. Each provider has these operations:
 
 A sub-vault holds selected secrets, e.g. for the cloud clones of one project.
 
-- Location: `vault-home/subvaults/<vault>/`, with `credentials.json`, `credentials.enc`,
+- Location: `<vault home>/subvaults/<vault>/`, with `credentials.json`, `credentials.enc`,
   `recipients/`, `main.master.enc`, `source.hmac`, and the key files of its recipients.
 - It has its own master key and recipients. It has no passphrase and no `master.enc.key`.
 - `main.master.enc` is its master key, encrypted with the main master key. Thus each clone
