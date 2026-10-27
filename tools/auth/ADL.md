@@ -8,91 +8,91 @@
 - 20260923-000000-04 authored Nestor 6277779501b1 The pre-commit hook is an sh and awk script in .githooks/ of the vault repo; no Python
 - 20260923-000000-05 generated Opus-5.5 6277779501b1 Remove install-hook and check-staged; the setup scripts turn on the hook
 - 20260923-000000-06 generated Opus-5.5 6277779501b1 init also copies .gitignore, .gitattributes, the hook and the setup scripts from templates/; it keeps existing files
-- 20260925-000000-00 authored Nestor 74bdb2b0a703 Callers set PYTHONPATH to src/ in their launchers; no sys.path changes in code
-- 20261008-095728-00 authored Nestor a09496bfde43 A system can be an alias of another system with the field alias_of
-- 20261008-095728-01 authored Nestor a09496bfde43 An alias takes the secrets of its target; its own secrets add to them or replace them
-- 20261008-095728-02 authored Nestor a09496bfde43 The target of an alias must exist and must not be an alias
-- 20261008-095728-03 authored Nestor a09496bfde43 set refuses a secret that an alias takes from its target
-- 20261008-095728-04 authored Nestor a09496bfde43 rename refuses a system that has aliases
-- 20261008-095728-05 authored Nestor a09496bfde43 list and get show the resolved secrets of an alias and do not show that it is an alias
-- 20261008-095728-06 generated Opus-5.5 a09496bfde43 set writes a new or own secret of an alias into the alias
-- 20261008-095728-07 generated Opus-5.5 a09496bfde43 The vault stores alias_of and only the own secrets of an alias
-- 20261019-170505-00 authored Nestor c037d2b01130 Each clone opens the vault with its own RSA-3072 key pair; the master key is wrapped for each clone with RSA-OAEP
-- 20261019-170505-01 authored Nestor c037d2b01130 Keep master.enc.key, the master key encrypted with the passphrase
-- 20261019-170505-03 authored Nestor c037d2b01130 Remove master.key
-- 20261019-170505-04 authored Nestor c037d2b01130 Remove the --passphrase option and CREDSTORE_PASSPHRASE; the CLI asks for the passphrase only in an interactive terminal and never reads it from a pipe
-- 20261019-170505-05 authored Nestor c037d2b01130 The Python API accepts a passphrase parameter
-- 20261019-170505-06 authored Nestor c037d2b01130 A clone enrols itself with the passphrase, or a second clone approves its public key
-- 20261019-170505-07 authored Nestor c037d2b01130 Commit the public key and the wrapped master key of each clone in the vault home
-- 20261019-170505-08 authored Nestor c037d2b01130 Each clone has a unique recipient name; one clone can have more than one key pair
-- 20261019-170505-09 authored Nestor c037d2b01130 The credentials skill runs only commands that need no passphrase; for the others it tells the user what to run in a terminal
-- 20261019-170505-12 authored Nestor c037d2b01130 Keep the get CLI command
-- 20261019-170505-13 authored Nestor c037d2b01130 Log each secret access, key operation and failed open to a gitignored access.log as TSV: time, event, vault, system, secrets, method, caller file name
-- 20261019-170505-14 authored Nestor c037d2b01130 Find the caller from the Python stack and, on Linux, the parent process; no parent process on Windows
-- 20261019-170505-16 authored Nestor c037d2b01130 sync rebuilds each changed sub-vault with a new master key
-- 20261019-170505-17 authored Nestor c037d2b01130 vault_home selects the main vault home; subvault selects a sub-vault under it
-- 20261019-170505-18 authored Nestor c037d2b01130 Cloud clones enrol like local clones; no environment variables
-- 20261019-170505-19 authored Nestor c037d2b01130 Remove recipients only with revoke, one at a time
-- 20261019-170505-20 authored Nestor c037d2b01130 expenses and voice_code open the vault only with clone keys
-- 20261019-170505-21 generated Opus-5.5 c037d2b01130 Wrap the master key with RSA-OAEP and SHA-256
-- 20261019-170505-22 generated Opus-5.5 c037d2b01130 If a clone key opens the vault, do not use a passphrase given to the API to open it
-- 20261019-170505-23 generated Opus-5.5 c037d2b01130 revoke always rotates the master key and thus needs the passphrase
-- 20261019-170505-24 generated Opus-5.5 c037d2b01130 change-passphrase gets the master key from a clone key or from the old passphrase
-- 20261019-170505-25 generated Opus-5.5 c037d2b01130 Each keyring backend of the keyring package except fail and plaintext backends counts as a keyring, Windows Credential Manager included
-- 20261019-170505-26 generated Opus-5.5 c037d2b01130 sync detects a sub-vault change with an HMAC-SHA256 keyed with the main master key over the selected values and recipient names
-- 20261019-170505-27 generated Opus-5.5 c037d2b01130 sync does not touch sub-vaults in a clone that does not open the main vault
-- 20261019-170505-28 generated Opus-5.5 c037d2b01130 No migration command; run rotate-key once after the change
-- 20261019-174805-00 authored Nestor c037d2b01130 The private key of a clone is always a file; it is plain, or encrypted with a key passphrase that a provider stores
-- 20261019-174805-01 authored Nestor c037d2b01130 Providers of key passphrases are pluggable; the OS keyring is the first provider, network providers can follow
-- 20261019-174805-02 authored Nestor c037d2b01130 Without a TTY, enrol uses an available provider first
-- 20261019-174805-03 authored Nestor c037d2b01130 Add commands to list and to remove the key passphrases of this tool in providers
-- 20261019-174805-04 authored Nestor c037d2b01130 enrol with a TTY lists the provider entries of this tool and asks to delete each
-- 20261019-174805-05 authored Nestor c037d2b01130 create-vault enrols no clone
-- 20261019-174805-06 authored Nestor c037d2b01130 enrol can generate a unique recipient name, so a cloud session can enrol without user input
-- 20261019-174805-07 authored Nestor c037d2b01130 If WSL ignores file modes, show a warning with the fix for drvfs metadata
-- 20261019-174805-09 authored Nestor c037d2b01130 A sub-vault can hold systems that are not in the main vault; sync copies only the systems that the main vault has
-- 20261019-174805-10 generated Opus-5.5 c037d2b01130 The provider name is the first line of an encrypted key file
-- 20261019-174805-11 generated Opus-5.5 c037d2b01130 A key passphrase is 256 random bits; the key file is an encrypted PKCS#8 PEM
-- 20261019-174805-12 generated Opus-5.5 c037d2b01130 A key with a missing provider entry is skipped
-- 20261019-174805-14 generated Opus-5.5 c037d2b01130 When enrol deletes a provider entry, it also deletes the matching key file of this clone
-- 20261019-174805-15 generated Opus-5.5 c037d2b01130 Generated recipient names have the form auto-<yyyymmdd>-<8 hex digits>
-- 20261019-174805-16 generated Opus-5.5 c037d2b01130 On Windows, the tool sets no ACL on key files
-- 20261019-175135-00 authored Nestor c037d2b01130 Try each key file; an encrypted key gets its key passphrase from the provider that the file names; use the first key that opens its wrapped master key
-- 20261019-175135-01 authored Nestor c037d2b01130 Sub-vaults in vault-home/subvaults/<name> have their own master key and recipients and no passphrase
-- 20261019-175135-02 authored Nestor c037d2b01130 key-list searches each provider backend directly for the entries of this tool
-- 20261019-182929-01 generated Opus-5.5 c037d2b01130 Each sub-vault keeps its master key also encrypted with the main master key, in main.master.enc; the main vault opens each sub-vault
-- 20261019-182929-02 generated Opus-5.5 c037d2b01130 enrol approves itself in each vault that opens in this clone, sub-vaults included
-- 20261019-182929-03 generated Opus-5.5 c037d2b01130 An approved recipient has a .pub and a .master.enc; rotate-key and revoke never approve a request
-- 20261019-182929-04 generated Opus-5.5 c037d2b01130 source.hmac covers the copied values and the file names in recipients/
-- 20261019-182929-05 generated Opus-5.5 c037d2b01130 rotate-key and revoke accept --subvault; for a sub-vault they rebuild it and need no passphrase
-- 20261019-182929-06 generated Opus-5.5 c037d2b01130 rotate-key of the main vault rebuilds each sub-vault
-- 20261019-182929-07 generated Opus-5.5 c037d2b01130 key-remove also deletes the key files of this clone that the removed entries open
-- 20261019-182929-08 generated Opus-5.5 c037d2b01130 create-vault needs the main vault
-- 20261019-182929-09 generated Opus-5.5 c037d2b01130 A failed sub-vault in sync of the main vault gives a warning, not an error
-- 20261019-182929-10 generated Opus-5.5 c037d2b01130 enrol and the access log add clone.*.key and access.log to the gitignore of the vault home
-- 20261019-182929-11 generated Opus-5.5 c037d2b01130 The pre-commit hook stops a commit of clone.*.key, access.log and master.key
-- 20261019-182929-12 generated Opus-5.5 c037d2b01130 The access log is in the main vault home, also for sub-vaults
-- 20261019-182929-13 generated Opus-5.5 c037d2b01130 The key fingerprint is SHA256: and the base64 SHA-256 of the DER public key
-- 20261019-185316-00 authored Nestor c037d2b01130 Allow duplicate recipient names across vaults; a recipient is a vault and a name
-- 20261019-192810-00 authored Nestor c037d2b01130 Each vault keeps the key files of its recipients in its own folder; one name in several vaults is one key pair for each vault
-- 20261019-192810-01 authored Nestor c037d2b01130 The access log shows no key IDs
-- 20261019-192810-02 generated Opus-5.5 c037d2b01130 The provider entry of a key is <name> in the main vault and <sub-vault>/<name> in a sub-vault
-- 20261019-192810-03 generated Opus-5.5 c037d2b01130 Backups do not copy key files
-- 20261019-192810-04 generated Opus-5.5 c037d2b01130 When the main vault opens a sub-vault, the log method is main: and the method of the main vault
-- 20261019-203559-00 generated Opus-5.5 cee997b4d833 An alias in a sub-vault needs its target in the same sub-vault
-- 20261019-211123-00 authored Nestor 3903e251a373 The access log has a header line
-- 20261019-211123-01 authored Nestor 3903e251a373 The access log writes the system name in quotes
-- 20261019-211123-02 generated Opus-5.5 3903e251a373 The tool adds the header to a log from before the header
-- 20261027-194351-00 authored Nestor 94add1b00e31 enrol writes recipients/<name>.inf beside the public key with information about the clone
-- 20261027-194351-01 authored Nestor 94add1b00e31 The .inf has OS info (uname), the Linux distribution and version, WSL if detected, IP addresses, clone path, computer name, user name and the URL of the root repository
-- 20261027-194351-02 authored Nestor 94add1b00e31 The .inf is INI with one [clone] section
-- 20261027-194351-03 authored Nestor 94add1b00e31 The .inf also has the recipient name, the vault, the creation time and the fingerprint
-- 20261027-194351-04 authored Nestor 94add1b00e31 IP addresses come from the standard library: outbound routes and host name resolution
-- 20261027-194351-05 authored Nestor 94add1b00e31 Generated recipient names have the form auto-<computer>-<user>-<repo>-<yyyymmdd>, with -N for a duplicate
-- 20261027-194351-06 authored Nestor 94add1b00e31 The identification fields of a generated name have a maximum of 30 characters; auto- and the date do not count; empty fields are skipped
-- 20261027-194351-07 authored Nestor 94add1b00e31 If the identification fields are too long, cut the longest fields first
-- 20261027-194351-08 authored Nestor 94add1b00e31 approve shows the .inf of the request
-- 20261027-194351-09 generated Opus-5.5 94add1b00e31 The root repository is the top superproject of the vault home; its URL is that of origin, else of the first remote, without credentials
-- 20261027-194351-10 generated Opus-5.5 94add1b00e31 The user name comes from pwd on POSIX and GetUserNameW on Windows; no environment variables
-- 20261027-194351-11 generated Opus-5.5 94add1b00e31 Each enrol writes the .inf again; revoke deletes it
-- 20261027-194351-12 generated Opus-5.5 94add1b00e31 A name is a duplicate if its .pub or key file exists in the target vault; the first duplicate gets -2
+- 20260925-000000-00 authored Nestor 37ec28a3594b Callers set PYTHONPATH to src/ in their launchers; no sys.path changes in code
+- 20261008-095728-00 authored Nestor f9c32a2e41e5 A system can be an alias of another system with the field alias_of
+- 20261008-095728-01 authored Nestor f9c32a2e41e5 An alias takes the secrets of its target; its own secrets add to them or replace them
+- 20261008-095728-02 authored Nestor f9c32a2e41e5 The target of an alias must exist and must not be an alias
+- 20261008-095728-03 authored Nestor f9c32a2e41e5 set refuses a secret that an alias takes from its target
+- 20261008-095728-04 authored Nestor f9c32a2e41e5 rename refuses a system that has aliases
+- 20261008-095728-05 authored Nestor f9c32a2e41e5 list and get show the resolved secrets of an alias and do not show that it is an alias
+- 20261008-095728-06 generated Opus-5.5 f9c32a2e41e5 set writes a new or own secret of an alias into the alias
+- 20261008-095728-07 generated Opus-5.5 f9c32a2e41e5 The vault stores alias_of and only the own secrets of an alias
+- 20261019-170505-00 authored Nestor bb942da5d8ab Each clone opens the vault with its own RSA-3072 key pair; the master key is wrapped for each clone with RSA-OAEP
+- 20261019-170505-01 authored Nestor bb942da5d8ab Keep master.enc.key, the master key encrypted with the passphrase
+- 20261019-170505-03 authored Nestor bb942da5d8ab Remove master.key
+- 20261019-170505-04 authored Nestor bb942da5d8ab Remove the --passphrase option and CREDSTORE_PASSPHRASE; the CLI asks for the passphrase only in an interactive terminal and never reads it from a pipe
+- 20261019-170505-05 authored Nestor bb942da5d8ab The Python API accepts a passphrase parameter
+- 20261019-170505-06 authored Nestor bb942da5d8ab A clone enrols itself with the passphrase, or a second clone approves its public key
+- 20261019-170505-07 authored Nestor bb942da5d8ab Commit the public key and the wrapped master key of each clone in the vault home
+- 20261019-170505-08 authored Nestor bb942da5d8ab Each clone has a unique recipient name; one clone can have more than one key pair
+- 20261019-170505-09 authored Nestor bb942da5d8ab The credentials skill runs only commands that need no passphrase; for the others it tells the user what to run in a terminal
+- 20261019-170505-12 authored Nestor bb942da5d8ab Keep the get CLI command
+- 20261019-170505-13 authored Nestor bb942da5d8ab Log each secret access, key operation and failed open to a gitignored access.log as TSV: time, event, vault, system, secrets, method, caller file name
+- 20261019-170505-14 authored Nestor bb942da5d8ab Find the caller from the Python stack and, on Linux, the parent process; no parent process on Windows
+- 20261019-170505-16 authored Nestor bb942da5d8ab sync rebuilds each changed sub-vault with a new master key
+- 20261019-170505-17 authored Nestor bb942da5d8ab vault_home selects the main vault home; subvault selects a sub-vault under it
+- 20261019-170505-18 authored Nestor bb942da5d8ab Cloud clones enrol like local clones; no environment variables
+- 20261019-170505-19 authored Nestor bb942da5d8ab Remove recipients only with revoke, one at a time
+- 20261019-170505-20 authored Nestor bb942da5d8ab expenses and voice_code open the vault only with clone keys
+- 20261019-170505-21 generated Opus-5.5 bb942da5d8ab Wrap the master key with RSA-OAEP and SHA-256
+- 20261019-170505-22 generated Opus-5.5 bb942da5d8ab If a clone key opens the vault, do not use a passphrase given to the API to open it
+- 20261019-170505-23 generated Opus-5.5 bb942da5d8ab revoke always rotates the master key and thus needs the passphrase
+- 20261019-170505-24 generated Opus-5.5 bb942da5d8ab change-passphrase gets the master key from a clone key or from the old passphrase
+- 20261019-170505-25 generated Opus-5.5 bb942da5d8ab Each keyring backend of the keyring package except fail and plaintext backends counts as a keyring, Windows Credential Manager included
+- 20261019-170505-26 generated Opus-5.5 bb942da5d8ab sync detects a sub-vault change with an HMAC-SHA256 keyed with the main master key over the selected values and recipient names
+- 20261019-170505-27 generated Opus-5.5 bb942da5d8ab sync does not touch sub-vaults in a clone that does not open the main vault
+- 20261019-170505-28 generated Opus-5.5 bb942da5d8ab No migration command; run rotate-key once after the change
+- 20261019-174805-00 authored Nestor bb942da5d8ab The private key of a clone is always a file; it is plain, or encrypted with a key passphrase that a provider stores
+- 20261019-174805-01 authored Nestor bb942da5d8ab Providers of key passphrases are pluggable; the OS keyring is the first provider, network providers can follow
+- 20261019-174805-02 authored Nestor bb942da5d8ab Without a TTY, enrol uses an available provider first
+- 20261019-174805-03 authored Nestor bb942da5d8ab Add commands to list and to remove the key passphrases of this tool in providers
+- 20261019-174805-04 authored Nestor bb942da5d8ab enrol with a TTY lists the provider entries of this tool and asks to delete each
+- 20261019-174805-05 authored Nestor bb942da5d8ab create-vault enrols no clone
+- 20261019-174805-06 authored Nestor bb942da5d8ab enrol can generate a unique recipient name, so a cloud session can enrol without user input
+- 20261019-174805-07 authored Nestor bb942da5d8ab If WSL ignores file modes, show a warning with the fix for drvfs metadata
+- 20261019-174805-09 authored Nestor bb942da5d8ab A sub-vault can hold systems that are not in the main vault; sync copies only the systems that the main vault has
+- 20261019-174805-10 generated Opus-5.5 bb942da5d8ab The provider name is the first line of an encrypted key file
+- 20261019-174805-11 generated Opus-5.5 bb942da5d8ab A key passphrase is 256 random bits; the key file is an encrypted PKCS#8 PEM
+- 20261019-174805-12 generated Opus-5.5 bb942da5d8ab A key with a missing provider entry is skipped
+- 20261019-174805-14 generated Opus-5.5 bb942da5d8ab When enrol deletes a provider entry, it also deletes the matching key file of this clone
+- 20261019-174805-15 generated Opus-5.5 bb942da5d8ab Generated recipient names have the form auto-<yyyymmdd>-<8 hex digits>
+- 20261019-174805-16 generated Opus-5.5 bb942da5d8ab On Windows, the tool sets no ACL on key files
+- 20261019-175135-00 authored Nestor bb942da5d8ab Try each key file; an encrypted key gets its key passphrase from the provider that the file names; use the first key that opens its wrapped master key
+- 20261019-175135-01 authored Nestor bb942da5d8ab Sub-vaults in vault-home/subvaults/<name> have their own master key and recipients and no passphrase
+- 20261019-175135-02 authored Nestor bb942da5d8ab key-list searches each provider backend directly for the entries of this tool
+- 20261019-182929-01 generated Opus-5.5 bb942da5d8ab Each sub-vault keeps its master key also encrypted with the main master key, in main.master.enc; the main vault opens each sub-vault
+- 20261019-182929-02 generated Opus-5.5 bb942da5d8ab enrol approves itself in each vault that opens in this clone, sub-vaults included
+- 20261019-182929-03 generated Opus-5.5 bb942da5d8ab An approved recipient has a .pub and a .master.enc; rotate-key and revoke never approve a request
+- 20261019-182929-04 generated Opus-5.5 bb942da5d8ab source.hmac covers the copied values and the file names in recipients/
+- 20261019-182929-05 generated Opus-5.5 bb942da5d8ab rotate-key and revoke accept --subvault; for a sub-vault they rebuild it and need no passphrase
+- 20261019-182929-06 generated Opus-5.5 bb942da5d8ab rotate-key of the main vault rebuilds each sub-vault
+- 20261019-182929-07 generated Opus-5.5 bb942da5d8ab key-remove also deletes the key files of this clone that the removed entries open
+- 20261019-182929-08 generated Opus-5.5 bb942da5d8ab create-vault needs the main vault
+- 20261019-182929-09 generated Opus-5.5 bb942da5d8ab A failed sub-vault in sync of the main vault gives a warning, not an error
+- 20261019-182929-10 generated Opus-5.5 bb942da5d8ab enrol and the access log add clone.*.key and access.log to the gitignore of the vault home
+- 20261019-182929-11 generated Opus-5.5 bb942da5d8ab The pre-commit hook stops a commit of clone.*.key, access.log and master.key
+- 20261019-182929-12 generated Opus-5.5 bb942da5d8ab The access log is in the main vault home, also for sub-vaults
+- 20261019-182929-13 generated Opus-5.5 bb942da5d8ab The key fingerprint is SHA256: and the base64 SHA-256 of the DER public key
+- 20261019-185316-00 authored Nestor bb942da5d8ab Allow duplicate recipient names across vaults; a recipient is a vault and a name
+- 20261019-192810-00 authored Nestor bb942da5d8ab Each vault keeps the key files of its recipients in its own folder; one name in several vaults is one key pair for each vault
+- 20261019-192810-01 authored Nestor bb942da5d8ab The access log shows no key IDs
+- 20261019-192810-02 generated Opus-5.5 bb942da5d8ab The provider entry of a key is <name> in the main vault and <sub-vault>/<name> in a sub-vault
+- 20261019-192810-03 generated Opus-5.5 bb942da5d8ab Backups do not copy key files
+- 20261019-192810-04 generated Opus-5.5 bb942da5d8ab When the main vault opens a sub-vault, the log method is main: and the method of the main vault
+- 20261019-203559-00 generated Opus-5.5 e32088b7751d An alias in a sub-vault needs its target in the same sub-vault
+- 20261019-211123-00 authored Nestor 46e836781ee5 The access log has a header line
+- 20261019-211123-01 authored Nestor 46e836781ee5 The access log writes the system name in quotes
+- 20261019-211123-02 generated Opus-5.5 46e836781ee5 The tool adds the header to a log from before the header
+- 20261027-194351-00 authored Nestor 6c9479e96b5f enrol writes recipients/<name>.inf beside the public key with information about the clone
+- 20261027-194351-01 authored Nestor 6c9479e96b5f The .inf has OS info (uname), the Linux distribution and version, WSL if detected, IP addresses, clone path, computer name, user name and the URL of the root repository
+- 20261027-194351-02 authored Nestor 6c9479e96b5f The .inf is INI with one [clone] section
+- 20261027-194351-03 authored Nestor 6c9479e96b5f The .inf also has the recipient name, the vault, the creation time and the fingerprint
+- 20261027-194351-04 authored Nestor 6c9479e96b5f IP addresses come from the standard library: outbound routes and host name resolution
+- 20261027-194351-05 authored Nestor 6c9479e96b5f Generated recipient names have the form auto-<computer>-<user>-<repo>-<yyyymmdd>, with -N for a duplicate
+- 20261027-194351-06 authored Nestor 6c9479e96b5f The identification fields of a generated name have a maximum of 30 characters; auto- and the date do not count; empty fields are skipped
+- 20261027-194351-07 authored Nestor 6c9479e96b5f If the identification fields are too long, cut the longest fields first
+- 20261027-194351-08 authored Nestor 6c9479e96b5f approve shows the .inf of the request
+- 20261027-194351-09 generated Opus-5.5 6c9479e96b5f The root repository is the top superproject of the vault home; its URL is that of origin, else of the first remote, without credentials
+- 20261027-194351-10 generated Opus-5.5 6c9479e96b5f The user name comes from pwd on POSIX and GetUserNameW on Windows; no environment variables
+- 20261027-194351-11 generated Opus-5.5 6c9479e96b5f Each enrol writes the .inf again; revoke deletes it
+- 20261027-194351-12 generated Opus-5.5 6c9479e96b5f A name is a duplicate if its .pub or key file exists in the target vault; the first duplicate gets -2
