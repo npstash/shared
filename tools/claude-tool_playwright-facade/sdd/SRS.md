@@ -91,6 +91,13 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
   - The user gives the value with an argument or a variable → the facade keeps it.
   - The tool folder cannot hold Unix sockets → the facade keeps the temp folder of the OS.
 
+#### REQ-015 — Headless browser
+
+- **Basic Flow:** The facade shall start the browser without a window: HEADLESS (true).
+- **Alternative Flow:**
+  - The user sets `PLAYWRIGHT_MCP_HEADLESS=false` → the browser opens a window.
+  - The user gives `--config` → the config file of upstream decides.
+
 ## 3. Tool switches
 
 #### REQ-020 — Tool list in the config
@@ -253,6 +260,7 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 | ASK_TIMEOUT | 300000 | ms | — | Maximum time of a dialog of the ask provider |
 | TOOL_TIMEOUT | 600000 | ms | — | Maximum time of one call without progress |
 | NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` / `run.bat` | Pinned Node.js runtime |
+| HEADLESS | true | — | `PLAYWRIGHT_MCP_HEADLESS` | `true`: the browser has no window |
 | DEFAULT_BROWSER | chromium | — | `--browser`, `PLAYWRIGHT_MCP_BROWSER` | Browser of upstream |
 | SYSLIBS_ROUNDS | 10 | rounds | — | Maximum download rounds of the missing libraries |
 | FONT_PACKAGES | fonts-liberation, fonts-dejavu-core, fonts-noto-color-emoji | — | — | Fonts for a host without fonts |

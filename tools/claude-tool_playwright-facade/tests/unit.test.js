@@ -45,6 +45,7 @@ describe('upstreamEnv', () => {
   test('sets the defaults in the tool folder', () => {
     const env = upstreamEnv([], {}, cwd);
     assert.equal(env.PLAYWRIGHT_MCP_BROWSER, 'chromium');
+    assert.equal(env.PLAYWRIGHT_MCP_HEADLESS, 'true');
     assert.equal(env.PLAYWRIGHT_MCP_OUTPUT_DIR, path.join(ASSETS_DIR, 'output'));
     assert.ok(env.PLAYWRIGHT_MCP_USER_DATA_DIR.startsWith(path.join(ASSETS_DIR, 'profiles')));
     assert.match(env.PLAYWRIGHT_MCP_USER_DATA_DIR, /-chromium-[0-9a-f]{8}$/);
@@ -70,8 +71,9 @@ describe('upstreamEnv', () => {
   });
 
   test('keeps the values of the user', () => {
-    const env = upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox', PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine' }, cwd);
+    const env = upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox', PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine', PLAYWRIGHT_MCP_HEADLESS: 'false' }, cwd);
     assert.equal(env.PLAYWRIGHT_MCP_BROWSER, 'firefox');
+    assert.equal(env.PLAYWRIGHT_MCP_HEADLESS, 'false');
     assert.equal(env.PLAYWRIGHT_MCP_USER_DATA_DIR, '/mine');
   });
 

@@ -69,7 +69,7 @@ See [SRS.md](SRS.md).
 | # | Story | Requirements | Milestone | Status | Link |
 | :-: | :-: | :-: | :-: | :-: | :-: |
 | 1 | As an agent, I use the tools of Playwright MCP through the facade. | REQ-001–REQ-004 | v1 | done | MISSING: issue |
-| 2 | As a user, I run the facade on Ubuntu without root and without OS installs. | REQ-010–REQ-014 | v2 | done | MISSING: issue |
+| 2 | As a user, I run the facade on Ubuntu without root and without OS installs. | REQ-010–REQ-015 | v2 | done | MISSING: issue |
 | 3 | As a user, I disable dangerous tools, and the agent sees why a call fails. | REQ-020, REQ-021 | v2 | done | MISSING: issue |
 | 4 | As a user, I give form values from the vault, a file or a dialog; the agent writes only placeholders. | REQ-030–REQ-036 | v2 | done | MISSING: issue |
 | 5 | As a user, I block hosts and keep a list of the opened hosts. | REQ-040–REQ-042 | v2 | done | MISSING: issue |

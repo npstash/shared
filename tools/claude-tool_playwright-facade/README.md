@@ -62,6 +62,7 @@ The facade sets these defaults. An argument or an env variable of the user overr
 | Value | Default of the facade | Default of Playwright MCP |
 | --- | --- | --- |
 | Browser (`PLAYWRIGHT_MCP_BROWSER`) | `chromium`, installed by the launcher | `chrome` (Google Chrome of the system) |
+| Headless (`PLAYWRIGHT_MCP_HEADLESS`) | `true`: no window. Set `false` for a window. | a window if the host has a display (also WSLg) |
 | Browser files (`PLAYWRIGHT_BROWSERS_PATH`) | `.local_assets/browsers/<platform>/` | cache folder of the user |
 | Profile (`PLAYWRIGHT_MCP_USER_DATA_DIR`) | `.local_assets/profiles/<platform>-<browser>-<workspace hash>/` | cache folder of the user |
 | Output files (`PLAYWRIGHT_MCP_OUTPUT_DIR`) | `.local_assets/output/` | in the workspace |

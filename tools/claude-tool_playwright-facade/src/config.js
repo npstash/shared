@@ -12,6 +12,7 @@ export const PLATFORM = `${process.platform === 'win32' ? 'win' : process.platfo
 export const TMP_DIR = path.join(ASSETS_DIR, 'tmp');
 export const SYSLIBS_DIR = path.join(ASSETS_DIR, 'syslibs', PLATFORM);
 export const DEFAULT_BROWSER = 'chromium';
+export const DEFAULT_HEADLESS = 'true';
 const LIB_TRIPLETS = { x64: 'x86_64-linux-gnu', arm64: 'aarch64-linux-gnu' };
 
 const require = createRequire(import.meta.url);
@@ -66,6 +67,9 @@ export function upstreamEnv(args, env = process.env, cwd = process.cwd(), tmpDir
   if (hasArg(args, '--config') || env.PLAYWRIGHT_MCP_CONFIG) return result;
 
   result.PLAYWRIGHT_MCP_BROWSER ??= DEFAULT_BROWSER;
+  // Upstream opens a window if the host has a display (also WSLg). The facade runs headless.
+  // PLAYWRIGHT_MCP_HEADLESS=false gives a window again.
+  result.PLAYWRIGHT_MCP_HEADLESS ??= DEFAULT_HEADLESS;
   result.PLAYWRIGHT_MCP_OUTPUT_DIR ??= path.join(ASSETS_DIR, 'output');
 
   const ownProfile = ['--isolated', '--user-data-dir', '--cdp-endpoint', '--extension', '--endpoint']

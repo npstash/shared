@@ -46,3 +46,4 @@ The log of the decisions that change the design. Format and rules:
 - 20261025-205943-25 generated Opus-5.5 93411e71fd9a Keep each hosts.ini section sorted and unique and keep the header comments
 - 20261025-205943-26 generated Opus-5.5 93411e71fd9a Check the target URL before a navigation and the page URL after each call, and open about:blank for a blocked page
 - 20261025-205943-27 generated Opus-5.5 93411e71fd9a Use private apt package lists in the tool folder when the host has none, and delete them after the download
+- 20261026-072128-00 authored Nestor 94add1b00e31 Run the browser headless by default; PLAYWRIGHT_MCP_HEADLESS=false gives a window
