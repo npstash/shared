@@ -3,7 +3,7 @@ id: browser-automation-facade
 summary: Browser automation only through the Playwright facade MCP server; placeholders for user data.
 applies-to: all-agents
 requires:
-  - tools/claude-tool_playwright-facade      # the facade
+  - tools/browser-tool-facades      # the facade
   - a "playwright-facade" entry in the root .mcp.json   # see the facade docs/clients.md
   - deny entries in the root .claude/settings.json      # Claude Code: blocks direct Playwright
 related: [credentials-from-vault]
@@ -12,7 +12,7 @@ related: [credentials-from-vault]
 # Browser automation through the facade
 
 Use only the tools of the MCP server `playwright-facade` for browser automation. It is the
-[Playwright facade](../tools/claude-tool_playwright-facade/README.md).
+[Playwright facade](../tools/browser-tool-facades/playwright/README.md).
 
 - Do not use Playwright MCP directly, the Playwright plugin, or a browser tool of an other server.
 - Do not start Playwright, a browser or `npx playwright` from the shell.

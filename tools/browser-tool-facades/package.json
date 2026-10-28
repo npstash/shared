@@ -1,0 +1,22 @@
+{
+  "name": "browser-tool-facades",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP facade for the Playwright MCP server, with logging.",
+  "type": "module",
+  "main": "src/server.js",
+  "bin": {
+    "playwright-facade": "src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1 tests/"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@playwright/mcp": "0.0.83"
+  }
+}
