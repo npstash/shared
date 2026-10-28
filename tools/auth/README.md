@@ -1,6 +1,6 @@
 # tools/auth — credential vault
 
-Requirements: [request.md](request.md). Design of clone keys and sub-vaults:
+Requirements: [request.md](request.md). Design of clone keys:
 [docs/clone-keys.md](docs/clone-keys.md). Code: [src/credstore.py](src/credstore.py).
 
 The vault files are not in this folder. They are in the **vault home**, a separate git
@@ -15,9 +15,8 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 | `recipients/<name>.pub` | yes | Public key (RSA-3072) of the clone `<name>`. |
 | `recipients/<name>.master.enc` | yes | The master key, encrypted for `<name>` (RSA-OAEP, SHA-256). |
 | `recipients/<name>.inf` | yes | Information about the clone of `<name>`: OS, WSL, IP addresses, path, repository URL. See [docs/clone-keys.md](docs/clone-keys.md#clone-information). |
-| `clone.<name>.key` | no | Private key of a clone for the main vault. Plain, or encrypted with a key passphrase in the OS keyring. |
+| `clone.<name>.key` | no | Private key of a clone. Plain, or encrypted with a key passphrase in the OS keyring. |
 | `access.log` | no | One line for each secret given out, key operation and failed open. |
-| `subvaults/<vault>/` | yes | Sub-vaults. Each keeps the `clone.<name>.key` files of its recipients (not committed). See [docs/clone-keys.md](docs/clone-keys.md). |
 | `.githooks/pre-commit` | yes | Stops a commit of `credentials.json` with secret values, of a key file and of the log. Needs only `sh` and `awk`. |
 | `setup.sh`, `setup.bat` | yes | Turn the hook on in a clone: `git config core.hooksPath .githooks`. |
 
@@ -26,8 +25,6 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 1. `--vault-home DIR` (CLI) or `vault_home=` (Python), if given.
 2. Else `./vaults/vault-main` in the working directory.
 3. Else `vaults/vault-main` in this folder.
-
-`--subvault NAME` (CLI) or `subvault=` (Python) selects `subvaults/NAME` of that vault home.
 
 ```json
 {
@@ -66,9 +63,8 @@ the alias add to the target secrets, or replace them. The alias keeps its own `u
 
 ## Opening the vault
 
-1. A clone key: each `clone.<name>.key` in the folder of the vault that has a
+1. A clone key: each `clone.<name>.key` in the vault home that has a
    `recipients/<name>.master.enc` there. The first key that opens its wrapped master key is used.
-   A sub-vault without a key of its own opens through the main vault.
 2. Else the passphrase: `passphrase=` in Python, or a prompt of the CLI. The CLI asks only if
    stdin is an interactive terminal. It never reads the passphrase from a pipe or an option.
 
@@ -84,18 +80,17 @@ run.sh approve NAME                 # in a trusted clone: approve a request
 run.sh revoke NAME                  # delete a recipient, new master key; needs the passphrase
 run.sh rotate-key                   # new master key, same passphrase; needs the passphrase
 run.sh change-passphrase            # new passphrase, same master key
-run.sh create-vault NAME [--system S ...]   # new sub-vault with copies of systems
 run.sh key-list                     # key passphrases of this tool in the OS keyring
-run.sh key-remove ENTRY ... | --all # delete them, and the key files they open
-run.sh sync                         # mirror credentials.json; update the sub-vaults
+run.sh key-remove NAME ... | --all  # delete them, and the key files they open
+run.sh sync                         # mirror credentials.json into the vault
 run.sh list                         # name, url, secret names; no key needed
 run.sh get NAME [--secret KEY]
 run.sh set NAME [--url U] [--info LINE ...] [--secret KEY=VALUE ...]
 run.sh rename NAME NEW | rename NAME --secret OLD=NEW
-run.sh --vault-home DIR --subvault NAME ...
+run.sh --vault-home DIR ...
 ```
 
-After `enrol`, `approve`, `revoke`, `rotate-key`, `create-vault` and `sync`, commit and push
+After `enrol`, `approve`, `revoke`, `rotate-key` and `sync`, commit and push
 the vault home.
 
 ## Enrolment
@@ -106,8 +101,6 @@ Each clone gets its own key pair. Do not copy keys between clones.
   keyring, and asks for each one if it is to be deleted. It asks if the new key passphrase
   goes into the keyring. Then it asks for the passphrase. With the passphrase, the clone is
   enrolled at once. With an empty answer, the result is a request.
-- **One name, more vaults:** `run.sh --subvault V enrol NAME` makes another key pair for the
-  sub-vault, also if `NAME` is in the main vault. Each key file opens only its own vault.
 - **Without a terminal** (agent, cloud): `run.sh enrol` uses the keyring if there is one, and
   writes a request. With no name, it generates one: `auto-<computer>-<user>-<repo>-<yyyymmdd>[-<N>]`.
   See [docs/clone-keys.md](docs/clone-keys.md#generated-names).
@@ -123,7 +116,7 @@ shows the fix: `options = "metadata"` under `[automount]` in `/etc/wsl.conf`, th
 ## Rotation and revocation
 
 `rotate-key` makes a new master key. It wraps the key for each approved recipient and with the
-passphrase, and rebuilds the sub-vaults. `revoke NAME` deletes the recipient, then rotates.
+passphrase. `revoke NAME` deletes the recipient, then rotates.
 Both need the passphrase, so run them in a terminal. `change-passphrase` encrypts
 `master.enc.key` with a new passphrase. Each copies the files into `.local_assets/` of this
 folder first.
@@ -159,13 +152,11 @@ root):
 ```python
 from credstore import get_credential, list_systems
 c = get_credential("Github npstash/all 01", vault_home="vaults/vault-main")     # clone key
-c = get_credential("jira", subvault="expenses")                          # a sub-vault
 c = get_credential("jira", passphrase=value_the_script_asked_for)        # no clone key
 c.url, c.authority_info, c.secrets()["token"]   # secrets() is an immutable map
 ```
 
-Each call writes a line into `access.log`: the vault, the system, the secrets, the key
-(`clone-key:<name>:<plain|provider>`, with `main:` in front if the main vault opened a
-sub-vault) and the file name of the calling script.
+Each call writes a line into `access.log`: the system, the secrets, the key
+(`clone-key:<name>:<plain|provider>`) and the file name of the calling script.
 
 Tests: `run.sh test`. The hook tests need `sh` and `awk`.

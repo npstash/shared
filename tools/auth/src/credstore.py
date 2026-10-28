@@ -12,7 +12,6 @@ recipients/<name>.pub   public key of a clone; <name>.master.enc is the master k
 clone.<name>.key        gitignored private key of a clone for this vault: plain, or encrypted
                         with a key passphrase that a provider (the OS keyring) holds
 access.log              gitignored access log
-subvaults/<vault>/      sub-vaults: own master key, recipients and key files, no passphrase
 
 A clone key opens the vault. Else the passphrase does: the API parameter, or a prompt of
 the CLI in an interactive terminal. This tool never reads environment variables.
@@ -34,7 +33,6 @@ from __future__ import annotations
 import argparse
 import configparser
 import getpass
-import hmac
 import io
 import ipaddress
 import json
@@ -58,9 +56,8 @@ VAULT_DIR = "vaults/vault-main"       # the default vault home, looked up by fin
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that init puts next to a new vault
 SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # init copies them too
-RECIPIENTS = "recipients"             # public keys and wrapped master keys, in each vault
-SUBVAULTS = "subvaults"               # sub-vaults, in the main vault home
-LOG = "access.log"                    # in the main vault home, gitignored
+RECIPIENTS = "recipients"             # public keys and wrapped master keys
+LOG = "access.log"                    # in the vault home, gitignored
 IGNORED = ("clone.*.key", LOG)        # the vault home must ignore these; see _ensure_ignored()
 KEY_BITS = 3072
 PROVIDER_LINE = "credstore-provider:"  # first line of a key file that a provider unlocks
@@ -134,13 +131,11 @@ def _canonical(systems: dict[str, Credential]) -> bytes:
     return json.dumps(_document(systems), sort_keys=True, separators=(",", ":")).encode()
 
 
-def _merge(index: dict[str, Credential], stored: dict[str, Credential],
-           check: bool = True) -> dict[str, Credential]:
+def _merge(index: dict[str, Credential], stored: dict[str, Credential]) -> dict[str, Credential]:
     """Mirror the index, filling blank secrets from the vault.
 
     A secret that is blank in the index and absent from the vault is an error: it would
     otherwise be listed as a secret this system has, while holding nothing.
-    check=False leaves the alias check to the caller, which has the other systems.
     """
     merged = {}
     for name, e in index.items():
@@ -154,8 +149,7 @@ def _merge(index: dict[str, Credential], stored: dict[str, Credential],
                     f"fill it in credentials.json, or remove the key")
             secrets[key] = kept
         merged[name] = replace(e, _secrets=secrets)
-    if check:
-        _resolve(merged)
+    _resolve(merged)
     return merged
 
 
@@ -173,17 +167,6 @@ def _resolve(systems: dict[str, Credential]) -> dict[str, Credential]:
                 f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
         resolved[name] = replace(c, _secrets={**target._secrets, **c._secrets}, alias_of=None)
     return resolved
-
-
-def _compose(index: dict[str, Credential], stored: dict[str, Credential],
-             main: dict[str, Credential]) -> dict[str, Credential]:
-    """A sub-vault: systems of the main vault come from it, the others are its own.
-
-    An alias in a sub-vault needs its target in the same sub-vault."""
-    own = _merge({n: c for n, c in index.items() if n not in main}, stored, check=False)
-    systems = {n: main[n] if n in main else own[n] for n in index}
-    _resolve(systems)
-    return systems
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -646,10 +629,12 @@ def _caller() -> str:
 LOG_HEADER = "\t".join(["time", "event", "vault", "system", "secrets", "method", "caller"])
 
 
-def _log(home: Path, event: str, vault: str, system: str = "", secrets=(), method: str = "") -> None:
-    """One tab-separated line. The system and the caller are in quotes: they can hold spaces."""
+def _log(home: Path, event: str, system: str = "", secrets=(), method: str = "") -> None:
+    """One tab-separated line. The system and the caller are in quotes: they can hold spaces.
+
+    The vault column is always "main": it stays for the format of existing logs."""
     clean = lambda s: re.sub(r"[\t\r\n\"]", " ", s)  # noqa: E731
-    line = "\t".join([datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), event, clean(vault),
+    line = "\t".join([datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), event, "main",
                       f'"{clean(system)}"', clean(",".join(secrets)), method, f'"{clean(_caller())}"'])
     path = home / LOG
     try:
@@ -679,47 +664,27 @@ def find_vault_home(vault_home: Path | str | None = None) -> Path:
 
 
 class Store:
-    """One vault: the main vault of `vault_home`, or its sub-vault `subvault`.
+    """The vault of `vault_home`.
 
-    `passphrase` opens the main vault when no clone key does. `interactive` lets the CLI ask
+    `passphrase` opens the vault when no clone key does. `interactive` lets the CLI ask
     for it in a terminal.
     """
 
     def __init__(self, vault_home: Path | str | None = None, passphrase: str | None = None,
-                 subvault: str | None = None, interactive: bool = False):
-        self.main_home = find_vault_home(vault_home)
-        self.subvault = _check_name(subvault, "sub-vault") if subvault is not None else None
-        self.home = self.main_home / SUBVAULTS / subvault if subvault else self.main_home
-        self.label = subvault or "main"
+                 interactive: bool = False):
+        self.home = find_vault_home(vault_home)
         self.index = self.home / "credentials.json"
         self.vault = self.home / "credentials.enc"
         self.recipients = self.home / RECIPIENTS
-        self.key_enc = self.main_home / "master.enc.key"   # the main vault only
-        self.main_enc = self.home / "main.master.enc"      # sub-vaults: their key under the main key
-        self.source_hmac = self.home / "source.hmac"       # sub-vaults: see _digest()
+        self.key_enc = self.home / "master.enc.key"
         self.interactive = interactive
         self.prompt = "Master passphrase: "
         self.method = ""                   # how the vault was opened, for the access log
         self._passphrase = passphrase
         self._key: str | None = None       # the master key, once loaded
         self._stored: bytes | None = None  # canonical vault content as last read/written
-        self._main_store: Store | None = self if subvault is None else None
 
     # -- opening ------------------------------------------------------------------------
-
-    def _main(self) -> Store:
-        if self._main_store is None:
-            self._main_store = Store(self.main_home, self._passphrase, interactive=self.interactive)
-        return self._main_store
-
-    def _sub(self, name: str) -> Store:
-        sub = Store(self.main_home, self._passphrase, name, self.interactive)
-        sub._main_store = self._main()
-        return sub
-
-    def subvault_names(self) -> list[str]:
-        root = self.main_home / SUBVAULTS
-        return sorted(d.name for d in root.iterdir() if (d / "credentials.json").is_file()) if root.is_dir() else []
 
     def _ask_passphrase(self) -> str | None:
         if not self._passphrase and self.interactive:
@@ -729,15 +694,8 @@ class Store:
     def _key_files(self) -> list[tuple[str, Path]]:
         return [(p.name[len("clone."):-len(".key")], p) for p in sorted(self.home.glob("clone.*.key"))]
 
-    def _entry(self, name: str) -> str:
-        """The provider entry of a key of this vault: <name>, or <sub-vault>/<name>."""
-        return f"{self.subvault}/{name}" if self.subvault else name
-
-    def _load_key(self, log_failure: bool = True, prompt: bool = True) -> str:
-        """The master key: from the first clone key that opens it, else from the passphrase.
-
-        A sub-vault has no passphrase: without a clone key of its own, the main vault opens it.
-        """
+    def _load_key(self, log_failure: bool = True) -> str:
+        """The master key: from the first clone key that opens it, else from the passphrase."""
         if self._key is not None:
             return self._key
         skipped = []
@@ -746,7 +704,7 @@ class Store:
             if not wrapped.is_file():
                 continue
             try:
-                private, how = _read_private(path, self._entry(name))
+                private, how = _read_private(path, name)
                 key = private.decrypt(wrapped.read_bytes(), _oaep()).decode()
             except CredentialError as exc:
                 skipped.append(f"{name}: {exc}")
@@ -758,17 +716,7 @@ class Store:
             return key
         tried = ""
         try:
-            if self.subvault:
-                main = self._main()
-                main_key = main._load_key(log_failure=False, prompt=prompt)
-                tried = main.method
-                if not self.main_enc.is_file():
-                    raise CredentialError(f"{self.main_enc} is missing")
-                self._key = _read_key(decrypt(self.main_enc.read_bytes(), main_key, what="sub-vault key"),
-                                      self.main_enc)
-                self.method = f"main:{main.method}"   # the key of the main vault, not of this one
-                return self._key
-            passphrase = self._ask_passphrase() if prompt else self._passphrase
+            passphrase = self._ask_passphrase()
             if not passphrase:
                 raise NoWayToOpen(
                     "no way to open the vault: no clone key opens it, and no passphrase was given. "
@@ -786,7 +734,7 @@ class Store:
             return self._key
         except CredentialError as exc:
             if log_failure:
-                _log(self.main_home, "open-failed", self.label, method=tried)
+                _log(self.home, "open-failed", method=tried)
             if skipped:
                 raise type(exc)(f"{exc}. Skipped keys: {'; '.join(skipped)}") from exc
             raise
@@ -862,24 +810,21 @@ class Store:
         """Copy keys and vaults aside first: a crash between two writes would strand them."""
         target = BACKUPS / f"{label}-{datetime.now():%Y%m%d-%H%M%S}"
         target.mkdir(parents=True, exist_ok=True)
-        for path in (self.key_enc, self.vault, self.main_enc, self.source_hmac):
+        for path in (self.key_enc, self.vault):
             if path.exists():
                 shutil.copy2(path, target / path.name)
-        for folder in (self.recipients, self.main_home / SUBVAULTS if not self.subvault else None):
-            if folder is not None and folder.is_dir():
-                shutil.copytree(folder, target / folder.name, dirs_exist_ok=True,
-                                ignore=shutil.ignore_patterns("clone.*.key", "*.tmp"))   # no private keys
+        if self.recipients.is_dir():
+            shutil.copytree(self.recipients, target / self.recipients.name, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns("*.tmp"))
         return target
 
-    # -- the main vault -------------------------------------------------------------------
+    # -- master key -----------------------------------------------------------------------
 
     def init(self) -> list[Path]:
         """A new vault: master key, example credentials.json, the files from templates/, setup scripts.
 
         Stops if any vault file exists already. Template files that exist are kept.
         """
-        if self.subvault:
-            raise CredentialError("init makes a main vault; use create-vault for a sub-vault")
         existing = [p for p in (self.key_enc, self.index, self.vault) if p.exists()]
         if existing:
             raise CredentialError(f"a vault exists already: {', '.join(map(str, existing))}")
@@ -906,39 +851,25 @@ class Store:
     def rotate_key(self, backup: Path | None = None) -> Path:
         """A new master key, wrapped for each approved recipient and with the passphrase.
 
-        The sub-vaults are rebuilt, because the main key protects them too. Returns the backup.
+        Returns the backup.
         """
-        if self.subvault:
-            self._main()._load_key()
-            self._load_key()
-            backup = backup or self._backup("rotate-key")
-            self._sync_subvault(force=True)
-            _log(self.main_home, "rotate-key", self.label, method=self.method)
-            return backup
         stored, order = self._read_vault(), list(self.read_index())
         systems = {**{n: stored[n] for n in order if n in stored}, **stored}   # keep the index order
         passphrase = self._confirm_passphrase()
-        subs = [self._sub(name) for name in self.subvault_names()]
-        for sub in subs:
-            sub._load_key()       # with the old main key, before it changes
         backup = backup or self._backup("rotate-key")
         self._new_key(passphrase)
         self._stored = None       # the vault must be written again, under the new key
         self._save(systems)
         self._wrap_all(self._key)
-        for sub in subs:
-            sub._sync_subvault(force=True)
-        _log(self.main_home, "rotate-key", self.label, method=self.method)
+        _log(self.home, "rotate-key", method=self.method)
         return backup
 
     def change_passphrase(self, new: str) -> Path:
         """Encrypt master.enc.key with a new passphrase. Key and vault are untouched."""
-        if self.subvault:
-            raise CredentialError("a sub-vault has no passphrase")
         key = self._load_key()
         backup = self._backup("change-passphrase")
         _write(self.key_enc, encrypt((key + "\n").encode(), new))
-        _log(self.main_home, "change-passphrase", self.label, method=self.method)
+        _log(self.home, "change-passphrase", method=self.method)
         return backup
 
     # -- recipients -----------------------------------------------------------------------
@@ -946,31 +877,29 @@ class Store:
     def enrol(self, name: str | None = None, provider: Provider | str | None = "auto") -> tuple[str, str, bool]:
         """Make (or reuse) the key pair `name` of this clone for this vault.
 
-        Each vault has its own key files: the same name in another vault is another key pair.
-
         provider: "auto" takes the first available provider; None writes a plain key file.
         If this vault opens here, the master key is wrapped for the new key at once
         (self-enrolment). Else the result is a request for `approve` in a trusted clone.
         Writes recipients/<name>.inf with the facts about this clone, for the approver.
         Returns (name, fingerprint, approved).
         """
-        clone = _clone_info(self.main_home)
+        clone = _clone_info(self.home)
         name = _check_name(name or _auto_name(clone, lambda n: (self.recipients / f"{n}.pub").exists()
                                               or (self.home / f"clone.{n}.key").exists()), "recipient")
         path = self.home / f"clone.{name}.key"
         pub = self.recipients / f"{name}.pub"
         if pub.exists() and not path.exists():
-            raise CredentialError(f"recipient name {name!r} is taken in vault {self.label}: {pub} exists")
-        _ensure_ignored(self.main_home)
+            raise CredentialError(f"recipient name {name!r} is taken: {pub} exists")
+        _ensure_ignored(self.home)
         if path.exists():
-            private, _ = _read_private(path, self._entry(name))
+            private, _ = _read_private(path, name)
         else:
             from cryptography.hazmat.primitives.asymmetric import rsa
             if provider == "auto":
                 provider = next(iter(available_providers()), None)
             private = rsa.generate_private_key(public_exponent=65537, key_size=KEY_BITS)
             self.home.mkdir(parents=True, exist_ok=True)
-            _write_private(path, self._entry(name), private, provider if isinstance(provider, Provider) else None)
+            _write_private(path, name, private, provider if isinstance(provider, Provider) else None)
         public = _public_pem(private)
         if pub.exists() and pub.read_bytes() != public:
             raise CredentialError(f"{pub} holds another key than {path.name}")
@@ -978,7 +907,7 @@ class Store:
         if not pub.exists():
             _write(pub, public)
         _write_info(self.recipients / f"{name}.inf",
-                    {"name": name, "vault": self.label, "created": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
+                    {"name": name, "created": f"{datetime.now(timezone.utc):%Y-%m-%dT%H:%M:%SZ}",
                      "fingerprint": fingerprint(public), **clone})
         approved = (self.recipients / f"{name}.master.enc").is_file()
         if not approved:
@@ -989,7 +918,7 @@ class Store:
             if key:
                 self._wrap(name, key)
                 approved = True
-        _log(self.main_home, "enrol", self.label, name, method=self.method if approved else "")
+        _log(self.home, "enrol", name, method=self.method if approved else "")
         return name, fingerprint(public), approved
 
     def approve(self, name: str) -> str:
@@ -998,7 +927,7 @@ class Store:
         if not pub.is_file():
             raise CredentialError(f"no request for {name!r}: {pub} does not exist")
         self._wrap(name, self._load_key())
-        _log(self.main_home, "approve", self.label, name, method=self.method)
+        _log(self.home, "approve", name, method=self.method)
         return fingerprint(pub.read_bytes())
 
     def request_info(self, name: str) -> str:
@@ -1011,112 +940,39 @@ class Store:
         files = [self.recipients / f"{_check_name(name, 'recipient')}{ext}" for ext in (".pub", ".master.enc", ".inf")]
         if not any(p.exists() for p in files[:2]):
             raise CredentialError(f"unknown recipient {name!r} in {self.recipients}")
-        if self.subvault:
-            self._main()._load_key()
-            self._load_key()
-        else:
-            self._read_vault()
-            self._confirm_passphrase()   # before anything is deleted
+        self._read_vault()
+        self._confirm_passphrase()   # before anything is deleted
         backup = self._backup("revoke")
         for p in files:
             p.unlink(missing_ok=True)
         self.rotate_key(backup)
-        _log(self.main_home, "revoke", self.label, name, method=self.method)
+        _log(self.home, "revoke", name, method=self.method)
         return backup
 
     def key_list(self) -> list[tuple[str, str]]:
-        """(provider, entry) for each key passphrase of this tool in the available providers.
-
-        An entry is <name> for a key of the main vault, <sub-vault>/<name> for a sub-vault."""
+        """(provider, name) for each key passphrase of this tool in the available providers."""
         return [(p.name, n) for p in available_providers() for n in p.list()]
 
-    def key_remove(self, entries: list[str] | None = None) -> list[tuple[str, str]]:
-        """Delete key passphrases (all, if entries is None), and the key files they unlock here."""
+    def key_remove(self, names: list[str] | None = None) -> list[tuple[str, str]]:
+        """Delete key passphrases (all, if names is None), and the key files they unlock here."""
         removed = []
         for p in available_providers():
-            for entry in p.list():
-                if entries is not None and entry not in entries:
+            for name in p.list():
+                if names is not None and name not in names:
                     continue
-                p.delete(entry)
-                removed.append((p.name, entry))
-                vault, _, name = entry.rpartition("/")
-                home = self.main_home / SUBVAULTS / vault if vault else self.main_home
-                path = home / f"clone.{name}.key"
+                p.delete(name)
+                removed.append((p.name, name))
+                path = self.home / f"clone.{name}.key"
                 if path.is_file() and _key_provider(path) == p.name:
                     path.unlink()   # it cannot open any more
-                _log(self.main_home, "key-remove", vault or "main", name, method=p.name)
+                _log(self.home, "key-remove", name, method=p.name)
         return removed
-
-    # -- sub-vaults -----------------------------------------------------------------------
-
-    def create_vault(self, name: str, systems: list[str] | tuple = ()) -> Path:
-        """A new sub-vault with copies of the given systems of this main vault. It enrols no clone."""
-        if self.subvault:
-            raise CredentialError("create-vault runs on the main vault")
-        main_systems = self._read_vault()
-        unknown = [s for s in systems if s not in main_systems]
-        if unknown:
-            raise CredentialError(f"unknown system(s) in the main vault: {', '.join(unknown)}")
-        sub = self._sub(_check_name(name, "sub-vault"))
-        if sub.home.exists():
-            raise CredentialError(f"sub-vault {name!r} exists already: {sub.home}")
-        sub.recipients.mkdir(parents=True)
-        _write(sub.index, (json.dumps(_document({s: main_systems[s] for s in systems}, redact=True),
-                                      indent=2) + "\n").encode())
-        sub._sync_subvault(force=True)
-        return sub.home
-
-    def _digest(self, main_key: str, systems: dict[str, Credential], main: dict[str, Credential]) -> str:
-        """HMAC-SHA256 with the main key over the copied values and the recipient files.
-
-        The files, not only the approved names: a request that was approved and then
-        revoked before a sync leaves the same approved names, but a stale wrapped key."""
-        copied = {n: c for n, c in systems.items() if n in main}
-        files = sorted(p.name for p in self.recipients.iterdir()) if self.recipients.is_dir() else []
-        message = _canonical(copied) + b"\n" + "\n".join(files).encode()
-        return hmac.new(main_key.encode(), message, sha256).hexdigest()
-
-    def _sync_subvault(self, force: bool = False) -> dict[str, Credential]:
-        """Mirror the index of this sub-vault. With the main vault open here, copy its values,
-        and rebuild with a new master key when the copied values or the recipients changed."""
-        main = self._main()
-        main_systems = None
-        try:
-            main._load_key(log_failure=False, prompt=False)
-            main_systems = main._read_vault()
-        except NoWayToOpen:
-            if force:
-                raise
-        systems = _compose(self.read_index(), self._read_vault(), main_systems or {})
-        if main_systems is None:
-            return self._save(systems)
-        digest = self._digest(main._key, systems, main_systems)
-        current = self.source_hmac.read_text().strip() if self.source_hmac.exists() else ""
-        if not force and digest == current:
-            return self._save(systems)
-        self._key, self._stored = _new_master_key(), None
-        self._save(systems)
-        self._wrap_all(self._key)   # it can delete files: take the digest after it
-        _write(self.main_enc, encrypt((self._key + "\n").encode(), main._key))
-        _write(self.source_hmac, (self._digest(main._key, systems, main_systems) + "\n").encode())
-        return systems
 
     # -- operations -------------------------------------------------------------------
 
     def sync(self) -> dict[str, Credential]:
-        """Mirror credentials.json into the vault and clear the index's secret values.
-
-        On the main vault, also bring each sub-vault up to date.
-        """
-        if self.subvault:
-            return self._sync_subvault()
-        systems = self._save(_merge(self.read_index(), self._read_vault()))
-        for name in self.subvault_names():
-            try:
-                self._sub(name)._sync_subvault()
-            except CredentialError as exc:
-                print(f"warning: sub-vault {name!r} is not synced: {exc}", file=sys.stderr)
-        return systems
+        """Mirror credentials.json into the vault and clear the index's secret values."""
+        return self._save(_merge(self.read_index(), self._read_vault()))
 
     def lookup(self, system: str) -> Credential:
         """A system, with no access log line. get() is the logged way to hand out secrets."""
@@ -1126,7 +982,7 @@ class Store:
         return systems[system]
 
     def log_get(self, c: Credential, secrets) -> None:
-        _log(self.main_home, "get", self.label, c.name, secrets, self.method)
+        _log(self.home, "get", c.name, secrets, self.method)
 
     def get(self, system: str) -> Credential:
         c = self.lookup(system)
@@ -1220,14 +1076,14 @@ def _yes(question: str, default: bool) -> bool:
     return default if not answer else answer in ("y", "yes")
 
 
-def get_credential(system: str, vault_home: Path | str | None = None, subvault: str | None = None,
+def get_credential(system: str, vault_home: Path | str | None = None,
                    passphrase: str | None = None) -> Credential:
-    return Store(vault_home, passphrase, subvault).get(system)
+    return Store(vault_home, passphrase).get(system)
 
 
-def list_systems(vault_home: Path | str | None = None, subvault: str | None = None) -> list[str]:
+def list_systems(vault_home: Path | str | None = None) -> list[str]:
     """System names from credentials.json - no key, no decryption."""
-    return list(Store(vault_home, subvault=subvault).read_index())
+    return list(Store(vault_home).read_index())
 
 
 def _enrol_cli(store: Store, name: str | None) -> None:
@@ -1238,14 +1094,14 @@ def _enrol_cli(store: Store, name: str | None) -> None:
                 store.key_remove([n])
         found = available_providers()
         provider = found[0] if found and _yes(f"Keep the key passphrase in {found[0].name}?", True) else None
-        store.prompt = store._main().prompt = "Master passphrase (empty: leave a request): "
+        store.prompt = "Master passphrase (empty: leave a request): "
     name, fp, approved = store.enrol(name, provider)
     print(f"recipient\t{name}\nfingerprint\t{fp}")
     if approved:
         print(f"enrolled: commit and push {store.recipients}")
     else:
         print(f"request: commit and push {store.recipients / (name + '.pub')}, then run "
-              f"`approve {name}`{' --subvault ' + store.subvault if store.subvault else ''} in a trusted clone")
+              f"`approve {name}` in a trusted clone")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1253,8 +1109,7 @@ def main(argv: list[str] | None = None) -> int:
     _CLI = True
     ap = argparse.ArgumentParser(prog="credstore", description="Credential vault (see docs/clone-keys.md).")
     ap.add_argument("--vault-home", metavar="DIR",
-                    help=f"main vault home (default: ./{VAULT_DIR}, then {VAULT_DIR} next to this script)")
-    ap.add_argument("--subvault", metavar="NAME", help="use the sub-vault NAME of the main vault")
+                    help=f"vault home (default: ./{VAULT_DIR}, then {VAULT_DIR} next to this script)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init", help="create a vault: master key, example credentials.json, git hook")
     p = sub.add_parser("enrol", help="make a key pair for this clone; self-enrol, or leave a request")
@@ -1265,12 +1120,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name")
     sub.add_parser("rotate-key", help="new master key, same passphrase")
     sub.add_parser("change-passphrase", help="encrypt master.enc.key with a new passphrase")
-    p = sub.add_parser("create-vault", help="make a sub-vault with copies of systems of the main vault")
-    p.add_argument("name")
-    p.add_argument("--system", action="append", default=[], help="system to copy (repeatable)")
     sub.add_parser("key-list", help="key passphrases of this tool in the providers")
     p = sub.add_parser("key-remove", help="delete key passphrases from the providers")
-    p.add_argument("names", nargs="*", metavar="ENTRY", help="<name>, or <sub-vault>/<name>")
+    p.add_argument("names", nargs="*", metavar="NAME", help="recipient name")
     p.add_argument("--all", action="store_true")
     sub.add_parser("sync", help="mirror credentials.json into the vault and clear its secrets")
     sub.add_parser("list", help="systems, urls and secret names from credentials.json")
@@ -1295,7 +1147,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"next: fill the secrets in {store.index}, run sync, enrol this clone, "
                   f"then run setup.sh in {store.home}")
             return 0
-        store = Store(a.vault_home, subvault=a.subvault, interactive=_tty())
+        store = Store(a.vault_home, interactive=_tty())
         if a.cmd == "enrol":
             _enrol_cli(store, a.name)
         elif a.cmd == "approve":
@@ -1312,8 +1164,6 @@ def main(argv: list[str] | None = None) -> int:
             store._load_key()
             backup = store.change_passphrase(_prompt_new_passphrase())
             print(f"passphrase changed (backup: {backup})")
-        elif a.cmd == "create-vault":
-            print(f"created {store.create_vault(a.name, a.system)}")
         elif a.cmd == "key-list":
             for provider, name in store.key_list():
                 print(f"{provider}\t{name}")

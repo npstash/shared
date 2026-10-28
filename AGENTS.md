@@ -22,7 +22,6 @@ agents.
 
 ### Skills
 - [credentials](skills/credentials/SKILL.md) — get a secret from the vault through the API; enrol a clone; manage keys.
-- [create-vault](skills/create-vault/SKILL.md) — make and fill a sub-vault of the vault. Use only when the user asks.
 - [create-adr](skills/create-adr/SKILL.md) — write an ADR for an ADL entry. Use only when the user asks.
 
 ## Claude Code

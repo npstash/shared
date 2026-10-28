@@ -490,7 +490,7 @@ def test_a_request_has_an_inf_file_that_approve_shows(home, tmp_path, capsys, mo
     new = clone(home, tmp_path / "new")
     name, fp, _ = cs.Store(new).enrol("req", None)
     info = (new / "recipients" / "req.inf").read_text()
-    assert info.startswith(f"[clone]\nname = req\nvault = main\ncreated = ")
+    assert info.startswith(f"[clone]\nname = req\ncreated = ")
     assert f"fingerprint = {fp}\n" in info and "computer = " in info and "os = " in info
     assert "clone_path" not in info and "repository" not in info   # no git repository: no value
     pull(new, home)
@@ -529,7 +529,7 @@ def test_the_root_repository_is_the_top_superproject(tmp_path):
 
 def test_a_recipient_name_of_another_clone_is_refused(home, tmp_path):
     cs.Store(home, PW).enrol("taken", None)
-    with pytest.raises(cs.CredentialError, match="is taken in vault main"):
+    with pytest.raises(cs.CredentialError, match="is taken"):
         cs.Store(clone(home, tmp_path / "other")).enrol("taken", None)
     with pytest.raises(cs.CredentialError, match="not valid"):
         cs.Store(home).enrol("../x", None)
@@ -615,123 +615,13 @@ def test_openssl_opens_the_wrapped_master_key_with_a_clone_key(home):
         "SHA256:" + base64.b64encode(hashlib.sha256(der).digest()).decode().rstrip("=")
 
 
-# -- sub-vaults ------------------------------------------------------------------------------
-
 @pytest.fixture
 def two(home):
-    """A main vault with two systems and an enrolled clone."""
+    """A vault with two systems and an enrolled clone."""
     write_index(home, {SYS: entry(token="t"), "jira": entry(password="p")})
     cs.Store(home, PW).sync()
     cs.Store(home, PW).enrol("main", None)
     return home
-
-
-def test_create_vault_copies_selected_systems(two):
-    path = cs.Store(two).create_vault("proj", [SYS])
-    assert path == two / "subvaults" / "proj"
-    assert read_index(path) == {SYS: entry(token="")}
-    assert not list((path / "recipients").iterdir())        # it enrols no clone
-    assert dict(cs.get_credential(SYS, vault_home=two, subvault="proj").secrets()) == {"token": "t"}
-    with pytest.raises(cs.CredentialError, match="unknown system"):
-        cs.get_credential("jira", vault_home=two, subvault="proj")
-    with pytest.raises(cs.CredentialError, match="exists already"):
-        cs.Store(two).create_vault("proj")
-    assert cs.Store(two).create_vault("blank") and read_index(two / "subvaults" / "blank") == {}
-
-
-def test_a_cloud_clone_enrolled_in_a_sub_vault_opens_only_it(two, tmp_path):
-    cs.Store(two).create_vault("proj", [SYS])
-    cloud = clone(two, tmp_path / "cloud")
-    name, fp, approved = cs.Store(cloud, subvault="proj").enrol()
-    assert not approved
-    pull(cloud, two)
-    assert cs.Store(two, subvault="proj").approve(name) == fp
-    pull(two, cloud)
-    store = cs.Store(cloud, subvault="proj")
-    assert dict(store.get(SYS).secrets()) == {"token": "t"} and store.method == f"clone-key:{name}:plain"
-    with pytest.raises(cs.NoWayToOpen):
-        cs.Store(cloud).get(SYS)
-
-
-def test_sync_copies_main_values_and_keeps_own_systems(two, tmp_path):
-    cs.Store(two).create_vault("proj", [SYS])
-    cs.Store(two, subvault="proj").set("own", secrets={"k": "v"})
-    old_key = (two / "subvaults" / "proj" / "main.master.enc").read_bytes()
-    cs.Store(two).sync()                                    # nothing changed: no rebuild
-    assert (two / "subvaults" / "proj" / "main.master.enc").read_bytes() == old_key
-    cs.Store(two).set(SYS, secrets={"token": "new"})        # set syncs the main vault, not the subs
-    cs.Store(two).sync()
-    assert (two / "subvaults" / "proj" / "main.master.enc").read_bytes() != old_key   # new key
-    sub = cs.Store(two, subvault="proj")
-    assert dict(sub.get(SYS).secrets()) == {"token": "new"}
-    assert dict(sub.get("own").secrets()) == {"k": "v"}
-
-
-def test_one_name_in_the_main_vault_and_in_sub_vaults(two, tmp_path):
-    """Each vault has its own key pair for a name, in its own folder."""
-    cs.Store(two).create_vault("a", [SYS])
-    cs.Store(two).create_vault("b", [SYS])
-    for sub in ("a", "b"):
-        assert cs.Store(two, subvault=sub).enrol("main", None)[2]    # self-enrolment: the main vault opens here
-    keys = [two / "clone.main.key", two / "subvaults" / "a" / "clone.main.key", two / "subvaults" / "b" / "clone.main.key"]
-    pubs = [k.parent / "recipients" / "main.pub" for k in keys]
-    assert len({p.read_bytes() for p in pubs}) == 3                   # three key pairs
-    other = clone(two, tmp_path / "other")                           # with no key files
-    assert not list(other.rglob("clone.*.key"))
-    shutil.copy2(keys[1], other / "subvaults" / "a" / "clone.main.key")
-    store = cs.Store(other, subvault="a")                             # the key of "a" opens only "a"
-    assert store.get(SYS) and store.method == "clone-key:main:plain"
-    for vault in (None, "b"):
-        with pytest.raises(cs.NoWayToOpen):
-            cs.Store(other, subvault=vault).get(SYS)
-
-
-def test_the_log_names_the_vault_of_the_key(two, tmp_path):
-    cs.Store(two).create_vault("a", [SYS])
-    cs.get_credential(SYS, vault_home=two, subvault="a")    # no key of "a" here: through the main vault
-    assert log_lines(two)[-1][2] == "a" and log_lines(two)[-1][5] == "main:clone-key:main:plain"
-    cs.Store(two, subvault="a").enrol("main", None)
-    other = clone(two, tmp_path / "other")
-    shutil.copy2(two / "subvaults" / "a" / "clone.main.key", other / "subvaults" / "a" / "clone.main.key")
-    cs.get_credential(SYS, vault_home=other, subvault="a")  # the key of "a" itself
-    assert log_lines(other)[-1][2] == "a" and log_lines(other)[-1][5] == "clone-key:main:plain"
-
-
-def test_provider_entries_tell_the_vaults_apart(two, fake):
-    cs.Store(two).create_vault("a")
-    cs.Store(two, subvault="a").enrol("x")
-    cs.Store(two).enrol("x")
-    store = cs.Store(two)
-    assert store.key_list() == [("fake", "a/x"), ("fake", "x")]
-    assert store.key_remove(["a/x"]) == [("fake", "a/x")]
-    assert not (two / "subvaults" / "a" / "clone.x.key").exists() and (two / "clone.x.key").exists()
-    assert log_lines(two)[-1][1:6] == ["key-remove", "a", '"x"', "", "fake"]
-
-
-def test_revoking_from_a_sub_vault_needs_no_passphrase(two, tmp_path):
-    cs.Store(two).create_vault("proj", [SYS])
-    cloud = clone(two, tmp_path / "cloud")
-    name = cs.Store(cloud, subvault="proj").enrol("c1", None)[0]
-    pull(cloud, two)
-    cs.Store(two, subvault="proj").approve(name)
-    pull(two, cloud)
-    assert cs.Store(cloud, subvault="proj").get(SYS)
-    (two / "subvaults" / "proj" / "recipients" / "c1.pub").unlink()
-    cs.Store(two).sync()                                    # rebuild with a new key
-    assert not (two / "subvaults" / "proj" / "recipients" / "c1.master.enc").exists()
-    stable = (two / "subvaults" / "proj" / "main.master.enc").read_bytes()
-    cs.Store(two).sync()                                    # and no second rebuild
-    assert (two / "subvaults" / "proj" / "main.master.enc").read_bytes() == stable
-    pull(two, cloud)
-    with pytest.raises(cs.NoWayToOpen):
-        cs.Store(cloud, subvault="proj").get(SYS)
-
-
-def test_rotating_the_main_key_keeps_sub_vaults_open(two):
-    cs.Store(two).create_vault("proj", [SYS])
-    cs.Store(two, subvault="proj").set("own", secrets={"k": "v"})
-    cs.Store(two, PW).rotate_key()
-    assert dict(cs.get_credential("own", vault_home=two, subvault="proj").secrets()) == {"k": "v"}
 
 
 # -- access log ------------------------------------------------------------------------------
@@ -744,7 +634,7 @@ def log_lines(home):
 
 def test_a_log_from_before_the_header_gets_it(home):
     (home / "access.log").write_text("2026-10-19T20:56:45Z\tenrol\tmain\tx\t\tpassphrase\t\"bash\"\n")
-    cs._log(home, "get", "main", "a b", ["k"], "passphrase")
+    cs._log(home, "get", "a b", ["k"], "passphrase")
     lines = (home / "access.log").read_text().splitlines()
     assert lines[0] == cs.LOG_HEADER and len(lines) == 3 and lines[2].split("\t")[3] == '"a b"'
 
@@ -915,18 +805,6 @@ def test_the_keyring_provider_reports_a_missing_keyring(monkeypatch):
     from keyring.backends import fail
     monkeypatch.setattr(keyring, "get_keyring", lambda: fail.Keyring())
     assert not cs.KeyringProvider().available()
-
-
-def test_an_alias_in_a_sub_vault_needs_its_target_there(home):
-    write_index(home, {"ldap": entry(username="u", password="p"),
-                       "git": {"alias_of": "ldap", "credentials": {"token": "t"}}})
-    cs.Store(home, PW).sync()
-    cs.Store(home, PW).enrol("main", None)
-    cs.Store(home).create_vault("both", ["ldap", "git"])
-    assert dict(cs.get_credential("git", vault_home=home, subvault="both").secrets()) == \
-        {"username": "u", "password": "p", "token": "t"}
-    with pytest.raises(cs.CredentialError, match="alias of 'ldap'"):
-        cs.Store(home).create_vault("alone", ["git"])
 
 
 def test_rotate_key_keeps_the_order_of_the_index(home):
