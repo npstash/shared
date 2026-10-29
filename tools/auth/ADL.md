@@ -98,3 +98,22 @@
 - 20261027-13 Opus-5.5 6c9479e96b5f A name is a duplicate if its .pub or key file exists in the target vault; the first duplicate gets -2
 - 20261027-14 Nestor 47467967acb9 Each vault is a repository vault-<name> in the folder vaults/; the default vault home is ./vaults/vault-main, then vaults/vault-main next to the tool; ./vault-home is no longer looked up
 - 20261028-01 Nestor 14e8c70de325 Remove sub-vaults
+- 20261029-01 Nestor b3a7d3d5f22c unenrol deletes the recipient files without a new master key and needs no passphrase
+- 20261029-02 Nestor b3a7d3d5f22c unenrol without a name unenrols this clone; with a name, it unenrols any recipient
+- 20261029-03 Nestor b3a7d3d5f22c unenrol also withdraws a request
+- 20261029-04 Nestor b3a7d3d5f22c delete-private-clone-key is a separate command; it deletes the private clone key after the push of unenrol
+- 20261029-05 Nestor b3a7d3d5f22c delete-private-clone-key refuses while the recipient files of the key exist
+- 20261029-06 Nestor b3a7d3d5f22c unenrol-all-vaults is a separate command; it unenrols this clone in each vault
+- 20261029-07 Nestor b3a7d3d5f22c An option does not change what a command does; a different behaviour is a separate command
+- 20261029-08 Nestor b3a7d3d5f22c Rename the commands: init to create-vault, approve to approve-enrol, revoke to unenrol-and-rotate-master-key, rotate-key to rotate-master-key, key-list to list-keyring-secrets, key-remove to delete-keyring-secret and delete-all-keyring-secrets, get to get-system and get-secret, set to set-system, rename to rename-system and rename-secret
+- 20261029-09 Nestor b3a7d3d5f22c The Python API has the names of the commands
+- 20261029-10 Nestor b3a7d3d5f22c enrol stays one command; in a terminal it self-enrols with the passphrase, else it writes a request
+- 20261029-11 Nestor b3a7d3d5f22c enrol in a terminal keeps the question about deleting key passphrases in the keyring
+- 20261029-12 Nestor b3a7d3d5f22c If the push after unenrol fails, restore the recipient files and stop
+- 20261029-13 Opus-5.5 b3a7d3d5f22c delete-private-clone-key also refuses while the upstream branch of the vault home holds the recipient files
+- 20261029-14 Opus-5.5 b3a7d3d5f22c delete-private-clone-key also deletes the key passphrase of the key in its provider
+- 20261029-15 Opus-5.5 b3a7d3d5f22c Without a name, unenrol and delete-private-clone-key need exactly one key file of this clone in the vault home
+- 20261029-16 Opus-5.5 b3a7d3d5f22c unenrol-all-vaults unenrols each recipient of this clone in each vault-* folder beside the vault home
+- 20261029-17 Opus-5.5 b3a7d3d5f22c The access log events have the names of the commands
+- 20261029-18 Opus-5.5 b3a7d3d5f22c get-system writes no access log line; get-secret logs only the secret that it prints
+- 20261029-19 Opus-5.5 b3a7d3d5f22c The API keeps get_credential for all secrets of a system and adds get_secret for one secret

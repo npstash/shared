@@ -1,6 +1,6 @@
 ---
 name: credentials
-description: Get a username, password, token or other secret for an external system (GitHub, Jira, an API, a database...) from the vault, through a script that uses the vault API. Also enrol this clone into the vault, approve a request of another clone, and manage keys. Use it each time a task must authenticate, before env vars, ~/.netrc, gh auth, a keychain, or a request to the user. Triggers - "credentials for X", "token for X", "log in to X", "authenticate against X", "API key", "enrol this clone", "approve the clone", 401/403 errors.
+description: Get a username, password, token or other secret for an external system (GitHub, Jira, an API, a database...) from the vault, through a script that uses the vault API. Also enrol this clone into the vault, approve a request of another clone, unenrol this clone, and manage keys. Use it each time a task must authenticate, before env vars, ~/.netrc, gh auth, a keychain, or a request to the user. Triggers - "credentials for X", "token for X", "log in to X", "authenticate against X", "API key", "enrol this clone", "approve the clone", "unenrol this clone", 401/403 errors.
 ---
 
 # Credentials
@@ -22,12 +22,12 @@ give the passphrase. Do not ask for it.
 
 | You run these | The user runs these in a terminal |
 | --- | --- |
-| `enrol` (it writes a request), `approve`, `sync`, `list`, `set`, `rename`, `key-list`, `key-remove` | `init`, `enrol` with the passphrase (self-enrolment), `rotate-key`, `revoke`, `change-passphrase` |
+| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `unenrol-all-vaults`, `delete-private-clone-key`, `sync`, `list`, `get-system`, `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `create-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
 
 For a command in the right column, give the user the full command, e.g.
-`shared/tools/auth/run.sh revoke old-laptop`. Then wait.
+`shared/tools/auth/run.sh unenrol-and-rotate-master-key old-laptop`. Then wait.
 
-Do not run `get` to see or to pass a secret. Use a script (section 3).
+Do not run `get-secret` to see or to pass a secret. Use a script (section 3).
 
 ## 2. See what is stored
 
@@ -74,7 +74,7 @@ $TOOL/run.sh enrol                       # a generated name
    fingerprint. Without a terminal, it is a request.
 2. Commit and push the `.pub` in the vault home repository.
 3. Tell the user the name and the fingerprint. Ask the user to approve the request in a
-   trusted clone: `run.sh approve <name>`.
+   trusted clone: `run.sh approve-enrol <name>`.
 4. After the approval, pull the vault home. Then the vault opens.
 
 Do not copy a key file from another clone. Do not create or copy `master.key`.
@@ -84,26 +84,50 @@ Do not copy a key file from another clone. Do not create or copy `master.key`.
 Only if the user asks. Pull the vault home, then:
 
 ```bash
-$TOOL/run.sh approve <name>
+$TOOL/run.sh approve-enrol <name>
 ```
 
 Compare the printed fingerprint with the fingerprint that the user gives. If they are
 different, stop and tell the user. Else commit and push `recipients/<name>.master.enc`.
 
-## 6. Keys
+## 6. Unenrol this clone
 
-- List the key passphrases in the OS keyring: `$TOOL/run.sh key-list`. Delete one only if the
-  user asks: `$TOOL/run.sh key-remove <name>`. Its key file stops working.
+Only if the user asks. It removes this clone from vaults without a new master key. The clone
+knows the current master key: to lock a clone out, the user runs
+`unenrol-and-rotate-master-key` in a terminal.
+
+1. Find the vaults of this clone: each `vaults/vault-*` with a `clone.<name>.key` and a
+   `recipients/<name>.pub`. Show the vault, the name, and "approved" if
+   `recipients/<name>.master.enc` exists, else "request".
+2. Ask the user which vaults to unenrol: one or more, or all.
+3. Unenrol:
+   - All vaults: `$TOOL/run.sh unenrol-all-vaults`.
+   - Some vaults: `$TOOL/run.sh --vault-home vaults/vault-<name> unenrol` for each vault.
+4. Commit and push each changed vault home. Git uses its own credentials, not the vault.
+5. If a push fails, run `git restore recipients/` in that vault home, then stop and tell the
+   user. The vault still opens.
+6. After each push: `$TOOL/run.sh --vault-home vaults/vault-<name> delete-private-clone-key`.
+7. Commit and push the submodule pointers in the root repository, if the user asks.
+
+To unenrol another clone, the user gives the name: `$TOOL/run.sh unenrol <name>`, then commit
+and push. Do not delete a private key of another clone.
+
+## 7. Keys
+
+- List the key passphrases in the OS keyring: `$TOOL/run.sh list-keyring-secrets`. Delete one
+  only if the user asks: `$TOOL/run.sh delete-keyring-secret <name>`. Its key file stops working.
 
 After each change in the vault home, commit and push it in the vault home repository.
 
-## 7. Errors
+## 8. Errors
 
 For each error: stop and ask. Do not use an env var or a file of the machine instead.
 
 | Error | Cause | Action |
 | --- | --- | --- |
 | `no way to open the vault` | No clone key of this clone opens the vault. | Enrol this clone (section 4). |
+| `... is still enrolled ...` | `delete-private-clone-key` before the push of `unenrol`. | Commit and push the vault home first. |
+| `more than one recipient` | This clone has more key files in the vault home. | Show the names and ask which one. |
 | `Skipped keys: ...` | A key file is from another machine, or its keyring entry is missing. | Tell the user. Enrol again with a new name if the user agrees. |
 | `unknown system 'X'` | No entry. | Show the `list` output and ask which system to use, or ask the user to add it. |
 | `secret 'K' is blank and the vault has no value for it` | The key has no value. | Ask the user to fill it. Never use a different secret. |

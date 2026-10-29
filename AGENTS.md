@@ -21,7 +21,7 @@ agents.
 - **browser-automation-facade** — browser automation only through the `playwright-facade` MCP server; placeholders for user data. @rules/browser-automation-facade.md
 
 ### Skills
-- [credentials](skills/credentials/SKILL.md) — get a secret from the vault through the API; enrol a clone; manage keys.
+- [credentials](skills/credentials/SKILL.md) — get a secret from the vault through the API; enrol and unenrol a clone; manage keys.
 - [create-adr](skills/create-adr/SKILL.md) — write an ADR for an ADL entry. Use only when the user asks.
 
 ## Claude Code

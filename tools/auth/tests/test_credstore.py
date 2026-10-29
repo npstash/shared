@@ -54,7 +54,7 @@ def fake(monkeypatch):
 @pytest.fixture
 def home(tmp_path):
     vault = tmp_path / "vault-home"
-    cs.Store(vault, PW).init()
+    cs.Store(vault, PW).create_vault()
     return vault
 
 
@@ -122,7 +122,7 @@ def test_sync_stores_secrets_and_clears_them_in_the_index(home):
     cs.Store(home, PW).sync()
     assert read_index(home) == {SYS: entry(username="", token="")}
     assert b"ghp_x" not in (home / "credentials.enc").read_bytes()
-    c = cs.Store(home, PW).get(SYS)
+    c = cs.Store(home, PW).get_credential(SYS)
     assert dict(c.secrets()) == {"username": "npstash", "token": "ghp_x"}
     assert (c.url, c.authority_info) == ("https://g", ("scope line",))
 
@@ -169,9 +169,9 @@ def test_files_are_rewritten_only_when_contents_change(home):
     cs.Store(home, PW).sync()
     vault, index = stamp(home / "credentials.enc"), stamp(home / "credentials.json")
     cs.Store(home, PW).sync()
-    cs.Store(home, PW).get(SYS)
+    cs.Store(home, PW).get_credential(SYS)
     assert stamp(home / "credentials.enc") == vault and stamp(home / "credentials.json") == index
-    cs.Store(home, PW).set(SYS, secrets={"token": "changed"})
+    cs.Store(home, PW).set_system(SYS, secrets={"token": "changed"})
     assert (home / "credentials.enc").read_bytes() != vault[0]
 
 
@@ -198,24 +198,26 @@ def test_rename_system_keeps_secrets(home, index_name):
     write_index(home, {"old": entry(token="t")})
     cs.Store(home, PW).sync()
     write_index(home, {index_name: entry(token="")})
-    cs.Store(home, PW).rename("old", "new")
-    assert dict(cs.Store(home, PW).get("new").secrets()) == {"token": "t"}
+    cs.Store(home, PW).rename_system("old", "new")
+    assert dict(cs.Store(home, PW).get_credential("new").secrets()) == {"token": "t"}
     assert list(read_index(home)) == ["new"]
 
 
 def test_rename_secret_keeps_value(home):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
-    cs.Store(home, PW).rename(SYS, "pat", secret="token")
-    assert dict(cs.Store(home, PW).get(SYS).secrets()) == {"pat": "t"}
+    cs.Store(home, PW).rename_secret(SYS, "token", "pat")
+    assert dict(cs.Store(home, PW).get_credential(SYS).secrets()) == {"pat": "t"}
 
 
 def test_rename_refuses_conflicts(home):
     write_index(home, {"a": entry(x="1", y="2"), "b": entry(z="3")})
     cs.Store(home, PW).sync()
-    for system, new, secret in (("a", "b", None), ("missing", "c", None), ("a", "", None), ("a", "y", "x")):
+    for system, new in (("a", "b"), ("missing", "c"), ("a", "")):
         with pytest.raises(cs.CredentialError):
-            cs.Store(home, PW).rename(system, new, secret=secret)
+            cs.Store(home, PW).rename_system(system, new)
+    with pytest.raises(cs.CredentialError):
+        cs.Store(home, PW).rename_secret("a", "x", "y")
 
 
 # -- aliases -----------------------------------------------------------------------------
@@ -229,19 +231,19 @@ def test_alias_takes_the_secrets_of_its_target(home):
     write_index(home, {"LDAP": entry(username="u", password="p"), "wiki": alias("LDAP")})
     cs.Store(home, PW).sync()
     assert read_index(home)["wiki"] == alias("LDAP")      # no credentials block of its own
-    c = cs.Store(home, PW).get("wiki")
+    c = cs.Store(home, PW).get_credential("wiki")
     assert (c.name, c.url, c.authority_info) == ("wiki", "https://a", ("alias scope",))
     assert dict(c.secrets()) == {"username": "u", "password": "p"}
     write_index(home, {"LDAP": entry(username="", password="new"), "wiki": alias("LDAP")})
-    assert cs.Store(home, PW).get("wiki").secrets()["password"] == "new"
+    assert cs.Store(home, PW).get_credential("wiki").secrets()["password"] == "new"
 
 
 def test_alias_secrets_add_to_and_replace_the_target_secrets(home):
     write_index(home, {"LDAP": entry(username="u", password="p"), "gh": alias("LDAP", username="x", token="t")})
     cs.Store(home, PW).sync()
     assert read_index(home)["gh"]["credentials"] == {"username": "", "token": ""}
-    assert dict(cs.Store(home, PW).get("gh").secrets()) == {"username": "x", "password": "p", "token": "t"}
-    assert dict(cs.Store(home, PW).get("LDAP").secrets()) == {"username": "u", "password": "p"}
+    assert dict(cs.Store(home, PW).get_credential("gh").secrets()) == {"username": "x", "password": "p", "token": "t"}
+    assert dict(cs.Store(home, PW).get_credential("LDAP").secrets()) == {"username": "u", "password": "p"}
 
 
 @pytest.mark.parametrize("doc", [{"wiki": alias("missing")},
@@ -256,9 +258,9 @@ def test_alias_target_must_exist_and_not_be_an_alias(home, doc):
 def test_set_refuses_an_inherited_secret_of_an_alias(home):
     write_index(home, {"LDAP": entry(password="p"), "gh": alias("LDAP", token="t")})
     with pytest.raises(cs.CredentialError, match="alias of 'LDAP'; set password there"):
-        cs.Store(home, PW).set("gh", secrets={"password": "x"})
-    cs.Store(home, PW).set("gh", url="https://new", secrets={"token": "t2", "extra": "e"})
-    c = cs.Store(home, PW).get("gh")
+        cs.Store(home, PW).set_system("gh", secrets={"password": "x"})
+    cs.Store(home, PW).set_system("gh", url="https://new", secrets={"token": "t2", "extra": "e"})
+    c = cs.Store(home, PW).get_credential("gh")
     assert (c.url, dict(c.secrets())) == ("https://new", {"password": "p", "token": "t2", "extra": "e"})
 
 
@@ -266,10 +268,10 @@ def test_rename_refuses_a_target_with_aliases(home):
     write_index(home, {"LDAP": entry(password="p"), "wiki": alias("LDAP")})
     cs.Store(home, PW).sync()
     with pytest.raises(cs.CredentialError, match="wiki are aliases of it"):
-        cs.Store(home, PW).rename("LDAP", "AD")
-    cs.Store(home, PW).rename("wiki", "docs")
+        cs.Store(home, PW).rename_system("LDAP", "AD")
+    cs.Store(home, PW).rename_system("wiki", "docs")
     assert read_index(home)["docs"]["alias_of"] == "LDAP"
-    assert cs.Store(home, PW).get("docs").secrets()["password"] == "p"
+    assert cs.Store(home, PW).get_credential("docs").secrets()["password"] == "p"
 
 
 def test_list_shows_the_resolved_secrets_of_an_alias(home, capsys):
@@ -286,7 +288,7 @@ def test_error_messages(home):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
     with pytest.raises(cs.CredentialError, match="unknown system 'zz'"):
-        cs.Store(home, PW).get("zz")
+        cs.Store(home, PW).get_credential("zz")
     # CBC carries no MAC, so roughly 0.4% of wrong passphrases pass the padding check and
     # the failure surfaces one step later. Every route gives a clear CredentialError.
     with pytest.raises(cs.CredentialError, match="could not decrypt the master key|"
@@ -301,15 +303,21 @@ def test_cli(home, capsys):
     cs.Store(home, PW).enrol("here", None)                 # the CLI opens the vault with this key
     run = lambda *a: cs.main(["--vault-home", str(home), *a])  # noqa: E731
     write_index(home, {})                                  # drop the example entry of init
-    assert run("set", SYS, "--url", "https://g", "--info", "scope", "--secret", "token=t") == 0
-    assert run("rename", SYS, "--secret", "token=pat") == 0
+    assert run("set-system", SYS, "--url", "https://g", "--info", "scope", "--secret", "token=t") == 0
+    assert run("rename-secret", SYS, "token", "pat") == 0
     capsys.readouterr()
-    assert run("get", SYS, "--secret", "pat") == 0
+    assert run("get-secret", SYS, "pat") == 0
     assert capsys.readouterr().out == "t\n"
+    assert run("get-system", SYS) == 0
+    assert capsys.readouterr().out == f"{SYS}\thttps://g\tpat\n  scope\n"
     assert run("list") == 0
     assert capsys.readouterr().out == f"{SYS}\thttps://g\tpat\n"
-    assert run("get", SYS, "--secret", "nope") == 1
-    assert run("get", "nope") == 1
+    assert run("rename-system", SYS, "other") == 0
+    assert run("get-secret", "other", "nope") == 1
+    assert run("get-system", "nope") == 1
+    for old in ("init", "approve", "revoke", "rotate-key", "key-list", "key-remove", "get", "set", "rename"):
+        with pytest.raises(SystemExit):
+            run(old)                                       # the old names are gone
     with pytest.raises(SystemExit):
         run("--passphrase", PW, "list")                    # the option is gone
 
@@ -317,7 +325,7 @@ def test_cli(home, capsys):
 def test_cli_without_a_key_or_terminal_cannot_open_the_vault(home, capsys):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
-    assert cs.main(["--vault-home", str(home), "get", SYS]) == 1
+    assert cs.main(["--vault-home", str(home), "get-system", SYS]) == 1
     assert "no way to open the vault" in capsys.readouterr().err
 
 
@@ -327,9 +335,9 @@ def test_the_cli_asks_for_the_passphrase_only_in_a_terminal(home, monkeypatch):
     asked = []
     monkeypatch.setattr(cs.getpass, "getpass", lambda prompt: asked.append(prompt) or PW)
     monkeypatch.setattr(cs, "_tty", lambda: False)
-    assert cs.main(["--vault-home", str(home), "get", SYS]) == 1 and not asked
+    assert cs.main(["--vault-home", str(home), "get-system", SYS]) == 1 and not asked
     monkeypatch.setattr(cs, "_tty", lambda: True)
-    assert cs.main(["--vault-home", str(home), "get", SYS]) == 0 and asked == ["Master passphrase: "]
+    assert cs.main(["--vault-home", str(home), "get-system", SYS]) == 0 and asked == ["Master passphrase: "]
 
 
 # -- key rotation ----------------------------------------------------------------------------
@@ -338,35 +346,35 @@ def master_key(home):
     return (home / "master.enc.key").read_bytes()
 
 
-def test_rotate_key_keeps_passphrase_and_secrets(home):
+def test_rotate_master_key_keeps_passphrase_and_secrets(home):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
     old_key, old_vault = master_key(home), (home / "credentials.enc").read_bytes()
 
-    backup = cs.Store(home, PW).rotate_key()
+    backup = cs.Store(home, PW).rotate_master_key()
 
     assert master_key(home) != old_key
     assert (home / "credentials.enc").read_bytes() != old_vault
-    assert dict(cs.Store(home, PW).get(SYS).secrets()) == {"token": "t"}   # same passphrase
+    assert dict(cs.Store(home, PW).get_credential(SYS).secrets()) == {"token": "t"}   # same passphrase
     assert (backup / "master.enc.key").read_bytes() == old_key             # old key kept
     assert cs.decrypt(master_key(home), PW) != cs.decrypt(old_key, PW)     # a genuinely new key
 
 
-def test_rotate_key_needs_the_passphrase_and_rewraps_for_each_clone(home):
+def test_rotate_master_key_needs_the_passphrase_and_rewraps_for_each_clone(home):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
     cs.Store(home, PW).enrol("a", None)
     cs.Store(home, PW).enrol("b", None)
     with pytest.raises(cs.CredentialError, match="needs the master passphrase"):
-        cs.Store(home).rotate_key()                        # a clone key alone cannot write master.enc.key
+        cs.Store(home).rotate_master_key()                        # a clone key alone cannot write master.enc.key
     with pytest.raises(cs.CredentialError, match="does not open master.enc.key"):
-        cs.Store(home, "wrong").rotate_key()
+        cs.Store(home, "wrong").rotate_master_key()
     old = (home / "recipients" / "b.master.enc").read_bytes()
-    cs.Store(home, PW).rotate_key()
+    cs.Store(home, PW).rotate_master_key()
     assert (home / "recipients" / "b.master.enc").read_bytes() != old
     (home / "clone.a.key").unlink()
     store = cs.Store(home)
-    assert dict(store.get(SYS).secrets()) == {"token": "t"} and store.method == "clone-key:b:plain"
+    assert dict(store.get_credential(SYS).secrets()) == {"token": "t"} and store.method == "clone-key:b:plain"
 
 
 def test_change_passphrase_leaves_the_key_and_vault_alone(home):
@@ -380,7 +388,7 @@ def test_change_passphrase_leaves_the_key_and_vault_alone(home):
     assert (home / "credentials.enc").read_bytes() == vault
     with pytest.raises(cs.CredentialError, match="could not decrypt the master key"):
         cs.Store(home, PW).sync()
-    assert dict(cs.Store(home, "brand-new").get(SYS).secrets()) == {"token": "t"}
+    assert dict(cs.Store(home, "brand-new").get_credential(SYS).secrets()) == {"token": "t"}
 
 
 def test_change_passphrase_with_a_clone_key_needs_no_old_passphrase(home):
@@ -394,9 +402,9 @@ def test_change_passphrase_with_a_clone_key_needs_no_old_passphrase(home):
 def test_rotation_and_passphrase_change_combine(home):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
-    cs.Store(home, PW).rotate_key()
+    cs.Store(home, PW).rotate_master_key()
     cs.Store(home, PW).change_passphrase("second")
-    assert dict(cs.Store(home, "second").get(SYS).secrets()) == {"token": "t"}
+    assert dict(cs.Store(home, "second").get_credential(SYS).secrets()) == {"token": "t"}
 
 
 def test_the_tool_never_reads_the_environment(home, monkeypatch):
@@ -404,7 +412,7 @@ def test_the_tool_never_reads_the_environment(home, monkeypatch):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
     with pytest.raises(cs.CredentialError, match="no way to open the vault"):
-        cs.Store(home).get(SYS)         # the variable is set, and ignored
+        cs.Store(home).get_credential(SYS)         # the variable is set, and ignored
     source = Path(cs.__file__).read_text()
     assert not any(call in source for call in ("os.environ", "import environ", "getenv", "import os"))
 
@@ -461,7 +469,7 @@ def test_self_enrolment_with_the_passphrase(home):
         assert key.stat().st_mode & 0o777 == 0o600
     assert {"clone.*.key", "access.log"} <= set((home / ".gitignore").read_text().splitlines())
     store = cs.Store(home)                                  # no passphrase any more
-    assert dict(store.get(SYS).secrets()) == {"token": "t"}
+    assert dict(store.get_credential(SYS).secrets()) == {"token": "t"}
     assert store.method == "clone-key:laptop:plain"
 
 
@@ -472,11 +480,11 @@ def test_a_request_is_approved_in_a_trusted_clone(home, tmp_path):
     name, fp, approved = cs.Store(new).enrol(None, None)   # no passphrase: a request
     assert not approved and re.fullmatch(r"auto-.*-\d{8}(-\d+)?", name)
     with pytest.raises(cs.NoWayToOpen):
-        cs.Store(new).get(SYS)
+        cs.Store(new).get_credential(SYS)
     pull(new, home)
-    assert cs.Store(home).approve(name) == fp               # the fingerprints match
+    assert cs.Store(home).approve_enrol(name) == fp               # the fingerprints match
     pull(home, new)
-    assert dict(cs.Store(new).get(SYS).secrets()) == {"token": "t"}
+    assert dict(cs.Store(new).get_credential(SYS).secrets()) == {"token": "t"}
 
 
 def git(cwd, *args):
@@ -495,7 +503,7 @@ def test_a_request_has_an_inf_file_that_approve_shows(home, tmp_path, capsys, mo
     assert "clone_path" not in info and "repository" not in info   # no git repository: no value
     pull(new, home)
     capsys.readouterr()
-    assert cs.main(["--vault-home", str(home), "approve", "req"]) == 0
+    assert cs.main(["--vault-home", str(home), "approve-enrol", "req"]) == 0
     assert capsys.readouterr().out.startswith(f"approved req\n{info}fingerprint\t{fp}\n")
 
 
@@ -557,44 +565,134 @@ def test_a_provider_keeps_the_key_passphrase(home, fake):
     assert key.startswith(b"credstore-provider: fake\n-----BEGIN ENCRYPTED PRIVATE KEY-----")
     assert list(fake.entries) == ["kr"]
     store = cs.Store(home)
-    assert dict(store.get(SYS).secrets()) == {"token": "t"} and store.method == "clone-key:kr:fake"
+    assert dict(store.get_credential(SYS).secrets()) == {"token": "t"} and store.method == "clone-key:kr:fake"
     fake.entries.clear()
     with pytest.raises(cs.NoWayToOpen, match="Skipped keys: kr: provider 'fake' has no key passphrase"):
-        cs.Store(home).get(SYS)
+        cs.Store(home).get_credential(SYS)
 
 
-def test_key_list_and_key_remove(home, fake):
+def test_list_and_delete_keyring_secrets(home, fake):
     cs.Store(home, PW).enrol("one")
     cs.Store(home, PW).enrol("two")
     fake.set("stale", "x")
     store = cs.Store(home)
-    assert store.key_list() == [("fake", "one"), ("fake", "stale"), ("fake", "two")]
-    assert store.key_remove(["one"]) == [("fake", "one")]
+    assert store.list_keyring_secrets() == [("fake", "one"), ("fake", "stale"), ("fake", "two")]
+    assert store.delete_keyring_secrets(["one"]) == [("fake", "one")]
     assert not (home / "clone.one.key").exists()            # it cannot open any more
-    assert store.key_remove() == [("fake", "stale"), ("fake", "two")]
+    assert store.delete_all_keyring_secrets() == [("fake", "stale"), ("fake", "two")]
     assert fake.entries == {}
 
 
-def test_revoke_rotates_and_locks_the_clone_out(home, tmp_path):
+def test_unenrol_and_rotate_master_key_rotates_and_locks_the_clone_out(home, tmp_path):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
     cs.Store(home, PW).enrol("keep", None)
     lost = clone(home, tmp_path / "lost")
     name = cs.Store(lost).enrol("lost", None)[0]
     pull(lost, home)
-    cs.Store(home).approve(name)
+    cs.Store(home).approve_enrol(name)
     pull(home, lost)
-    assert cs.Store(lost).get(SYS)
+    assert cs.Store(lost).get_credential(SYS)
     with pytest.raises(cs.CredentialError, match="needs the master passphrase"):
-        cs.Store(home).revoke("lost")
+        cs.Store(home).unenrol_and_rotate_master_key("lost")
     assert (home / "recipients" / "lost.pub").exists()     # nothing deleted before the check
     old_master = master_key(home)
-    cs.Store(home, PW).revoke("lost")
+    cs.Store(home, PW).unenrol_and_rotate_master_key("lost")
     assert not list((home / "recipients").glob("lost.*")) and master_key(home) != old_master
     pull(home, lost)
     with pytest.raises(cs.NoWayToOpen):
-        cs.Store(lost).get(SYS)
-    assert cs.Store(home).get(SYS)
+        cs.Store(lost).get_credential(SYS)
+    assert cs.Store(home).get_credential(SYS)
+
+
+def test_unenrol_this_clone_keeps_the_master_key_and_the_private_key(home, tmp_path):
+    write_index(home, {SYS: entry(token="t")})
+    cs.Store(home, PW).enrol("keep", None)
+    gone = clone(home, tmp_path / "gone")
+    cs.Store(gone).enrol("gone", None)
+    pull(gone, home)
+    cs.Store(home).approve_enrol("gone")
+    pull(home, gone)
+    old_master = master_key(home)
+    assert cs.Store(gone).unenrol() == "gone"              # no name: the recipient of this clone
+    assert not list((gone / "recipients").glob("gone.*"))
+    assert (gone / "clone.gone.key").exists() and master_key(gone) == old_master
+    assert log_lines(gone)[-1][1:4] == ["unenrol", "main", '"gone"']
+    with pytest.raises(cs.NoWayToOpen):
+        cs.Store(gone).get_credential(SYS)
+    pull(gone, home)
+    assert cs.Store(home).get_credential(SYS)             # the other clones are not changed
+
+
+def test_unenrol_another_clone_and_a_request(home, tmp_path):
+    cs.Store(home, PW).enrol("trusted", None)
+    other = clone(home, tmp_path / "other")
+    cs.Store(other).enrol("req", None)                     # a request: only .pub and .inf
+    pull(other, home)
+    assert cs.Store(home).unenrol("req") == "req"
+    assert not list((home / "recipients").glob("req.*"))
+    assert (home / "recipients" / "trusted.master.enc").exists()
+    with pytest.raises(cs.CredentialError, match="unknown recipient 'req'"):
+        cs.Store(home).unenrol("req")
+
+
+def test_unenrol_without_a_name_needs_exactly_one_own_recipient(home):
+    with pytest.raises(cs.CredentialError, match="no recipient"):
+        cs.Store(home).unenrol()
+    cs.Store(home, PW).enrol("a", None)
+    cs.Store(home, PW).enrol("b", None)
+    with pytest.raises(cs.CredentialError, match="more than one recipient.*a, b; give a name"):
+        cs.Store(home).unenrol()
+
+
+def test_delete_private_clone_key_only_after_unenrol(home, fake):
+    cs.Store(home, PW).enrol("c")
+    with pytest.raises(cs.CredentialError, match="'c' is still enrolled .*c.pub, c.master.enc"):
+        cs.Store(home).delete_private_clone_key()
+    cs.Store(home).unenrol()
+    assert cs.Store(home).delete_private_clone_key() == "c"
+    assert not (home / "clone.c.key").exists() and fake.entries == {}
+    assert log_lines(home)[-1][1:4] == ["delete-private-clone-key", "main", '"c"']
+    with pytest.raises(cs.CredentialError, match="no private clone key"):
+        cs.Store(home).delete_private_clone_key()
+
+
+def test_delete_private_clone_key_waits_for_the_push(tmp_path):
+    remote, home = tmp_path / "remote.git", tmp_path / "vault"
+    git(tmp_path, "init", "-q", "--bare", str(remote))
+    cs.Store(home, PW).create_vault()
+    cs.Store(home, PW).enrol("c", None)
+    commit = lambda: git(home, "-c", "user.name=t", "-c", "user.email=t@t",  # noqa: E731
+                         "commit", "-q", "--no-verify", "-am", "x")
+    git(home, "init", "-q", "-b", "main")
+    git(home, "add", ".")
+    commit()
+    git(home, "remote", "add", "origin", str(remote))
+    git(home, "push", "-q", "-u", "origin", "main")
+    cs.Store(home).unenrol()
+    commit()
+    with pytest.raises(cs.CredentialError, match="still enrolled .*recipients/c.pub"):
+        cs.Store(home).delete_private_clone_key()        # committed, not pushed
+    git(home, "push", "-q")
+    assert cs.Store(home).delete_private_clone_key() == "c"
+
+
+def test_unenrol_all_vaults(tmp_path, capsys):
+    vaults = tmp_path / "vaults"
+    for name in ("vault-main", "vault-x", "vault-none"):
+        cs.Store(vaults / name, PW).create_vault()
+    cs.Store(vaults / "vault-main", PW).enrol("a", None)
+    cs.Store(vaults / "vault-x", PW).enrol("b", None)
+    cs.Store(vaults / "vault-x", PW).enrol("c", None)
+    assert cs.unenrol_all_vaults(vaults) == [(vaults / "vault-main", "a"), (vaults / "vault-x", "b"),
+                                             (vaults / "vault-x", "c")]
+    assert not list(vaults.glob("*/recipients/*"))
+    with pytest.raises(cs.CredentialError, match="no recipient in a vault"):
+        cs.unenrol_all_vaults(vaults)
+    cs.Store(vaults / "vault-x", PW).enrol("d", None)
+    capsys.readouterr()
+    assert cs.main(["--vault-home", str(vaults / "vault-main"), "unenrol-all-vaults"]) == 0
+    assert capsys.readouterr().out.startswith(f"unenrolled d in {vaults / 'vault-x'}\n")
 
 
 @pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl is not installed")
@@ -654,7 +752,7 @@ def test_access_log(two):
 
 
 def test_cli_get_logs_only_the_secret_it_prints(two, capsys):
-    assert cs.main(["--vault-home", str(two), "get", "jira", "--secret", "password"]) == 0
+    assert cs.main(["--vault-home", str(two), "get-secret", "jira", "password"]) == 0
     assert capsys.readouterr().out == "p\n"
     assert log_lines(two)[-1][1:5] == ["get", "main", '"jira"', "password"]
 
@@ -675,7 +773,7 @@ def test_vault_home_is_found_in_the_working_directory_first(tmp_path, monkeypatc
     assert cs.find_vault_home(tmp_path / "x") == tmp_path / "x"   # an explicit folder is not checked
 
 
-def test_init_writes_a_vault_that_needs_the_secrets_filled_in(home):
+def test_create_vault_writes_a_vault_that_needs_the_secrets_filled_in(home):
     for name in ("master.enc.key", "credentials.json", ".gitignore", ".gitattributes",
                  ".githooks/pre-commit", "setup.sh", "setup.bat"):
         assert (home / name).is_file(), name
@@ -685,29 +783,29 @@ def test_init_writes_a_vault_that_needs_the_secrets_filled_in(home):
     with pytest.raises(cs.CredentialError, match="blank and the vault has no value"):
         cs.Store(home, PW).sync()
     write_index(home, {SYS: entry(token="t")})
-    assert dict(cs.Store(home, PW).get(SYS).secrets()) == {"token": "t"}
+    assert dict(cs.Store(home, PW).get_credential(SYS).secrets()) == {"token": "t"}
 
 
-def test_init_refuses_an_existing_vault(home):
+def test_create_vault_refuses_an_existing_vault(home):
     with pytest.raises(cs.CredentialError, match="a vault exists already"):
-        cs.Store(home, PW).init()
+        cs.Store(home, PW).create_vault()
 
 
-def test_init_defaults_to_vaults_vault_main_in_the_working_directory(tmp_path, monkeypatch):
+def test_create_vault_defaults_to_vaults_vault_main_in_the_working_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cs, "_prompt_new_passphrase", lambda: PW)
-    assert cs.main(["init"]) == 0
+    assert cs.main(["create-vault"]) == 0
     assert (tmp_path / "vaults" / "vault-main" / "master.enc.key").is_file()
 
 
 def test_backups_go_to_the_tool_folder_not_the_vault(home, tmp_path):
     write_index(home, {SYS: entry(token="t")})
     cs.Store(home, PW).sync()
-    backup = cs.Store(home, PW).rotate_key()
+    backup = cs.Store(home, PW).rotate_master_key()
     assert backup.parent == tmp_path / "backups" and not (home / ".local_assets").exists()
 
 
-def test_init_copies_the_setup_scripts_of_the_shared_repository(home):
+def test_create_vault_copies_the_setup_scripts_of_the_shared_repository(home):
     for source in cs.SETUP:
         assert (home / source.name).read_bytes() == source.read_bytes(), source.name
 
@@ -807,11 +905,11 @@ def test_the_keyring_provider_reports_a_missing_keyring(monkeypatch):
     assert not cs.KeyringProvider().available()
 
 
-def test_rotate_key_keeps_the_order_of_the_index(home):
+def test_rotate_master_key_keeps_the_order_of_the_index(home):
     write_index(home, {"b": entry(token="1"), "a": entry(token="2")})
     cs.Store(home, PW).sync()
     before = (home / "credentials.json").read_bytes()
-    cs.Store(home, PW).rotate_key()
+    cs.Store(home, PW).rotate_master_key()
     assert (home / "credentials.json").read_bytes() == before
 
 

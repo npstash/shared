@@ -50,4 +50,4 @@ Then run `setup.sh` (or `setup.bat`) of the repository root. It links the skill 
 3. Add `shared/AGENTS.md` and `shared/rules/*.md` to `instructions` in `.kilo/kilo.jsonc`.
 4. Copy [setup.sh](../setup.sh) and [setup.bat](../setup.bat) to the root, and run one.
 5. Do the `requires` of each rule. For the vault, add a vault home repository that
-   `tools/auth/run.sh init` makes.
+   `tools/auth/run.sh create-vault` makes.

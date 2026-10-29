@@ -35,7 +35,7 @@ Each clone opens the vault with its own key pair. Do not copy the master key to 
   log line add them if they are missing.
 - The pre-commit hook stops a commit of `clone.*.key`, `access.log` and `master.key`.
 - An approved recipient has `<name>.pub` and `<name>.master.enc`. A request has only `<name>.pub`.
-  Both can also have `<name>.inf`. `revoke` deletes it with the other two files.
+  Both can also have `<name>.inf`. `unenrol` deletes it with the other two files.
 
 ## Key files
 
@@ -136,23 +136,35 @@ clone, use a separate vault, e.g. `vaults/vault-<project>`.
 
 | Command | Needs | Effect |
 | --- | --- | --- |
-| `init` | new passphrase (TTY, typed twice) | Makes a new master key, `master.enc.key` and vault. |
+| `create-vault` | new passphrase (TTY, typed twice) | Makes a new master key, `master.enc.key` and vault. |
 | `enrol [NAME]` | passphrase (TTY), optional | Makes a key pair for this clone. See "Enrolment". |
-| `approve NAME` | clone key | Writes the wrapped master key for `recipients/NAME.pub`. Prints the fingerprint: `SHA256:` and the base64 SHA-256 of the DER public key. |
-| `rotate-key` | clone key or passphrase to open; passphrase (TTY) to write | Makes a new master key. Wraps it for each approved recipient and with the passphrase. |
-| `revoke NAME` | as `rotate-key` | Deletes the files of `NAME` in `recipients/`, then rotates the master key. |
+| `approve-enrol NAME` | clone key | Writes the wrapped master key for `recipients/NAME.pub`. Prints the fingerprint: `SHA256:` and the base64 SHA-256 of the DER public key. |
+| `unenrol [NAME]` | nothing | Deletes the files of `NAME` in `recipients/`. Without `NAME`: the recipient of this clone. See "Unenrolment". |
+| `unenrol-all-vaults` | nothing | Runs `unenrol` for each recipient of this clone in each `vault-*` folder beside the vault home. |
+| `delete-private-clone-key [NAME]` | nothing | Deletes `clone.NAME.key` and its key passphrase. Without `NAME`: the one key file of this clone. |
+| `rotate-master-key` | clone key or passphrase to open; passphrase (TTY) to write | Makes a new master key. Wraps it for each approved recipient and with the passphrase. |
+| `unenrol-and-rotate-master-key NAME` | as `rotate-master-key` | Deletes the files of `NAME` in `recipients/`, then rotates the master key. |
 | `change-passphrase` | clone key or old passphrase (TTY); new passphrase (TTY, typed twice) | Encrypts `master.enc.key` with the new passphrase. |
-| `key-list` | nothing | Lists the key passphrases of this tool in each available provider: provider and name. |
-| `key-remove NAME ... \| --all` | nothing | Deletes key passphrases of this tool from the providers, and the key files of this clone that they open. |
-| `sync`, `list`, `get`, `set`, `rename` | as before | As before. |
+| `list-keyring-secrets` | nothing | Lists the key passphrases of this tool in each available provider: provider and name. |
+| `delete-keyring-secret NAME ...` | nothing | Deletes these key passphrases from the providers, and the key files of this clone that they open. |
+| `delete-all-keyring-secrets` | nothing | Deletes each key passphrase of this tool from the providers, and the key files of this clone that they open. |
+| `sync`, `list` | as before | As before. |
+| `get-system NAME` | as `sync` | Prints the url, the secret names and the authority info. No values, no log line. |
+| `get-secret NAME KEY` | as `sync` | Prints one secret value. Logs only that secret. |
+| `set-system`, `rename-system`, `rename-secret` | as `sync` | Change a system or a secret name. |
 
-- `get` stays in the CLI.
+- `get-secret` stays in the CLI.
+- An option does not change what a command does. A different behaviour is a different command.
+- The Python API has the same names, e.g. `Store.approve_enrol()` and `unenrol_all_vaults()`.
 - A command that needs the passphrase works only in a terminal of the user, or through the
   `passphrase=` parameter of the API.
-- `revoke` always rotates the master key. Thus it needs the passphrase.
-- `rotate-key` and `revoke` change the approved recipients only. A request stays a request.
+- `unenrol-and-rotate-master-key` always rotates the master key. Thus it needs the passphrase.
+- `unenrol` does not rotate. Thus it needs no passphrase, and each clone can run it.
+- `rotate-master-key` and `unenrol-and-rotate-master-key` change the approved recipients only.
+  A request stays a request.
 - `change-passphrase` gets the master key from a clone key or from the old passphrase.
-- After `enrol`, `approve`, `rotate-key` and `revoke`, commit and push the vault home.
+- After `enrol`, `approve-enrol`, `unenrol`, `rotate-master-key` and
+  `unenrol-and-rotate-master-key`, commit and push the vault home.
 
 ## Enrolment
 
@@ -184,10 +196,29 @@ If `clone.<name>.key` exists in the vault home, `enrol` uses it and makes no new
 ### Approval of a request
 
 1. The new clone commits and pushes `recipients/<name>.pub` and `recipients/<name>.inf`.
-2. A trusted clone pulls, then runs `approve <name>`. It prints the `.inf` and the fingerprint.
-   Compare the fingerprint with the fingerprint from `enrol`.
+2. A trusted clone pulls, then runs `approve-enrol <name>`. It prints the `.inf` and the
+   fingerprint. Compare the fingerprint with the fingerprint from `enrol`.
 3. The trusted clone commits and pushes `recipients/<name>.master.enc`.
 4. The new clone pulls. Then the vault opens.
+
+## Unenrolment
+
+`unenrol` removes a recipient without a new master key. Each clone can unenrol itself or another
+recipient. A clone that can push to the vault home can also delete the files with git.
+
+1. `unenrol [NAME]` deletes `recipients/<name>.pub`, `.master.enc` and `.inf`. It works for an
+   approved recipient and for a request. Without `NAME`, it uses the recipient of the one
+   `clone.<name>.key` in the vault home. If there are more key files, give the name.
+2. Commit and push the vault home. Git uses its own credentials, not the vault.
+3. `delete-private-clone-key [NAME]` deletes `clone.<name>.key` and its key passphrase in the
+   provider. It refuses while `recipients/<name>.pub` or `.master.enc` exists in the vault home,
+   or in the upstream branch of the vault home.
+
+- If the push fails, restore the files with `git restore recipients/`. The private key still
+  opens the vault.
+- `unenrol-all-vaults` does step 1 in each vault. The skill does steps 2 and 3 in each vault.
+- `unenrol` does not lock a clone out. The clone knows the current master key, and git history
+  keeps its `<name>.master.enc`. To lock a clone out, use `unenrol-and-rotate-master-key`.
 
 ## Providers
 
@@ -242,24 +273,24 @@ time	event	vault	system	secrets	method	caller
 | Field | Values |
 | --- | --- |
 | UTC time | ISO 8601. |
-| event | `get`, `enrol`, `approve`, `revoke`, `rotate-key`, `change-passphrase`, `key-remove`, `open-failed`. |
+| event | `get`, `enrol`, `approve-enrol`, `unenrol`, `delete-private-clone-key`, `unenrol-and-rotate-master-key`, `rotate-master-key`, `change-passphrase`, `delete-keyring-secret`, `open-failed`. Logs from before 2026-10-29 also have `approve`, `revoke`, `rotate-key` and `key-remove`. |
 | vault | Always `main`. The column stays for the format of existing logs. |
-| system | The system name in quotes, or `""`. For `enrol`, `approve`, `revoke` and `key-remove`: the recipient name. |
+| system | The system name in quotes, or `""`. For the events about recipients and keys: the recipient name. |
 | secrets | The names of the secrets given out, separated by commas, or empty. |
 | method | `passphrase`, or `clone-key:<name>:<plain\|provider>`: the key of `<name>`. |
 | caller | A file name in quotes. No path, arguments or function. |
 
 The method identifies the key. One name is one key. A new key with the same name comes after
-a `revoke` and an `enrol` line. The log shows no key IDs.
+an `unenrol` and an `enrol` line. The log shows no key IDs.
 
 Example:
 
 ```
 time	event	vault	system	secrets	method	caller
 2026-10-19T18:30:02Z	enrol	main	"laptop"			"bash"
-2026-10-19T18:30:04Z	approve	main	"laptop"		passphrase	"bash"
+2026-10-19T18:30:04Z	approve-enrol	main	"laptop"		passphrase	"bash"
 2026-10-19T18:30:06Z	get	main	"jira"	password	clone-key:laptop:keyring	"sync.py"
-2026-10-19T18:33:00Z	key-remove	main	"laptop"		keyring	"bash"
+2026-10-19T18:33:00Z	delete-keyring-secret	main	"laptop"		keyring	"bash"
 2026-10-19T18:34:00Z	open-failed	main	""			"bash"
 ```
 
@@ -276,22 +307,25 @@ The log of a cloud clone is lost with the clone.
 - A cloud clone enrols like a local clone. No environment variable is used.
 - Cowork cloud has no terminal. Thus its clone cannot self-enrol:
   1. The `credentials` skill runs `enrol` with no name. It commits and pushes the request.
-  2. A trusted clone runs `approve`, then commits and pushes.
+  2. A trusted clone runs `approve-enrol`, then commits and pushes.
   3. The cloud clone pulls.
 - Later, an agent with a trusted clone can do step 2 automatically. That agent is not part of
   this design.
 - A persistent Cowork session keeps its key file.
 - A clone that a schedule makes again needs a new enrolment.
-- Remove old recipients with `revoke`, one at a time, in a terminal.
+- A cloud clone unenrols itself at the end of its work: `unenrol` or `unenrol-all-vaults`,
+  commit and push, then `delete-private-clone-key`. See "Unenrolment".
 
 ## Skills
 
 ### credentials
 
-- It runs only commands that need no passphrase: `enrol` (request), `approve`, `sync`, `list`,
-  `get`, `set`, `rename`, `key-list` and `key-remove`.
-- For `init`, self-enrolment, `rotate-key`, `revoke` and `change-passphrase`, it tells the user
-  the command to run in a terminal.
+- It runs only commands that need no passphrase: `enrol` (request), `approve-enrol`,
+  `unenrol`, `unenrol-all-vaults`, `delete-private-clone-key`, `sync`, `list`, `get-system`,
+  `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`,
+  `delete-keyring-secret` and `delete-all-keyring-secrets`.
+- For `create-vault`, self-enrolment, `rotate-master-key`, `unenrol-and-rotate-master-key` and
+  `change-passphrase`, it tells the user the command to run in a terminal.
 - It explains how a script gets secrets through the API.
 - It does not use `CREDSTORE_PASSPHRASE`.
 
@@ -304,7 +338,7 @@ The log of a cloud clone is lost with the clone.
 ## Migration
 
 - There is no migration command.
-- After the change, run `rotate-key` once in a terminal. Copies of `master.key` exist on many
+- After the change, run `rotate-master-key` once in a terminal. Copies of `master.key` exist on many
   clones, and the rotation makes them unusable.
 - Old versions of `credentials.enc` stay in git history. An old `master.key` opens them. Change
   those secrets at the source if necessary.
@@ -312,7 +346,7 @@ The log of a cloud clone is lost with the clone.
 ## Limits
 
 - A process of the same user can read a plain key file, and can read the keyring.
-- `get` in the CLI and the rule against secrets in a transcript prevent accidents. They do not
+- `get-secret` in the CLI and the rule against secrets in a transcript prevent accidents. They do not
   stop an agent that writes a script.
 - A revoked clone keeps each secret value from before the revocation. Change those secrets at
   the source if necessary.

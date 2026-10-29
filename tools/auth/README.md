@@ -38,13 +38,13 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 
 The two files mirror each other, secret values excepted. `credentials.json` decides which
 systems and secrets exist. A blank secret keeps the stored value. A blank secret with no
-stored value is an error. Use `rename` to change a name.
+stored value is an error. Use `rename-system` or `rename-secret` to change a name.
 
 ## Aliases
 
 Give `"alias_of": "TARGET"` to a system to use the secrets of `TARGET`. The secrets of
 the alias add to the target secrets, or replace them. The alias keeps its own `url` and
-`authority_info`. `get` and `list` show the resolved secrets.
+`authority_info`. `get-system`, `get-secret` and `list` show the resolved secrets.
 
 ```json
 {
@@ -58,8 +58,8 @@ the alias add to the target secrets, or replace them. The alias keeps its own `u
 ```
 
 - The target must exist and must not be an alias.
-- `set` refuses a secret that the alias takes from the target. Set it on the target.
-- `rename` refuses a target that has aliases.
+- `set-system` refuses a secret that the alias takes from the target. Set it on the target.
+- `rename-system` refuses a target that has aliases.
 
 ## Opening the vault
 
@@ -74,24 +74,35 @@ opens the vault there.
 ## Commands
 
 ```bash
-run.sh init                         # new vault; asks for a new passphrase
-run.sh enrol [NAME]                 # key pair for this clone; see "Enrolment"
-run.sh approve NAME                 # in a trusted clone: approve a request
-run.sh revoke NAME                  # delete a recipient, new master key; needs the passphrase
-run.sh rotate-key                   # new master key, same passphrase; needs the passphrase
-run.sh change-passphrase            # new passphrase, same master key
-run.sh key-list                     # key passphrases of this tool in the OS keyring
-run.sh key-remove NAME ... | --all  # delete them, and the key files they open
-run.sh sync                         # mirror credentials.json into the vault
-run.sh list                         # name, url, secret names; no key needed
-run.sh get NAME [--secret KEY]
-run.sh set NAME [--url U] [--info LINE ...] [--secret KEY=VALUE ...]
-run.sh rename NAME NEW | rename NAME --secret OLD=NEW
+run.sh create-vault                      # new vault; asks for a new passphrase
+run.sh enrol [NAME]                      # key pair for this clone; see "Enrolment"
+run.sh approve-enrol NAME                # in a trusted clone: approve a request
+run.sh unenrol [NAME]                    # delete the recipient files; see "Unenrolment"
+run.sh unenrol-all-vaults                # unenrol this clone in each vault in vaults/
+run.sh delete-private-clone-key [NAME]   # after the push of unenrol
+run.sh unenrol-and-rotate-master-key NAME  # unenrol, new master key; needs the passphrase
+run.sh rotate-master-key                 # new master key, same passphrase; needs the passphrase
+run.sh change-passphrase                 # new passphrase, same master key
+run.sh list-keyring-secrets              # key passphrases of this tool in the OS keyring
+run.sh delete-keyring-secret NAME ...    # delete them, and the key files they open
+run.sh delete-all-keyring-secrets        # delete all of them, and the key files they open
+run.sh sync                              # mirror credentials.json into the vault
+run.sh list                              # name, url, secret names; no key needed
+run.sh get-system NAME                   # url, secret names, authority info; no values
+run.sh get-secret NAME KEY               # print one secret value
+run.sh set-system NAME [--url U] [--info LINE ...] [--secret KEY=VALUE ...]
+run.sh rename-system NAME NEW
+run.sh rename-secret NAME OLD NEW
 run.sh --vault-home DIR ...
 ```
 
-After `enrol`, `approve`, `revoke`, `rotate-key` and `sync`, commit and push
-the vault home.
+`NAME` of `unenrol` and `delete-private-clone-key` is optional. Without it, the command uses
+the recipient of this clone: the one `clone.<name>.key` in the vault home.
+
+After `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
+`rotate-master-key` and `sync`, commit and push the vault home.
+
+The Python API has the same names, e.g. `Store.approve_enrol()` and `unenrol_all_vaults()`.
 
 ## Enrolment
 
@@ -106,23 +117,42 @@ Each clone gets its own key pair. Do not copy keys between clones.
   See [docs/clone-keys.md](docs/clone-keys.md#generated-names).
 - **Clone information:** each `enrol` writes `recipients/<name>.inf` beside the `.pub`.
 - **Approval of a request:** push `recipients/<name>.pub` and `recipients/<name>.inf`. In a
-  trusted clone, pull and run `run.sh approve <name>`. It shows the `.inf`. Compare the
+  trusted clone, pull and run `run.sh approve-enrol <name>`. It shows the `.inf`. Compare the
   fingerprint with the one from `enrol`. Push. Pull in the new clone.
 
 The tool sets mode 600 on each key file. If WSL ignores file modes on `/mnt/<drive>`, the tool
 shows the fix: `options = "metadata"` under `[automount]` in `/etc/wsl.conf`, then
 `wsl --shutdown`.
 
-## Rotation and revocation
+## Unenrolment
 
-`rotate-key` makes a new master key. It wraps the key for each approved recipient and with the
-passphrase. `revoke NAME` deletes the recipient, then rotates.
+`unenrol` deletes `recipients/<name>.pub`, `.master.enc` and `.inf`. It needs no passphrase and
+does not change the master key. It works for an approved recipient and for a request.
+
+1. `run.sh unenrol`: the recipient of this clone. `run.sh unenrol NAME`: any recipient.
+2. Commit and push the vault home.
+3. `run.sh delete-private-clone-key`: it deletes `clone.<name>.key` and its key passphrase.
+   It refuses while the recipient files are in the vault home or in its upstream branch.
+
+`unenrol-all-vaults` does step 1 in each `vault-*` folder beside the vault home. Then do steps
+2 and 3 in each vault home.
+
+If the push fails, restore the files with `git restore recipients/`. The private key still opens
+the vault.
+
+An unenrolled clone knows the current master key, and git history keeps its
+`<name>.master.enc`. To lock a clone out, use `unenrol-and-rotate-master-key`.
+
+## Rotation
+
+`rotate-master-key` makes a new master key. It wraps the key for each approved recipient and
+with the passphrase. `unenrol-and-rotate-master-key NAME` unenrols the recipient, then rotates.
 Both need the passphrase, so run them in a terminal. `change-passphrase` encrypts
 `master.enc.key` with a new passphrase. Each copies the files into `.local_assets/` of this
 folder first.
 
-A revoked clone keeps the secret values from before the revocation, and git history keeps
-old vault files. Change those secrets at the source if necessary.
+A clone that is unenrolled keeps the secret values from before the rotation, and git history
+keeps old vault files. Change those secrets at the source if necessary.
 
 ## Reading the vault without this tool
 
