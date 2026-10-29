@@ -1,6 +1,6 @@
 # Clone keys — design
 
-Status: implemented in [credstore.py](../src/credstore.py). Decisions: [ADL.md](../ADL.md), entries from `20261019-170505-00`.
+Status: implemented in [credstore.py](../src/credstore.py). Decisions: [ADL.md](../ADL.md), entries from `20261019-01`.
 
 Each clone opens the vault with its own key pair. Do not copy the master key to a clone.
 

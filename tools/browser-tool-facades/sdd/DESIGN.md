@@ -235,7 +235,7 @@ Manual test: see [playwright/README.md](../playwright/README.md#tests), and run 
 
 All decisions are in [ADL.md](ADL.md).
 
-- [ADR-20261028-174038-00](adr/ADR-20261028-174038-00.md): one folder for each facade, shared
+- [ADR-20261028-facade_folders](adr/ADR-20261028-facade_folders.md): one folder for each facade, shared
   providers and config.
 
 ## 11. Open issues

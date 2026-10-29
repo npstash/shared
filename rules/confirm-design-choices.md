@@ -13,5 +13,5 @@ structure, dependency, interface, unspecified behaviour. If a request leaves a c
 open, or you cannot do it as stated, stop. Give the options and their consequences,
 then wait. A choice that you mention after you apply it is not confirmed.
 
-**Unattended runs** (scheduled or cloud, e.g. a Cowork cloud session): generate the
-decisions. Record them as the rule [architecture-decision-log](architecture-decision-log.md) says.
+**Unattended runs** (scheduled or cloud, e.g. a Cowork cloud session): take the actions.
+Record them as the rule [architecture-decision-log](architecture-decision-log.md) says.

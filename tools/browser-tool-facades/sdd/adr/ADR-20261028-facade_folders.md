@@ -1,7 +1,6 @@
-# ADR-20261028-174038-00 — One folder for each facade, shared providers and config
+# ADR-20261028-facade_folders — One folder for each facade, shared providers and config
 
-- ADL entry: `20261028-174038-00` in [ADL.md](../ADL.md)
-- Type: authored
+- ADL entry: `20261028-02` in [ADL.md](../ADL.md)
 - Name: Nestor
 - Commit: 14e8c70de325
 - Status: Accepted
@@ -11,7 +10,7 @@
 The tool started as one facade: the Playwright facade (`claude-tool_playwright-facade`). Some
 sites block the automated browser of Playwright, but open in the browser that Claude uses in a
 chat of the Claude desktop app. A facade for that browser tool is planned
-([ADL 20261028-171454-00](../ADL.md)). The tool was renamed to `browser-tool-facades`.
+([ADL 20261028-01](../ADL.md)). The tool was renamed to `browser-tool-facades`.
 
 A facade adds tool switches, placeholders for form values, host lists and a log to a browser
 tool. Most of this does not depend on the browser tool:
@@ -42,11 +41,11 @@ Option b.
   `tests/`, `docs/` and `README.md`.
 - All facades share `providers-form-fill/` (renamed from `providers/`), `config/facade.ini`,
   `config/hosts.ini`, the code in `src/`, the launcher and the runtime
-  ([ADL 20261028-174038-01](../ADL.md)).
+  ([ADL 20261028-03](../ADL.md)).
 - The shared code takes the parts that depend on the browser tool as parameters: the dangerous
   tools (`ToolsConfig`) and the fill arguments (`FillRegistry`).
 - The first argument of `run.sh` / `run.bat` selects the facade, e.g. `run.sh playwright`
-  ([ADL 20261028-174038-02](../ADL.md)).
+  ([ADL 20261028-04](../ADL.md)).
 
 ## Consequences
 
@@ -64,11 +63,11 @@ Option b.
 
 ## Related ADL items
 
-- `20261028-171454-00` Hold facades for more browser tools in this tool
-- `20261028-174038-01` Share config, launcher, runtime and core code; keep tools.ini, dangerous
+- `20261028-01` Hold facades for more browser tools in this tool
+- `20261028-03` Share config, launcher, runtime and core code; keep tools.ini, dangerous
   tools and fill arguments in each facade
-- `20261028-174038-02` Select the facade with the first argument of run.sh / run.bat
-- `20261025-205943-09` Give each fill provider its own folder and its own committed config file
+- `20261028-04` Select the facade with the first argument of run.sh / run.bat
+- `20261025-10` Give each fill provider its own folder and its own committed config file
 
 ## Related Design items
 

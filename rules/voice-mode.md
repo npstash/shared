@@ -32,5 +32,5 @@ wrong names, wrong technical terms, missing or wrong punctuation, words of the o
 - Ask one question in each reply. Get the answer, then ask the next question. Give the options as short words.
 - Do not use code blocks, tables, lists, headings, links or file paths.
 - For long output, say a short summary. Say where the full output is, for example a file or a commit.
-- Do not say the list of generated decisions (rule [decision-gates](decision-gates.md)).
+- Do not say the list of actions taken (rule [decision-gates](decision-gates.md)).
 - When the user confirms a decision, do not repeat the decision. Continue with the next step.
