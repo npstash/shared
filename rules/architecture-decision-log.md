@@ -16,12 +16,15 @@ that item. Create `ADL.md` with the first decision.
 - 20261004-224512-01 generated Opus-5.5 4abf63da3ce0 Run the import as a weekly job
 ```
 
+- Record only accepted decisions. Add the entry when the design documents and the code show
+  the decision. Do not record a proposed decision; write a proposed ADR for it (see "ADR").
 - Record only architectural decisions and business rules. Skip decisions about file
   organisation, source control, versions, configuration values, development tooling and
   documentation.
 - Write one line for each decision: `- <id> <type> <name> <commit> <decision>`.
   Separate the fields with one space. Only `<decision>` can contain spaces.
   - `id`: the UTC time of the decision, `yyyymmdd-hhmmss-xx`. It identifies the entry.
+    For a decision from a proposed ADR, use the ID of the ADR.
   - `xx`: a counter for entries with the same time, from `00`. After `99`, add digits.
   - `type`: `authored` for a user decision, `generated` for a generated decision. See
     [agent-identity](agent-identity.md).
@@ -32,12 +35,16 @@ that item. Create `ADL.md` with the first decision.
     at the time of the decision. For an entry from before the item moved to this
     repository, use the last commit of the earlier repository.
   - `decision`: the decision only. Do not write reasons, options or other metadata.
-- Keep the lines sorted by ID. Never change or delete a line. If a decision changes, add
-  a new line.
+- Keep the lines sorted by ID. Put an entry with the ID of an ADR at its sorted position.
+- Never change or delete a line. If a decision changes, add a new line.
 
 ## ADR
 
 - Write an ADR only when the user asks. Use the `create-adr` skill.
 - Put it into `adr/ADR-<id>.md` beside the `ADL.md`. `<id>` is the ID of the ADL entry.
+- A proposed ADR has the status `Proposed` and no ADL entry. Its `<id>` is the UTC time of
+  the proposal, in the format of the ADL ID.
+- When the user accepts a proposed ADR, set its status to `Accepted`. Update the design
+  documents. Then add the ADL entry with the ID of the ADR.
 - Suggest an ADR for a decision that changes the architecture much and changes earlier
   decisions.
