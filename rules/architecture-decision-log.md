@@ -36,7 +36,10 @@ that item. Create `ADL.md` with the first decision.
     repository, use the last commit of the earlier repository.
   - `decision`: the decision only. Do not write reasons, options or other metadata.
 - Keep the lines sorted by ID. Put an entry with the ID of an ADR at its sorted position.
-- Never change or delete a line. If a decision changes, add a new line.
+- The ADL is a record of the decisions, not a description of the current system. If a
+  decision changes, add a new line. Do not change or delete the line of the earlier decision.
+- You can correct a line, e.g. a typo or a commit ID that a rebase changed. A correction
+  must not change the decision.
 
 ## ADR
 
