@@ -22,9 +22,11 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 
 ## Finding the vault
 
-1. `--vault-home DIR` (CLI) or `vault_home=` (Python), if given.
-2. Else `./vaults/vault-main` in the working directory.
-3. Else `vaults/vault-main` in this folder.
+- Python: give `vault_home`. It has no default.
+- CLI: give `--vault-home DIR`. Without it, the CLI finds `vault-main` as the rule
+  [submodule-dependencies](../../rules/submodule-dependencies.md) says. It starts in this folder.
+  See [dependencies.txt](../../dependencies.txt) of the repository shared.
+- `create-vault` needs `--vault-home`.
 
 ```json
 {
@@ -78,7 +80,6 @@ run.sh create-vault                      # new vault; asks for a new passphrase
 run.sh enrol [NAME]                      # key pair for this clone; see "Enrolment"
 run.sh approve-enrol NAME                # in a trusted clone: approve a request
 run.sh unenrol [NAME]                    # delete the recipient files; see "Unenrolment"
-run.sh unenrol-all-vaults                # unenrol this clone in each vault in vaults/
 run.sh delete-private-clone-key [NAME]   # after the push of unenrol
 run.sh unenrol-and-rotate-master-key NAME  # unenrol, new master key; needs the passphrase
 run.sh rotate-master-key                 # new master key, same passphrase; needs the passphrase
@@ -102,7 +103,7 @@ the recipient of this clone: the one `clone.<name>.key` in the vault home.
 After `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
 `rotate-master-key` and `sync`, commit and push the vault home.
 
-The Python API has the same names, e.g. `Store.approve_enrol()` and `unenrol_all_vaults()`.
+The Python API has the same names, e.g. `Store.approve_enrol()` and `Store.unenrol()`.
 
 ## Enrolment
 
@@ -133,9 +134,6 @@ does not change the master key. It works for an approved recipient and for a req
 2. Commit and push the vault home.
 3. `run.sh delete-private-clone-key`: it deletes `clone.<name>.key` and its key passphrase.
    It refuses while the recipient files are in the vault home or in its upstream branch.
-
-`unenrol-all-vaults` does step 1 in each `vault-*` folder beside the vault home. Then do steps
-2 and 3 in each vault home.
 
 If the push fails, restore the files with `git restore recipients/`. The private key still opens
 the vault.
@@ -182,7 +180,7 @@ root):
 ```python
 from credstore import get_credential, list_systems
 c = get_credential("Github npstash/all 01", vault_home="vaults/vault-main")     # clone key
-c = get_credential("jira", passphrase=value_the_script_asked_for)        # no clone key
+c = get_credential("jira", home, passphrase=value_the_script_asked_for)  # no clone key
 c.url, c.authority_info, c.secrets()["token"]   # secrets() is an immutable map
 ```
 

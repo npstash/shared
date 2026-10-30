@@ -1,0 +1,4 @@
+# Folders of the shareable submodules that shared uses (rule submodule-dependencies).
+[vault-main]
+../vaults/vault-main
+../vault-main

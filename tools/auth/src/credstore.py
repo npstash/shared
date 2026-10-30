@@ -1,7 +1,8 @@
 """credstore - credential vault for the tools in this repository.
 
-Design: docs/clone-keys.md. The vault home (--vault-home, default: ./vaults/vault-main, then
-<this folder>/vaults/vault-main) holds:
+Design: docs/clone-keys.md. The vault home holds the files below. The API needs it. The CLI
+takes --vault-home; without it, the CLI finds vault-main with dependencies.py (rule
+submodule-dependencies).
 
 credentials.json        committed index: system -> url, authority_info, credentials (values cleared)
 credentials.enc         committed vault: the same document, with secret values, encrypted with
@@ -25,7 +26,7 @@ A system with "alias_of" takes the secrets of its target. Its own secrets add to
 replace them. get_credential() and list give the resolved secrets.
 
     from credstore import get_credential          # PYTHONPATH must include this folder
-    c = get_credential("jira", vault_home="vault-home"); c.secrets()["token"]
+    c = get_credential("jira", "vaults/vault-main"); c.secrets()["token"]
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import getpass
+import importlib.util
 import io
 import ipaddress
 import json
@@ -52,7 +54,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
-VAULT_DIR = "vaults/vault-main"       # the default vault home, looked up by find_vault_home()
+DEFAULT_VAULT = "vault-main"          # the vault of the CLI without --vault-home
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that create-vault puts next to a new vault
 SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # create-vault copies them too
@@ -651,16 +653,15 @@ def _log(home: Path, event: str, system: str = "", secrets=(), method: str = "")
 
 # -- the store ------------------------------------------------------------------------------
 
-def find_vault_home(vault_home: Path | str | None = None) -> Path:
-    """The given folder, else ./vaults/vault-main, else vaults/vault-main next to this script."""
-    if vault_home:
-        return Path(vault_home)
-    for candidate in (Path.cwd() / VAULT_DIR, TOOL / VAULT_DIR):
-        if candidate.is_dir():
-            return candidate
-    raise CredentialError(
-        f"no vault found in ./{VAULT_DIR} or {TOOL / VAULT_DIR} - "
-        f"give its folder with --vault-home DIR, or create one with create-vault")
+def default_vault_home() -> Path:
+    """The folder of DEFAULT_VAULT, found by dependencies.py from the folder of this tool."""
+    spec = importlib.util.spec_from_file_location("credstore_dependencies", TOOL / "src" / "dependencies.py")
+    dependencies = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(dependencies)
+    try:
+        return dependencies.find(DEFAULT_VAULT, start=TOOL)
+    except dependencies.DependencyError as exc:
+        raise CredentialError(f"{exc}\ngive the vault home with --vault-home DIR") from None
 
 
 class Store:
@@ -670,9 +671,11 @@ class Store:
     for it in a terminal.
     """
 
-    def __init__(self, vault_home: Path | str | None = None, passphrase: str | None = None,
+    def __init__(self, vault_home: Path | str, passphrase: str | None = None,
                  interactive: bool = False):
-        self.home = find_vault_home(vault_home)
+        if not vault_home:
+            raise CredentialError("give the vault home")
+        self.home = Path(vault_home)
         self.index = self.home / "credentials.json"
         self.vault = self.home / "credentials.enc"
         self.recipients = self.home / RECIPIENTS
@@ -1158,28 +1161,14 @@ def _yes(question: str, default: bool) -> bool:
     return default if not answer else answer in ("y", "yes")
 
 
-def get_credential(system: str, vault_home: Path | str | None = None,
+def get_credential(system: str, vault_home: Path | str,
                    passphrase: str | None = None) -> Credential:
     return Store(vault_home, passphrase).get_credential(system)
 
 
-def list_systems(vault_home: Path | str | None = None) -> list[str]:
+def list_systems(vault_home: Path | str) -> list[str]:
     """System names from credentials.json - no key, no decryption."""
     return list(Store(vault_home).read_index())
-
-
-def unenrol_all_vaults(vaults: Path | str | None = None) -> list[tuple[Path, str]]:
-    """Unenrol this clone in each vault-* folder of `vaults` (default: the folder of the vault home).
-
-    Unenrols each recipient whose private key is in the vault home. Returns (vault home, name).
-    """
-    folder = Path(vaults) if vaults else find_vault_home().parent
-    done = [(store.home, store.unenrol(name))
-            for store in (Store(d) for d in sorted(folder.glob("vault-*")) if d.is_dir())
-            for name in store.own_recipients()]
-    if not done:
-        raise CredentialError(f"this clone has no recipient in a vault in {folder}")
-    return done
 
 
 def _enrol_cli(store: Store, name: str | None) -> None:
@@ -1205,7 +1194,7 @@ def main(argv: list[str] | None = None) -> int:
     _CLI = True
     ap = argparse.ArgumentParser(prog="credstore", description="Credential vault (see docs/clone-keys.md).")
     ap.add_argument("--vault-home", metavar="DIR",
-                    help=f"vault home (default: ./{VAULT_DIR}, then {VAULT_DIR} next to this script)")
+                    help=f"vault home (default: {DEFAULT_VAULT}, found by dependencies.txt or .gitmodules)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("create-vault", help="create a vault: master key, example credentials.json, git hook")
     p = sub.add_parser("enrol", help="make a key pair for this clone; self-enrol in a terminal, else leave a request")
@@ -1214,7 +1203,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("name")
     p = sub.add_parser("unenrol", help="delete the recipient files of this clone, or of NAME; no rotation")
     p.add_argument("name", nargs="?", help="recipient name (default: this clone)")
-    sub.add_parser("unenrol-all-vaults", help="unenrol this clone in each vault next to the vault home")
     p = sub.add_parser("delete-private-clone-key", help="delete the private key of this clone, or of NAME, "
                                                         "after unenrol is pushed")
     p.add_argument("name", nargs="?", help="recipient name (default: this clone)")
@@ -1248,18 +1236,15 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     try:
         if a.cmd == "create-vault":
-            store = Store(a.vault_home or Path.cwd() / VAULT_DIR, interactive=_tty())
+            if not a.vault_home:
+                raise CredentialError("give the folder of the new vault with --vault-home DIR")
+            store = Store(a.vault_home, interactive=_tty())
             for path in store.create_vault():
                 print(f"wrote {path}")
             print(f"next: fill the secrets in {store.index}, run sync, enrol this clone, "
                   f"then run setup.sh in {store.home}")
             return 0
-        if a.cmd == "unenrol-all-vaults":
-            for home, name in unenrol_all_vaults(Path(a.vault_home).parent if a.vault_home else None):
-                print(f"unenrolled {name} in {home}")
-            print("commit and push each vault home; then run delete-private-clone-key in each")
-            return 0
-        store = Store(a.vault_home, interactive=_tty())
+        store = Store(a.vault_home or default_vault_home(), interactive=_tty())
         if a.cmd == "enrol":
             _enrol_cli(store, a.name)
         elif a.cmd == "approve-enrol":

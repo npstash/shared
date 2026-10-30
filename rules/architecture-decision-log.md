@@ -9,7 +9,8 @@ related: [agent-identity, confirm-design-choices, decision-gates]
 # Architecture decision log
 
 Keep an `ADL.md` in the folder of each project and each tool. Record the decisions about
-that item. Create `ADL.md` with the first decision.
+that item. Create `ADL.md` with the first decision. A component of a project has no `ADL.md`.
+Record its decisions in the ADL of the project.
 
 ```markdown
 - 20261004-01 Nestor 4abf63da3ce0 Use SQLite for the cache

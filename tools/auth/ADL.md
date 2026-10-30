@@ -117,3 +117,6 @@
 - 20261029-17 Opus-5.5 b3a7d3d5f22c The access log events have the names of the commands
 - 20261029-18 Opus-5.5 b3a7d3d5f22c get-system writes no access log line; get-secret logs only the secret that it prints
 - 20261029-19 Opus-5.5 b3a7d3d5f22c The API keeps get_credential for all secrets of a system and adds get_secret for one secret
+- 20261030-01 Nestor 53811b07d8ef Remove unenrol-all-vaults; unenrol works on one vault home
+- 20261030-02 Nestor 53811b07d8ef The API has no default vault home; the CLI without --vault-home finds vault-main with the lookup of the rule submodule-dependencies
+- 20261030-03 Opus-5.5 53811b07d8ef create-vault needs --vault-home

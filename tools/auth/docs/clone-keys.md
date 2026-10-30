@@ -128,8 +128,8 @@ clone. Each `enrol` writes the file again. The format is INI with one section `[
 
 ## Selecting a vault
 
-The API has the parameter `vault_home`. The CLI has `--vault-home`. The default is
-`./vaults/vault-main`, then `vaults/vault-main` next to the tool. To limit the secrets of a
+The API needs the parameter `vault_home`. The CLI has `--vault-home`. Without it, the CLI
+finds `vault-main` with the rule submodule-dependencies. To limit the secrets of a
 clone, use a separate vault, e.g. `vaults/vault-<project>`.
 
 ## Commands
@@ -140,7 +140,6 @@ clone, use a separate vault, e.g. `vaults/vault-<project>`.
 | `enrol [NAME]` | passphrase (TTY), optional | Makes a key pair for this clone. See "Enrolment". |
 | `approve-enrol NAME` | clone key | Writes the wrapped master key for `recipients/NAME.pub`. Prints the fingerprint: `SHA256:` and the base64 SHA-256 of the DER public key. |
 | `unenrol [NAME]` | nothing | Deletes the files of `NAME` in `recipients/`. Without `NAME`: the recipient of this clone. See "Unenrolment". |
-| `unenrol-all-vaults` | nothing | Runs `unenrol` for each recipient of this clone in each `vault-*` folder beside the vault home. |
 | `delete-private-clone-key [NAME]` | nothing | Deletes `clone.NAME.key` and its key passphrase. Without `NAME`: the one key file of this clone. |
 | `rotate-master-key` | clone key or passphrase to open; passphrase (TTY) to write | Makes a new master key. Wraps it for each approved recipient and with the passphrase. |
 | `unenrol-and-rotate-master-key NAME` | as `rotate-master-key` | Deletes the files of `NAME` in `recipients/`, then rotates the master key. |
@@ -155,7 +154,7 @@ clone, use a separate vault, e.g. `vaults/vault-<project>`.
 
 - `get-secret` stays in the CLI.
 - An option does not change what a command does. A different behaviour is a different command.
-- The Python API has the same names, e.g. `Store.approve_enrol()` and `unenrol_all_vaults()`.
+- The Python API has the same names, e.g. `Store.approve_enrol()` and `Store.unenrol()`.
 - A command that needs the passphrase works only in a terminal of the user, or through the
   `passphrase=` parameter of the API.
 - `unenrol-and-rotate-master-key` always rotates the master key. Thus it needs the passphrase.
@@ -216,7 +215,6 @@ recipient. A clone that can push to the vault home can also delete the files wit
 
 - If the push fails, restore the files with `git restore recipients/`. The private key still
   opens the vault.
-- `unenrol-all-vaults` does step 1 in each vault. The skill does steps 2 and 3 in each vault.
 - `unenrol` does not lock a clone out. The clone knows the current master key, and git history
   keeps its `<name>.master.enc`. To lock a clone out, use `unenrol-and-rotate-master-key`.
 
@@ -313,7 +311,7 @@ The log of a cloud clone is lost with the clone.
   this design.
 - A persistent Cowork session keeps its key file.
 - A clone that a schedule makes again needs a new enrolment.
-- A cloud clone unenrols itself at the end of its work: `unenrol` or `unenrol-all-vaults`,
+- A cloud clone unenrols itself at the end of its work: `unenrol` in each vault,
   commit and push, then `delete-private-clone-key`. See "Unenrolment".
 
 ## Skills
@@ -321,7 +319,7 @@ The log of a cloud clone is lost with the clone.
 ### credentials
 
 - It runs only commands that need no passphrase: `enrol` (request), `approve-enrol`,
-  `unenrol`, `unenrol-all-vaults`, `delete-private-clone-key`, `sync`, `list`, `get-system`,
+  `unenrol`, `delete-private-clone-key`, `sync`, `list`, `get-system`,
   `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`,
   `delete-keyring-secret` and `delete-all-keyring-secrets`.
 - For `create-vault`, self-enrolment, `rotate-master-key`, `unenrol-and-rotate-master-key` and

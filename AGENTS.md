@@ -18,6 +18,8 @@ agents.
 - **voice-mode** — in voice mode the input can have speech recognition errors: repair them; the reply is spoken: short, one question at a time, no visual formatting. @rules/voice-mode.md
 - **agent-identity** — an agent is not a person: not an author, no decisions, takes actions, no feelings. @rules/agent-identity.md
 - **architecture-decision-log** — an `ADL.md` log of accepted architecture decisions and business rules in each project and tool; a proposal is only a proposed ADR. @rules/architecture-decision-log.md
+- **sdd-documentation** — SDD only in projects with `sdd/`; components use the SDD of the project; each value has one uppercase name, defined once. @rules/sdd-documentation.md
+- **submodule-dependencies** — find `shared`, a vault or other shareable submodules with the reference code: `.gitmodules` first, then `dependencies.txt`. @rules/submodule-dependencies.md
 - **browser-automation-facade** — browser automation only through the `playwright-facade` MCP server; placeholders for user data. @rules/browser-automation-facade.md
 
 ### Skills

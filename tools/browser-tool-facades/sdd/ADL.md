@@ -1,7 +1,7 @@
 # Architecture Decision Log (ADL) — browser-tool-facades
 
 The log of the decisions that change the design. Format and rules:
-[projects/sdd_templates/ADL.md](../../../../projects/sdd_templates/ADL.md).
+[sdd-templates/templates/ADL.md](../../sdd-templates/templates/ADL.md).
 
 ## Log
 

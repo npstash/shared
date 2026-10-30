@@ -677,24 +677,6 @@ def test_delete_private_clone_key_waits_for_the_push(tmp_path):
     assert cs.Store(home).delete_private_clone_key() == "c"
 
 
-def test_unenrol_all_vaults(tmp_path, capsys):
-    vaults = tmp_path / "vaults"
-    for name in ("vault-main", "vault-x", "vault-none"):
-        cs.Store(vaults / name, PW).create_vault()
-    cs.Store(vaults / "vault-main", PW).enrol("a", None)
-    cs.Store(vaults / "vault-x", PW).enrol("b", None)
-    cs.Store(vaults / "vault-x", PW).enrol("c", None)
-    assert cs.unenrol_all_vaults(vaults) == [(vaults / "vault-main", "a"), (vaults / "vault-x", "b"),
-                                             (vaults / "vault-x", "c")]
-    assert not list(vaults.glob("*/recipients/*"))
-    with pytest.raises(cs.CredentialError, match="no recipient in a vault"):
-        cs.unenrol_all_vaults(vaults)
-    cs.Store(vaults / "vault-x", PW).enrol("d", None)
-    capsys.readouterr()
-    assert cs.main(["--vault-home", str(vaults / "vault-main"), "unenrol-all-vaults"]) == 0
-    assert capsys.readouterr().out.startswith(f"unenrolled d in {vaults / 'vault-x'}\n")
-
-
 @pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl is not installed")
 def test_openssl_opens_the_wrapped_master_key_with_a_clone_key(home):
     write_index(home, {SYS: entry(token="ghp_x")})
@@ -758,19 +740,24 @@ def test_cli_get_logs_only_the_secret_it_prints(two, capsys):
 
 # -- vault home and init -------------------------------------------------------------------
 
-def test_vault_home_is_found_in_the_working_directory_first(tmp_path, monkeypatch):
-    here, beside = tmp_path / "cwd" / "vaults" / "vault-main", tmp_path / "tool" / "vaults" / "vault-main"
-    here.mkdir(parents=True)
-    beside.mkdir(parents=True)
-    monkeypatch.setattr(cs, "TOOL", tmp_path / "tool")
-    monkeypatch.chdir(tmp_path / "cwd")
-    assert cs.find_vault_home() == Path.cwd() / "vaults" / "vault-main"
-    here.rmdir()
-    assert cs.find_vault_home() == beside
-    beside.rmdir()
-    with pytest.raises(cs.CredentialError, match="--vault-home"):
-        cs.find_vault_home()
-    assert cs.find_vault_home(tmp_path / "x") == tmp_path / "x"   # an explicit folder is not checked
+def test_cli_finds_vault_main_with_dependencies_txt(tmp_path, monkeypatch):
+    shared = tmp_path / "shared"
+    (shared / "tools" / "auth" / "src").mkdir(parents=True)
+    (shared / "tools" / "auth" / "src" / "dependencies.py").write_text((cs.TOOL / "src" / "dependencies.py").read_text())
+    (shared / ".git").write_text("gitdir: x\n")
+    (shared / "dependencies.txt").write_text("[vault-main]\n../vaults/vault-main\n../vault-main\n")
+    monkeypatch.setattr(cs, "TOOL", shared / "tools" / "auth")
+    with pytest.raises(cs.CredentialError, match="vault-main is not found(.|\n)*--vault-home"):
+        cs.default_vault_home()
+    (tmp_path / "vault-main" / "recipients").mkdir(parents=True)
+    assert cs.default_vault_home() == tmp_path / "vault-main"
+    (tmp_path / "vaults" / "vault-main" / "recipients").mkdir(parents=True)
+    assert cs.default_vault_home() == tmp_path / "vaults" / "vault-main"
+
+
+def test_the_api_needs_the_vault_home():
+    with pytest.raises(cs.CredentialError, match="give the vault home"):
+        cs.Store("")
 
 
 def test_create_vault_writes_a_vault_that_needs_the_secrets_filled_in(home):
@@ -791,11 +778,11 @@ def test_create_vault_refuses_an_existing_vault(home):
         cs.Store(home, PW).create_vault()
 
 
-def test_create_vault_defaults_to_vaults_vault_main_in_the_working_directory(tmp_path, monkeypatch):
+def test_create_vault_needs_the_vault_home(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cs, "_prompt_new_passphrase", lambda: PW)
-    assert cs.main(["create-vault"]) == 0
-    assert (tmp_path / "vaults" / "vault-main" / "master.enc.key").is_file()
+    assert cs.main(["create-vault"]) != 0
+    assert "--vault-home" in capsys.readouterr().err
+    assert not list(tmp_path.iterdir())
 
 
 def test_backups_go_to_the_tool_folder_not_the_vault(home, tmp_path):

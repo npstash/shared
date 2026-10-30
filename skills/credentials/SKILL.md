@@ -12,8 +12,8 @@ environment of the machine (see "Forbidden sources").
 - `TOOL` is `tools/auth` next to the `skills/` folder of this skill. The skill folder can
   be a link, so resolve it: `TOOL="$(realpath <skill folder>)/../../tools/auth"`.
 - The **vault home** is a separate folder with the vault files: a repository `vault-<name>`
-  in `vaults/`. The tool finds `./vaults/vault-main` itself. For another vault, add
-  `--vault-home vaults/vault-<name>`.
+  in `vaults/`. Without `--vault-home`, the CLI finds `vault-main` itself. For another vault,
+  add `--vault-home <vault home>`. Find the vault home as the rule submodule-dependencies says.
 
 ## 1. What you can do, and what the user does
 
@@ -22,7 +22,7 @@ give the passphrase. Do not ask for it.
 
 | You run these | The user runs these in a terminal |
 | --- | --- |
-| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `unenrol-all-vaults`, `delete-private-clone-key`, `sync`, `list`, `get-system`, `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `create-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
+| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `sync`, `list`, `get-system`, `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `create-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
 
 For a command in the right column, give the user the full command, e.g.
 `shared/tools/auth/run.sh unenrol-and-rotate-master-key old-laptop`. Then wait.
@@ -45,8 +45,7 @@ script, through the API. The script uses the secret and does not print it.
 ```python
 from credstore import get_credential, CredentialError
 
-jira = get_credential("jira")                                 # ./vaults/vault-main
-jira = get_credential("jira", vault_home="vaults/vault-other")
+jira = get_credential("jira", "vaults/vault-main")      # the vault home is necessary
 session.auth = (jira.secrets()["username"], jira.secrets()["password"])
 ```
 
@@ -54,7 +53,7 @@ session.auth = (jira.secrets()["username"], jira.secrets()["password"])
   `run.sh` of the calling tool.
 - `Credential` has `name`, `url`, `authority_info` and `secrets()`: an immutable map of all
   secrets of the system, the username included.
-- `vault_home` is the vault home.
+- `vault_home` is the vault home. It has no default.
 - `passphrase=` is only for a script that asks the user for the passphrase itself. Do not
   give it a value from the environment, a file or the chat.
 - Each call writes a line into `access.log` with the file name of the script.
@@ -96,17 +95,15 @@ Only if the user asks. It removes this clone from vaults without a new master ke
 knows the current master key: to lock a clone out, the user runs
 `unenrol-and-rotate-master-key` in a terminal.
 
-1. Find the vaults of this clone: each `vaults/vault-*` with a `clone.<name>.key` and a
-   `recipients/<name>.pub`. Show the vault, the name, and "approved" if
+1. Find the vaults of this clone: each vault submodule in `.gitmodules` of the repository
+   with a `clone.<name>.key` and a `recipients/<name>.pub`. Show the vault, the name, and "approved" if
    `recipients/<name>.master.enc` exists, else "request".
 2. Ask the user which vaults to unenrol: one or more, or all.
-3. Unenrol:
-   - All vaults: `$TOOL/run.sh unenrol-all-vaults`.
-   - Some vaults: `$TOOL/run.sh --vault-home vaults/vault-<name> unenrol` for each vault.
+3. Unenrol: `$TOOL/run.sh --vault-home <vault home> unenrol` for each vault.
 4. Commit and push each changed vault home. Git uses its own credentials, not the vault.
 5. If a push fails, run `git restore recipients/` in that vault home, then stop and tell the
    user. The vault still opens.
-6. After each push: `$TOOL/run.sh --vault-home vaults/vault-<name> delete-private-clone-key`.
+6. After each push: `$TOOL/run.sh --vault-home <vault home> delete-private-clone-key`.
 7. Commit and push the submodule pointers in the root repository, if the user asks.
 
 To unenrol another clone, the user gives the name: `$TOOL/run.sh unenrol <name>`, then commit
@@ -131,7 +128,8 @@ For each error: stop and ask. Do not use an env var or a file of the machine ins
 | `Skipped keys: ...` | A key file is from another machine, or its keyring entry is missing. | Tell the user. Enrol again with a new name if the user agrees. |
 | `unknown system 'X'` | No entry. | Show the `list` output and ask which system to use, or ask the user to add it. |
 | `secret 'K' is blank and the vault has no value for it` | The key has no value. | Ask the user to fill it. Never use a different secret. |
-| `no vault found in ./vaults/vault-main ...` | No vault home found. | Run from the folder that holds `vaults/`, or give `--vault-home`. For an empty submodule, run `setup.sh` of the repository. |
+| `vault-main is not found ...` | The CLI found no vault home. | Give `--vault-home`. |
+| `the submodule ... is empty` | The vault submodule has no checkout. | Run `setup.sh` of the repository. |
 | `recipient name 'X' is taken` | Another clone has this name. | Enrol with no name, or with another name. |
 | `this command needs the master passphrase` | The command needs the passphrase. | Give the user the command to run in a terminal. |
 
