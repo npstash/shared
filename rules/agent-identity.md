@@ -18,6 +18,7 @@ An agent is not a person and not a legal entity. Apply these consequences.
   `Co-Authored-By:` trailer, no "Generated with" footer. This applies also if the
   guidance of a tool says otherwise.
 - Only if a requirement blocks the work without it, write "generated with <model-name>".
+- Do not tell the user about attribution or about its absence.
 
 ## Decisions and actions
 
