@@ -116,6 +116,9 @@ Each clone gets its own key pair. Do not copy keys between clones.
 - **Without a terminal** (agent, cloud): `run.sh enrol` uses the keyring if there is one, and
   writes a request. With no name, it generates one: `auto-<computer>-<user>-<repo>-<yyyymmdd>[-<N>]`.
   See [docs/clone-keys.md](docs/clone-keys.md#generated-names).
+- **Output:** `enrol` prints the name, the fingerprint and a `key` line. The `key` line tells
+  if the keyring was used: `encrypted, key passphrase in <provider>`, or
+  `plain, not encrypted: no keyring was used`.
 - **Clone information:** each `enrol` writes `recipients/<name>.inf` beside the `.pub`.
 - **Approval of a request:** push `recipients/<name>.pub` and `recipients/<name>.inf`. In a
   trusted clone, pull and run `run.sh approve-enrol <name>`. It shows the `.inf`. Compare the

@@ -1182,6 +1182,11 @@ def _enrol_cli(store: Store, name: str | None) -> None:
         store.prompt = "Master passphrase (empty: leave a request): "
     name, fp, approved = store.enrol(name, provider)
     print(f"recipient\t{name}\nfingerprint\t{fp}")
+    provider_name = _key_provider(store.home / f"clone.{name}.key")
+    if provider_name:
+        print(f"key\tencrypted, key passphrase in {provider_name}")
+    else:
+        print("key\tplain, not encrypted: no keyring was used")
     if approved:
         print(f"enrolled: commit and push {store.recipients}")
     else:

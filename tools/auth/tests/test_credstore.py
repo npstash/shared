@@ -543,6 +543,17 @@ def test_a_recipient_name_of_another_clone_is_refused(home, tmp_path):
         cs.Store(home).enrol("../x", None)
 
 
+def test_enrol_cli_tells_if_the_keyring_was_used(home, monkeypatch, capsys):
+    monkeypatch.setattr(cs, "_tty", lambda: False)
+    assert cs.main(["--vault-home", str(home), "enrol", "plain"]) == 0
+    assert "key\tplain, not encrypted: no keyring was used" in capsys.readouterr().out
+    provider = FakeProvider()
+    monkeypatch.setattr(cs, "PROVIDERS", [provider])
+    assert cs.main(["--vault-home", str(home), "enrol", "kept"]) == 0
+    assert "key\tencrypted, key passphrase in fake" in capsys.readouterr().out
+    assert provider.entries
+
+
 def test_enrol_again_reuses_the_key(home):
     first = cs.Store(home).enrol("x", None)
     assert cs.Store(home, PW).enrol("x", None) == ("x", first[1], True)

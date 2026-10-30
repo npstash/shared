@@ -68,6 +68,7 @@ if [[ "$(uname -s)" == "Linux" ]]; then
     syslibs_stamp="$assets/syslibs/$platform/.ready-$pw_version"
     if [[ ! -f "$syslibs_stamp" ]]; then
         node "$dir/playwright/src/setup/syslibs.js" >&2
+        mkdir -p "$(dirname "$syslibs_stamp")"
         touch "$syslibs_stamp"
     fi
 fi

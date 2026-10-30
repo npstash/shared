@@ -120,3 +120,4 @@
 - 20261030-01 Nestor 53811b07d8ef Remove unenrol-all-vaults; unenrol works on one vault home
 - 20261030-02 Nestor 53811b07d8ef The API has no default vault home; the CLI without --vault-home finds vault-main with the lookup of the rule submodule-dependencies
 - 20261030-03 Opus-5.5 53811b07d8ef create-vault needs --vault-home
+- 20261030-04 Nestor f5a998b60f00 enrol prints a key line that tells if the key passphrase is in the keyring

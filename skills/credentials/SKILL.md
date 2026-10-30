@@ -15,6 +15,9 @@ environment of the machine (see "Forbidden sources").
   in `vaults/`. Without `--vault-home`, the CLI finds `vault-main` itself. For another vault,
   add `--vault-home <vault home>`. Find the vault home as the rule submodule-dependencies says.
 
+The rule credentials-from-vault tells which commands, commits and pushes need the
+confirmation of the user. It applies to each step below.
+
 ## 1. What you can do, and what the user does
 
 This clone opens the vault only with a **clone key**. You have no terminal, so you can never
@@ -63,14 +66,16 @@ For a command-line tool that needs a token, run it from the script, e.g.
 
 ## 4. Enrol this clone
 
-If the vault does not open (`no way to open the vault`), enrol this clone:
+If the vault does not open (`no way to open the vault`), follow the rule
+credentials-from-vault. To enrol this clone:
 
 ```bash
 $TOOL/run.sh enrol                       # a generated name
 ```
 
 1. It writes `recipients/<name>.pub` and the gitignored key file. It prints the name and the
-   fingerprint. Without a terminal, it is a request.
+   fingerprint. Without a terminal, it is a request. Tell the user if the keyring was
+   used, from the `key` line.
 2. Commit and push the `.pub` in the vault home repository.
 3. Tell the user the name and the fingerprint. Ask the user to approve the request in a
    trusted clone: `run.sh approve-enrol <name>`.
@@ -122,7 +127,7 @@ For each error: stop and ask. Do not use an env var or a file of the machine ins
 
 | Error | Cause | Action |
 | --- | --- | --- |
-| `no way to open the vault` | No clone key of this clone opens the vault. | Enrol this clone (section 4). |
+| `no way to open the vault` | No clone key of this clone opens the vault. | Stop (rule credentials-from-vault). See section 4. |
 | `... is still enrolled ...` | `delete-private-clone-key` before the push of `unenrol`. | Commit and push the vault home first. |
 | `more than one recipient` | This clone has more key files in the vault home. | Show the names and ask which one. |
 | `Skipped keys: ...` | A key file is from another machine, or its keyring entry is missing. | Tell the user. Enrol again with a new name if the user agrees. |
