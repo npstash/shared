@@ -1,0 +1,11 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  // Rules: each AGENTS.md index plus one file per rule. Kilo does not follow the @
+  // imports in AGENTS.md, so the globs load the rule files themselves. They do not
+  // recurse: the agent folders (claude/, cline/, kilo/) stay unloaded.
+  "instructions": [
+    "AGENTS.md",
+    "local/AGENTS.md", "local/rules/*.md",
+    "shared/AGENTS.md", "shared/rules/*.md"
+  ]
+}

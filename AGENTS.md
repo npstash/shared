@@ -21,10 +21,12 @@ agents.
 - **sdd-documentation** — SDD only in projects with `sdd/`; components use the SDD of the project; each value has one uppercase name, defined once. @rules/sdd-documentation.md
 - **submodule-dependencies** — find `shared`, a vault or other shareable submodules with the reference code: `.gitmodules` first, then `dependencies.txt`. @rules/submodule-dependencies.md
 - **browser-automation-facade** — browser automation only through the `playwright-facade` MCP server; placeholders for user data. @rules/browser-automation-facade.md
+- **repo-structure-template** — when the repo structure or a templated file changes, ask to update the create-repo-structure skill. @rules/repo-structure-template.md
 
 ### Skills
 - [credentials](skills/credentials/SKILL.md) — get a secret from the vault through the API; enrol and unenrol a clone; manage keys.
 - [create-adr](skills/create-adr/SKILL.md) — write an ADR for an ADL entry. Use only when the user asks.
+- [create-repo-structure](skills/create-repo-structure/SKILL.md) — create or complete the repository structure and its repo-structure rule. Use only when the user asks.
 
 ## Claude Code
 

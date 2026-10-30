@@ -1,0 +1,28 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Generated / intermediate files (see shared/rules/deliverables-only.md)
+.local_assets/
+
+# Node
+node_modules/
+
+# Test caches
+.pytest_cache/
+
+# Atomic-write leftovers
+*.tmp
+
+# Claude Code per-user settings
+.claude/settings.local.json
+
+# Links that setup.sh makes to <container>/skills/
+.claude/skills/
+
+# Python package build metadata
+*.egg-info/
