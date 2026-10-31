@@ -1,5 +1,6 @@
 // Unit tests of the shared parts: INI files, host patterns and lists, tool switches, fill providers.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
@@ -267,15 +268,32 @@ describe('vault provider', () => {
       'more vault systems match the host www.example.com: Example A; Example B; Example C. Give each a more specific url.');
   });
 
-  test('gives the vault home and the sub-vault to the vault tool', async () => {
+  test('gives the vault home to the vault tool', async () => {
     fs.rmSync(callLog, { force: true });
     process.env.FAKE_VAULT_LOG = callLog;
     try {
-      await make('subvault = team\n').list({ host: '127.0.0.1' });
+      await make().list({ host: '127.0.0.1' });
     } finally {
       delete process.env.FAKE_VAULT_LOG;
     }
-    assert.deepEqual(JSON.parse(fs.readFileSync(callLog, 'utf8')), ['--vault-home', FAKE_VAULT, '--subvault', 'team', 'list']);
+    assert.deepEqual(JSON.parse(fs.readFileSync(callLog, 'utf8')), ['--vault-home', FAKE_VAULT, 'list']);
+  });
+});
+
+// The fake vault cannot see a change of the real vault tool. This test compares the commands.
+describe('vault tool contract', () => {
+  const tool = path.resolve(TOOL_DIR, '..', 'auth', process.platform === 'win32' ? 'run.bat' : 'run.sh');
+  const help = (...args) => {
+    const [command, prefix] = process.platform === 'win32' ? ['cmd', ['/c', tool]] : [tool, []];
+    return execFileSync(command, [...prefix, ...args], { encoding: 'utf8', windowsHide: true });
+  };
+
+  test('the vault tool has the options and commands of the vault provider', { skip: !fs.existsSync(tool) && `no vault tool at ${tool}` }, () => {
+    const usage = help('--help');
+    assert.match(usage, /--vault-home/);
+    const commands = usage.match(/\{([a-z,-]+)\}/)[1].split(',');
+    for (const command of ['list', 'get-secret']) assert.ok(commands.includes(command), `the vault tool has no command ${command}`);
+    assert.match(help('get-secret', '--help'), /get-secret \[-h\] system key/);
   });
 });
 

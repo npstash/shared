@@ -20,7 +20,6 @@ export default class VaultProvider extends FillProvider {
     this.tool = process.platform === 'win32' ? tool.replace(/\.sh$/, '.bat') : tool;
     this.globalArgs = [];
     if (values.vault_home) this.globalArgs.push('--vault-home', path.resolve(configDir, values.vault_home));
-    if (values.subvault) this.globalArgs.push('--subvault', values.subvault);
   }
 
   async vault(args) {
@@ -74,7 +73,7 @@ export default class VaultProvider extends FillProvider {
       throw new FillError(`more vault systems match the host ${ctx.host}: ${system.ambiguous.join('; ')}. Give each a more specific url.`);
     }
     if (!system.secrets.includes(name)) return undefined;
-    const stdout = await this.vault(['get', system.name, '--secret', name]);
+    const stdout = await this.vault(['get-secret', system.name, name]);
     return stdout.replace(/\r?\n$/, '');
   }
 }

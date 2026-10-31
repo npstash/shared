@@ -157,7 +157,7 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
   2. It shall give the secret whose name is the placeholder name, through the vault tool.
 - **Alternative Flow:**
   - More systems match → the system whose `url` is the longest prefix of the page URL wins.
-  - `providers-form-fill/vault/config.ini` gives `vault_home` or `subvault` → the provider uses that vault.
+  - `providers-form-fill/vault/config.ini` gives `vault_home` → the provider uses that vault.
   - No system matches, or the system has no such secret → the provider has no value.
 - **Exception Flow:**
   - Two systems match equally → error with the system names.

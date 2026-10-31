@@ -140,7 +140,7 @@ flowchart TD
 | Facade process | arguments | Each argument goes to Playwright MCP, e.g. `--headless`, `--isolated`. |
 | Facade process | environment | `PLAYWRIGHT_FACADE_LOG_FILE`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_CONFIG_DIR` (tools.ini); `BROWSER_FACADES_CONFIG_DIR`, `BROWSER_FACADES_PROVIDERS_CONFIG_DIR` (shared config). |
 | Launcher | `run.sh [install|test|args]` | Makes the runtime; `install` stops after it; `test` runs the tests. |
-| Vault tool (used) | `run.sh [--vault-home D] [--subvault S] list` / `get NAME --secret KEY` | Systems with url and secret names; one secret on stdout. |
+| Vault tool (used) | `run.sh [--vault-home D] list` / `get-secret NAME KEY` | Systems with url and secret names; one secret on stdout. |
 
 ### 6.2 Component interfaces
 
@@ -161,7 +161,7 @@ sequenceDiagram
     Agent->>Facade: tools/call browser_fill_form {value: "{{password}}"}
     Facade->>Facade: tool switch, host check
     Facade->>Vault provider: resolve("password", host)
-    Vault provider->>Vault tool: get "System" --secret password
+    Vault provider->>Vault tool: get-secret "System" password
     Vault tool-->>Vault provider: secret
     Facade->>Playwright MCP: tools/call browser_fill_form {value: secret}
     Playwright MCP-->>Facade: result (may show the secret)
@@ -202,7 +202,7 @@ sequenceDiagram
 | `config/facade.ini` | yes | `[fill] providers = vault, ini, ask`; `[hosts] record = true|false` | user |
 | `playwright/config/tools.ini` | yes | `[tools]` `<tool> = enabled|disabled`, sorted | user; facade adds missing tools |
 | `config/hosts.ini` | yes | header comments; `[deny]`, `[allow]`: one host pattern per line, sorted, unique | user; facade records hosts |
-| `providers-form-fill/vault/config.ini` | yes | `[vault]` `vault_home`, `subvault`, `tool` (paths relative to the folder) | user |
+| `providers-form-fill/vault/config.ini` | yes | `[vault]` `vault_home`, `tool` (paths relative to the folder) | user |
 | `providers-form-fill/ini/config.ini` | yes | `[all]` and `[<host pattern>]` with `key = value` | user |
 | `providers-form-fill/ask/config.ini` | yes | `[ask]` `fields = a, b, c` | user |
 | `LOG_FILE` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | facade |
