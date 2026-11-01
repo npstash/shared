@@ -7,7 +7,7 @@ the server the name `playwright-facade`. Then the tool names are
 
 This repository loads the facade for each Claude Code session (VSCode, CLI, Desktop app on Linux,
 WSL or macOS): the root `.mcp.json` has the server, and the root `.claude/settings.json`
-approves it and blocks direct Playwright. See [Block direct Playwright](#block-direct-playwright).
+approves it. See [Settings of Claude Code](#settings-of-claude-code).
 
 Before the first use, run `install` one time (see the [tool README](../../README.md#run)):
 
@@ -20,8 +20,7 @@ In the examples, `<TOOL>` is the absolute path of the tool folder `browser-tool-
 `/mnt/c/work/my_workspace/shared/tools/browser-tool-facades` (WSL)
 or `C:\work\my_workspace\shared\tools\browser-tool-facades` (Windows).
 
-If Playwright MCP is also configured, block it as [Block direct Playwright](#block-direct-playwright)
-says.
+To block a Playwright MCP that is also configured, see [Settings of Claude Code](#settings-of-claude-code).
 
 ## Select the launcher
 
@@ -171,10 +170,10 @@ facade runs on the computer, outside the sandbox. The browser then opens on the 
 If Cowork does not show the tools, it cannot use local MCP servers in this version. Cowork
 can open web pages with its own browser tools (Claude in Chrome) instead.
 
-## Block direct Playwright
+## Settings of Claude Code
 
-A rule only tells the agent what to do. Permission rules of Claude Code stop the calls. Put them
-into the committed `.claude/settings.json` of the repository root:
+Put the settings into the committed `.claude/settings.json` of the repository root. The `deny`
+entries are optional. Add them to enforce the facade.
 
 ```json
 {
