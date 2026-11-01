@@ -1,10 +1,10 @@
-# rules
+# shared
 
 One file for each rule, so that you can copy a rule alone. A **container** is a folder
 with `rules/`, `skills/`, `tools/` and an index. This repository is one container.
 
-- `rules/<id>.md` — for all agents; index: [AGENTS.md](../AGENTS.md).
-- `rules/<agent>/<id>.md` — for specific <agent> only; see [AGENTS.md](../AGENTS.md).
+- `rules/<id>.md` — for all agents; index: [AGENTS.md](AGENTS.md).
+- `rules/<agent>/<id>.md` — for specific <agent> only; see [AGENTS.md](AGENTS.md).
 
 Cite a rule by its id, not by a number. Numbers collide between workspaces.
 
@@ -36,11 +36,12 @@ Each container `AGENTS.md` has a section per agent: Common, Cline SR, Claude Cod
 
 ## Skills
 
-Put a skill into `skills/<name>/SKILL.md` and add it to [AGENTS.md](../AGENTS.md). Put a
+Put a skill into `skills/<name>/SKILL.md` and add it to [AGENTS.md](AGENTS.md). Put a
 Claude Code-only skill into `skills/claude/<name>/SKILL.md` and add it to the "Claude Code"
-section of [AGENTS.md](../AGENTS.md). Put a Cline SR-only skill into
-`skills/cline/<name>/SKILL.md` and add it to the "Cline SR" section of [AGENTS.md](../AGENTS.md).
-Then run `setup.sh` (or `setup.bat`) of the repository root. It links the skill into
+section of [AGENTS.md](AGENTS.md). Put a Cline SR-only skill into
+`skills/cline/<name>/SKILL.md` and add it to the "Cline SR" section of [AGENTS.md](AGENTS.md).
+Give the index line only the name and the link: the agent tools load the description from the
+frontmatter. Then run `setup.sh` (or `setup.bat`) of the repository root. It links the skill into
 `.claude/skills/`, where Claude Code and Kilo find it.
 
 ## Use in another workspace
@@ -48,6 +49,6 @@ Then run `setup.sh` (or `setup.bat`) of the repository root. It links the skill 
 1. Add this repository as the `shared` submodule.
 2. Import `@shared/AGENTS.md` in the root `AGENTS.md`.
 3. Add `shared/AGENTS.md` and `shared/rules/*.md` to `instructions` in `.kilo/kilo.jsonc`.
-4. Copy [setup.sh](../setup.sh) and [setup.bat](../setup.bat) to the root, and run one.
+4. Copy [setup.sh](setup.sh) and [setup.bat](setup.bat) to the root, and run one.
 5. Do the `requires` of each rule. For the vault, add a vault home repository that
    `tools/auth/run.sh create-vault` makes.

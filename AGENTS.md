@@ -1,6 +1,6 @@
 # shared — AGENTS.md
 
-Each rule is a file in [rules/](rules/README.md) and is **binding**. Cite a rule by its
+Each rule is a file in `rules/` ([README.md](README.md)) and is **binding**. Cite a rule by its
 id, not by a number. Read the section for your agent. Do NOT read the sections for other
 agents.
 
@@ -19,15 +19,16 @@ agents.
 - **agent-identity** — an agent is not a person: not an author, no decisions, takes actions, no feelings. @rules/agent-identity.md
 - **architecture-decision-log** — an `ADL.md` log of accepted architecture decisions and business rules in each project and tool; a proposal is only a proposed ADR. @rules/architecture-decision-log.md
 - **sdd-documentation** — SDD only in projects with `sdd/`; components use the SDD of the project; each value has one uppercase name, defined once. @rules/sdd-documentation.md
-- **submodule-dependencies** — find `shared`, a vault or other shareable submodules with the reference code: `.gitmodules` first, then `dependencies.txt`. @rules/submodule-dependencies.md
+- **submodule-dependencies** — find `shared`, a vault or other shareable submodules only with the reference code; no fixed paths. @rules/submodule-dependencies.md
 - **browser-automation-facade** — for browser automation, recommend the `playwright-facade` MCP server; keep the tool that the user selects. @rules/browser-automation-facade.md
 - **browser-cookie-consent** — in browser automation, accept all cookies in a consent dialog; do not ask. @rules/browser-cookie-consent.md
 - **repo-structure-template** — when the repo structure or a templated file changes, ask to update the create-repo-structure skill. @rules/repo-structure-template.md
 
 ### Skills
-- [credentials](skills/credentials/SKILL.md) — get a secret from the vault through the API; enrol and unenrol a clone; manage keys.
-- [create-adr](skills/create-adr/SKILL.md) — write an ADR for an ADL entry. Use only when the user asks.
-- [create-repo-structure](skills/create-repo-structure/SKILL.md) — create or complete the repository structure and its repo-structure rule. Use only when the user asks.
+- [credentials](skills/credentials/SKILL.md)
+- [create-adr](skills/create-adr/SKILL.md)
+- [create-repo-structure](skills/create-repo-structure/SKILL.md)
+- [submodule-dependencies](skills/submodule-dependencies/SKILL.md)
 
 ## Claude Code
 

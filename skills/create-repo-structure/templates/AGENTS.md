@@ -7,4 +7,4 @@ Read the "Common" section and the section for your agent only.
 - [local/AGENTS.md](local/AGENTS.md) @local/AGENTS.md
 - [shared/AGENTS.md](shared/AGENTS.md) @shared/AGENTS.md
 
-To add a rule or a skill, see [shared/rules/README.md](shared/rules/README.md).
+To add a rule or a skill, see [shared/README.md](shared/README.md).
