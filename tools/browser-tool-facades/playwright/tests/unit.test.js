@@ -1,10 +1,12 @@
 // Unit tests: redaction, result summary and the upstream environment.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 import { ASSETS_DIR } from '../../src/paths.js';
 import { redact, summarizeResult } from '../../src/logger.js';
 import { packageCandidates, parseLdd } from '../src/setup/syslibs.js';
+import { CHROME_PREFS, writeChromePrefs } from '../src/chrome-prefs.js';
 import { upstreamEnv } from '../src/config.js';
 
 describe('redact', () => {
@@ -87,6 +89,35 @@ describe('upstreamEnv', () => {
   test('sets the temp folder only when it is given', () => {
     assert.equal(upstreamEnv([], {}, cwd).TMPDIR, undefined);
     assert.equal(upstreamEnv([], {}, cwd, '/t').TMPDIR, '/t');
+  });
+});
+
+describe('writeChromePrefs', () => {
+  const dir = path.join(ASSETS_DIR, 'test-unit', 'chrome-prefs');
+  const file = path.join(dir, 'Default', 'Preferences');
+  const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+  test('adds the settings and keeps the other settings of the profile', () => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ homepage: 'x', profile: { name: 'P', exit_type: 'Crashed', password_manager_enabled: true } }));
+    writeChromePrefs(dir);
+    const prefs = read();
+    assert.equal(prefs.homepage, 'x');
+    assert.equal(prefs.profile.name, 'P');
+    assert.equal(prefs.profile.exit_type, 'Normal');
+    assert.equal(prefs.profile.password_manager_enabled, false);
+    assert.equal(prefs.profile.password_manager_leak_detection, false);
+    assert.equal(prefs.profile.default_content_setting_values.notifications, 2);
+  });
+
+  test('a missing or damaged file gets only the settings', () => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    writeChromePrefs(dir);
+    assert.deepEqual(read(), CHROME_PREFS);
+    fs.writeFileSync(file, '{not json');
+    writeChromePrefs(dir);
+    assert.deepEqual(read(), CHROME_PREFS);
   });
 });
 

@@ -29,7 +29,8 @@ import { listValue, readIni, sectionValues } from '../../src/ini.js';
 import { summarizeResult } from '../../src/logger.js';
 import { VERSION, sharedConfigDirs } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
-import { UPSTREAM_CLI, argValue, facadeConfigDir, tmpDirInTool, upstreamEnv } from './config.js';
+import { CHROMIUM_BROWSERS, writeChromePrefs } from './chrome-prefs.js';
+import { DEFAULT_BROWSER, UPSTREAM_CLI, argValue, facadeConfigDir, tmpDirInTool, upstreamEnv } from './config.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
 const TOOL_TIMEOUT = 10 * 60 * 1000;
@@ -105,6 +106,10 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
   if (!tmpDir) logger.info('tmp_dir_fallback', { reason: 'no Unix sockets in the tool folder; the OS temp folder stays' });
   const childEnv = upstreamEnv(args, env, cwd, tmpDir);
   const outputDir = argValue(args, '--output-dir') ?? childEnv.PLAYWRIGHT_MCP_OUTPUT_DIR;
+  // The persistent profile of a Chromium browser gets CHROME_PREFS. An isolated profile has no folder.
+  const browser = argValue(args, '--browser') ?? childEnv.PLAYWRIGHT_MCP_BROWSER ?? DEFAULT_BROWSER;
+  const userDataDir = argValue(args, '--user-data-dir') ?? childEnv.PLAYWRIGHT_MCP_USER_DATA_DIR;
+  const profileDir = userDataDir && CHROMIUM_BROWSERS.has(browser) ? path.resolve(cwd, userDataDir) : undefined;
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [UPSTREAM_CLI, ...args],
@@ -159,7 +164,7 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
     await client.sendRootsListChanged();
   });
 
-  const session = { client, server, logger, toolsConfig, hostPolicy, fill, cwd, outputDir: outputDir && path.resolve(cwd, outputDir), browserOpen: false, pageUrl: undefined };
+  const session = { client, server, logger, toolsConfig, hostPolicy, fill, cwd, outputDir: outputDir && path.resolve(cwd, outputDir), profileDir, browserOpen: false, pageUrl: undefined };
   server.setRequestHandler(ListToolsRequestSchema, async (request) => listTools(session, request));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => callTool(session, request, extra));
 
@@ -290,6 +295,12 @@ async function runSteps(session, request, extra) {
       if (!(error instanceof FillError)) throw error;
       return errorResult(`The facade did not run ${name}: ${error.message}`);
     }
+  }
+
+  // The browser starts with the next call. Its profile gets the settings first.
+  if (!session.browserOpen && session.profileDir) {
+    const file = writeChromePrefs(session.profileDir);
+    session.logger.info('chrome_prefs', { file });
   }
 
   const progressToken = request.params._meta?.progressToken;

@@ -98,6 +98,17 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
   - The user sets `PLAYWRIGHT_MCP_HEADLESS=false` → the browser opens a window.
   - The user gives `--config` → the config file of upstream decides.
 
+#### REQ-016 — No bubbles of the browser
+
+- **Trigger:** The browser starts with a persistent profile of a Chromium browser.
+- **Basic Flow:** Before the start, the facade shall write settings into `Default/Preferences` of
+  the profile. The settings stop the password manager, its leak check, the translate bar, the
+  "restore pages" bubble, autofill prompts and permission prompts. Other settings stay.
+- **Alternative Flow:**
+  - `--isolated`, or a browser that is not Chromium → the facade writes no settings.
+  - The file is missing or damaged → the facade writes a file with only these settings.
+- **Post-condition:** No bubble of the browser covers the page.
+
 ## 3. Tool switches
 
 #### REQ-020 — Tool list in the config

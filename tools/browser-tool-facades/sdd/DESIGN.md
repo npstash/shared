@@ -119,6 +119,8 @@ flowchart TD
   text files that upstream wrote in the call, gives
   `fill_values_list`.
 - **Vault, INI, ask providers:** `providers-form-fill/<name>/index.js` with `providers-form-fill/<name>/config.ini`.
+- **Chrome settings:** `playwright/src/chrome-prefs.js` writes `CHROME_PREFS` into the persistent
+  profile before the browser starts: at the first call, and after `browser_close`.
 - **Logger:** JSON Lines; redacts the secret arguments.
 
 ### 5.2 Launcher

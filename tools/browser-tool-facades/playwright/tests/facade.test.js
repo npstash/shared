@@ -101,11 +101,12 @@ describe('facade', () => {
 });
 
 describe('persistent profile', () => {
-  test('keeps localStorage from one session to the next', async () => {
+  test('keeps localStorage from one session to the next; the profile has no Chrome bubbles', async () => {
     const profile = path.join(ASSETS_DIR, 'test-profile');
     fs.rmSync(profile, { recursive: true, force: true });
     const site = await startSite();
     const values = [];
+    let prefs;
     try {
       for (const session of [1, 2]) {
         const facade = await startFacadeClient({ name: 'profile', args: ['--headless', '--user-data-dir', profile] });
@@ -118,11 +119,16 @@ describe('persistent profile', () => {
           await facade.close();
         }
       }
+      // Chrome writes the file again at exit. The settings stay.
+      prefs = JSON.parse(fs.readFileSync(path.join(profile, 'Default', 'Preferences'), 'utf8'));
     } finally {
       await site.close();
       fs.rmSync(profile, { recursive: true, force: true });
     }
     assert.deepEqual(values, ['kept', 'kept']);
+    assert.equal(prefs.profile.password_manager_leak_detection, false);
+    assert.equal(prefs.credentials_enable_service, false);
+    assert.equal(prefs.translate.enabled, false);
   });
 });
 
