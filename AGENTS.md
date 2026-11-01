@@ -21,6 +21,7 @@ agents.
 - **sdd-documentation** — SDD only in projects with `sdd/`; components use the SDD of the project; each value has one uppercase name, defined once. @rules/sdd-documentation.md
 - **submodule-dependencies** — find `shared`, a vault or other shareable submodules with the reference code: `.gitmodules` first, then `dependencies.txt`. @rules/submodule-dependencies.md
 - **browser-automation-facade** — browser automation only through the `playwright-facade` MCP server; placeholders for user data. @rules/browser-automation-facade.md
+- **browser-cookie-consent** — in browser automation, accept all cookies in a consent dialog; do not ask. @rules/browser-cookie-consent.md
 - **repo-structure-template** — when the repo structure or a templated file changes, ask to update the create-repo-structure skill. @rules/repo-structure-template.md
 
 ### Skills

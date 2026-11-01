@@ -52,3 +52,4 @@ The log of the decisions that change the design. Format and rules:
 - 20261028-03 Opus-5.5 14e8c70de325 Share config/facade.ini, config/hosts.ini, the launcher, the runtime and the core code among all facades; keep tools.ini, the dangerous tools and the fill arguments in each facade
 - 20261028-04 Opus-5.5 14e8c70de325 Select the facade with the first argument of run.sh / run.bat
 - 20261031-03 Opus-5.5 6852177487b8 Remove the sub-vault option of the vault provider; the vault tool has no sub-vaults
+- 20261101-01 Nestor f426c130bb37 Scrub the filled values also from the text files that upstream writes in a call: the files that the result links, and the changed files of the output folder

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { readIni } from '../../src/ini.js';
+import { ASSETS_DIR } from '../../src/paths.js';
 import { DANGEROUS_TOOLS } from '../src/facade.js';
 import { call, callText, evaluate, ref, startFacadeClient, startSite } from './helpers.js';
 
@@ -130,6 +131,9 @@ describe('placeholders', () => {
     });
     await call(facade.client, 'browser_type', { target: box('Note'), element: 'Note', text: 'Call {{name}}' });
     const after = await call(facade.client, 'browser_snapshot');
+    // Upstream writes a snapshot file itself. The facade scrubs the file too.
+    const saved = await call(facade.client, 'browser_snapshot', { filename: path.join(ASSETS_DIR, 'test-output', 'policy-fill-snapshot.yml') });
+    const savedFile = path.resolve(saved.match(/\]\(([^)]+)\)/)[1]);
     await call(facade.client, 'browser_click', { target: ref(snapshot, 'button', 'Save'), element: 'Save' });
 
     // The page shows the values, but the facade scrubs them also from browser_evaluate.
@@ -148,7 +152,9 @@ describe('placeholders', () => {
     assert.match(asked[0], /type your phone into the field "Phone" on 127\.0\.0\.1/);
 
     const secrets = Object.values(submitted);
-    for (const text of [filled, after, fs.readFileSync(facade.logFile, 'utf8')]) {
+    const savedText = fs.readFileSync(savedFile, 'utf8');
+    assert.match(savedText, /\{\{password\}\}/);
+    for (const text of [filled, after, savedText, fs.readFileSync(facade.logFile, 'utf8')]) {
       for (const secret of secrets) assert.ok(!text.includes(secret), `"${secret}" is visible`);
     }
     assert.match(after, /textbox "Name"[^\n]*: \{\{name\}\}/);

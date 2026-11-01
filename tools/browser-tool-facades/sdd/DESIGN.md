@@ -115,7 +115,8 @@ flowchart TD
 - **Allow provider:** the default reads `[allow]` and records each opened host.
 - **Fill registry:** loads the providers in the order of `facade.ini`, fills the placeholders in
   the arguments that the facade gives (for Playwright: `browser_type.text`,
-  `browser_fill_form.fields[].value`, `browser_select_option.values[]`), scrubs the results, gives
+  `browser_fill_form.fields[].value`, `browser_select_option.values[]`), scrubs the results and the
+  text files that upstream wrote in the call, gives
   `fill_values_list`.
 - **Vault, INI, ask providers:** `providers-form-fill/<name>/index.js` with `providers-form-fill/<name>/config.ini`.
 - **Logger:** JSON Lines; redacts the secret arguments.
@@ -150,7 +151,7 @@ flowchart TD
 | Allow provider | `isAllowed(host, ctx)`; `recordOpened(host, ctx)`. `ctx = { url, tool }`. See `src/hosts/allow-provider.js`. | Host policy |
 | Host policy | `check(url, ctx)` → `{ allowed, reason }`; `opened(url, ctx)` | Call pipeline |
 | Tool switches | `addMissing(names)`, `isEnabled(name)`, `describe(tool)`, `disabledResult(name)` | Call pipeline |
-| Fill registry | `fill(tool, args, ctx)`, `scrub(result)`, `list(ctx)` | Call pipeline |
+| Fill registry | `fill(tool, args, ctx)`, `scrub(result)`, `scrubFiles(files)`, `list(ctx)` | Call pipeline |
 
 ## 7. Key flows
 
@@ -165,7 +166,7 @@ sequenceDiagram
     Vault tool-->>Vault provider: secret
     Facade->>Playwright MCP: tools/call browser_fill_form {value: secret}
     Playwright MCP-->>Facade: result (may show the secret)
-    Facade->>Facade: scrub: secret → {{password}}
+    Facade->>Facade: scrub of the result and the output files: secret → {{password}}
     Facade-->>Agent: result with {{password}}
 ```
 

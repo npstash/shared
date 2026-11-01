@@ -2,7 +2,8 @@
 // The facade asks the providers in the order of "[fill] providers" in config/facade.ini.
 // Each facade gives its fill arguments: the string arguments of its tools that hold placeholders.
 // The first provider that has a value gives it. The client never sees the value: the facade
-// replaces it with the placeholder in each result (scrub).
+// replaces it with the placeholder in each result and in each file that upstream wrote (scrub).
+import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readIni } from '../ini.js';
@@ -67,15 +68,38 @@ export class FillRegistry {
     throw new FillError(`no provider has a value for {{${name}}} on the host ${ctx.host ?? '(no host)'}. Providers asked: ${tried}.`);
   }
 
+  // Replace each value that the facade filled in with its placeholder, in one text.
+  clean(text) {
+    const values = [...this.secrets.keys()].sort((a, b) => b.length - a.length);
+    return values.reduce((out, value) => out.split(value).join(this.secrets.get(value)), text);
+  }
+
   // Replace each value that the facade filled in with its placeholder, in each text of a result.
   scrub(result) {
     if (!this.secrets.size) return result;
-    const values = [...this.secrets.keys()].sort((a, b) => b.length - a.length);
-    const clean = (text) => values.reduce((out, value) => out.split(value).join(this.secrets.get(value)), text);
-    const content = result.content?.map((part) => (part.type === 'text' ? { ...part, text: clean(part.text) } : part));
+    const content = result.content?.map((part) => (part.type === 'text' ? { ...part, text: this.clean(part.text) } : part));
     const scrubbed = { ...result, content };
-    if (result.structuredContent) scrubbed.structuredContent = JSON.parse(clean(JSON.stringify(result.structuredContent)));
+    if (result.structuredContent) scrubbed.structuredContent = JSON.parse(this.clean(JSON.stringify(result.structuredContent)));
     return scrubbed;
+  }
+
+  // The same for files that upstream wrote, e.g. snapshots and console logs. Binary files stay.
+  scrubFiles(files) {
+    if (!this.secrets.size) return;
+    for (const file of files) {
+      let text;
+      try {
+        const data = fs.readFileSync(file);
+        if (data.includes(0)) continue;
+        text = data.toString('utf8');
+      } catch {
+        continue;
+      }
+      const clean = this.clean(text);
+      if (clean === text) continue;
+      fs.writeFileSync(file, clean);
+      this.logger.info('scrub_file', { file });
+    }
   }
 
   // The placeholders that the providers can fill for ctx, for the tool fill_values_list.

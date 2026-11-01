@@ -141,7 +141,11 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 
 - **Basic Flow:** The facade shall replace each value that it filled in with its placeholder in
   each later result, for the time of the session.
-- **Post-condition:** The client and the log never get a filled value (QAS-002).
+- **Alternative Flow:** Upstream writes a text file in a call → the facade shall replace the values
+  in it too. These are the files that the result links, and the files of the output folder that
+  changed in the call. Binary files, e.g. screenshots, stay unchanged.
+- **Post-condition:** The client, the log and the text files of upstream never get a filled value
+  (QAS-002).
 
 #### REQ-033 — List of placeholders
 

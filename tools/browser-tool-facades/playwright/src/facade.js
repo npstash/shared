@@ -16,6 +16,7 @@ import {
   RootsListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { FillError } from '../../src/fill/provider.js';
@@ -28,7 +29,7 @@ import { listValue, readIni, sectionValues } from '../../src/ini.js';
 import { summarizeResult } from '../../src/logger.js';
 import { VERSION, sharedConfigDirs } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
-import { UPSTREAM_CLI, facadeConfigDir, tmpDirInTool, upstreamEnv } from './config.js';
+import { UPSTREAM_CLI, argValue, facadeConfigDir, tmpDirInTool, upstreamEnv } from './config.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
 const TOOL_TIMEOUT = 10 * 60 * 1000;
@@ -41,6 +42,9 @@ const ASK_TIMEOUT = 5 * 60 * 1000;
 
 // Maximum text in a debug log entry of a tool result.
 const DEBUG_TEXT_MAX = 20000;
+
+// The scrub also takes output files that changed this much before the call: file times are not exact.
+const MTIME_SLACK = 2000;
 
 const PLACEHOLDER_NOTE = ' Do not type personal data or credentials: write a placeholder such as {{email}} or {{password}}. '
   + 'The facade types the value, and the result shows only the placeholder. fill_values_list gives the placeholders of the page.';
@@ -99,10 +103,12 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
   // 2. Start Playwright MCP and connect to it.
   const tmpDir = await tmpDirInTool();
   if (!tmpDir) logger.info('tmp_dir_fallback', { reason: 'no Unix sockets in the tool folder; the OS temp folder stays' });
+  const childEnv = upstreamEnv(args, env, cwd, tmpDir);
+  const outputDir = argValue(args, '--output-dir') ?? childEnv.PLAYWRIGHT_MCP_OUTPUT_DIR;
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [UPSTREAM_CLI, ...args],
-    env: upstreamEnv(args, env, cwd, tmpDir),
+    env: childEnv,
     cwd,
     stderr: 'pipe',
   });
@@ -153,7 +159,7 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
     await client.sendRootsListChanged();
   });
 
-  const session = { client, server, logger, toolsConfig, hostPolicy, fill, browserOpen: false, pageUrl: undefined };
+  const session = { client, server, logger, toolsConfig, hostPolicy, fill, cwd, outputDir: outputDir && path.resolve(cwd, outputDir), browserOpen: false, pageUrl: undefined };
   server.setRequestHandler(ListToolsRequestSchema, async (request) => listTools(session, request));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => callTool(session, request, extra));
 
@@ -217,6 +223,27 @@ function targetUrl(name, args) {
 }
 
 // The URL of the current page, from the "- Page URL:" line of a Playwright result.
+// The files of a call: each file link in the result, and each file of the output folder that
+// changed since the call started. Upstream writes snapshots and console logs there.
+function writtenFiles(session, result, since) {
+  if (!session.fill.secrets.size) return [];
+  const files = new Set();
+  for (const part of result.content ?? []) {
+    if (part.type !== 'text') continue;
+    for (const [, link] of part.text.matchAll(/\]\(([^)\s]+)\)/g)) {
+      const file = path.resolve(session.cwd, link.replace(/#.*$/, ''));
+      if (fs.statSync(file, { throwIfNoEntry: false })?.isFile()) files.add(file);
+    }
+  }
+  if (session.outputDir && fs.existsSync(session.outputDir)) {
+    for (const entry of fs.readdirSync(session.outputDir, { recursive: true, withFileTypes: true })) {
+      const file = path.join(entry.parentPath, entry.name);
+      if (entry.isFile() && fs.statSync(file).mtimeMs >= since - MTIME_SLACK) files.add(file);
+    }
+  }
+  return [...files];
+}
+
 function pageUrlOf(result) {
   const text = result.content?.filter((part) => part.type === 'text').map((part) => part.text).join('\n') ?? '';
   const matches = [...text.matchAll(/^- Page URL: (\S+)/gm)];
@@ -266,6 +293,7 @@ async function runSteps(session, request, extra) {
   }
 
   const progressToken = request.params._meta?.progressToken;
+  const started = Date.now();
   const raw = await client.callTool({ ...request.params, arguments: forwardArgs }, undefined, {
     signal: extra.signal,
     timeout: TOOL_TIMEOUT,
@@ -277,6 +305,7 @@ async function runSteps(session, request, extra) {
   });
   session.browserOpen = name !== 'browser_close';
   const result = fill.scrub(raw);
+  fill.scrubFiles(writtenFiles(session, raw, started));
 
   // A click, a redirect or a script can open a page of a blocked host. Close it.
   const opened = pageUrlOf(result);

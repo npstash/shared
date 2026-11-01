@@ -83,7 +83,7 @@ function hasArg(args, name) {
   return args.some((arg) => arg === name || arg.startsWith(name + '='));
 }
 
-function argValue(args, name) {
+export function argValue(args, name) {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === name) return args[i + 1];
     if (args[i].startsWith(name + '=')) return args[i].slice(name.length + 1);
