@@ -33,6 +33,7 @@ show the difference and ask the user.
 | `.gitignore` | [templates/gitignore](templates/gitignore) |
 | `.gitattributes` | [templates/gitattributes](templates/gitattributes) |
 | `.kilo/kilo.jsonc` | [templates/kilo.jsonc](templates/kilo.jsonc) |
+| `.continueignore` | [templates/continueignore](templates/continueignore) |
 | `setup.sh`, `setup.bat` | copy of `shared/setup.sh` and `shared/setup.bat` |
 | `.github/workflows/tests.yml` | copy of `shared/.github/workflows/tests.yml` |
 | `projects/`, `vaults/` | empty folders; add a `.gitkeep` |

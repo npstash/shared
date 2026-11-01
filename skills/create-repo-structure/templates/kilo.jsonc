@@ -7,5 +7,28 @@
     "AGENTS.md",
     "local/AGENTS.md", "local/rules/*.md",
     "shared/AGENTS.md", "shared/rules/*.md"
-  ]
+  ],
+  // Mandatory browser tool (rule browser-automation).
+  // Kilo starts the server in the project folder, so the relative path is correct.
+  "mcp": {
+    "browser-automation-x-mcp": {
+      "type": "local",
+      "command": ["./shared/tools/browser-automation-x-mcp/run.sh", "playwright", "--config-dir", "local/configs/browser-automation-x-mcp"],
+      "enabled": true,
+      // Render mode of the browser.
+      "environment": { "RENDER_MODE": "DEFAULT" },
+      // The first start can take long.
+      "timeout": 60000
+    }
+  },
+  "permission": {
+    "browser-automation-x-mcp_*": "allow",
+    // Close the browser tool, its config and .mcp.json to the agent. The last matching rule wins.
+    "read": { "*": "allow", "shared/tools/browser-automation-x-mcp/**": "deny", "local/configs/browser-automation-x-mcp/**": "deny", ".mcp.json": "deny" },
+    "edit": { "*": "allow", "shared/tools/browser-automation-x-mcp/**": "deny", "local/configs/browser-automation-x-mcp/**": "deny", ".mcp.json": "deny" },
+    "glob": { "*": "allow", "shared/tools/browser-automation-x-mcp/**": "deny", "local/configs/browser-automation-x-mcp/**": "deny" },
+    "grep": { "*": "allow", "shared/tools/browser-automation-x-mcp/**": "deny", "local/configs/browser-automation-x-mcp/**": "deny" },
+    "list": { "*": "allow", "shared/tools/browser-automation-x-mcp/**": "deny", "local/configs/browser-automation-x-mcp/**": "deny" },
+    "bash": { "*": "allow", "*tools/browser-automation-x-mcp*": "deny", "*configs/browser-automation-x-mcp*": "deny", "*.mcp.json*": "deny" }
+  }
 }

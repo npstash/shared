@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Two-step login</title></head>
+<body>
+  <h1>Sign in</h1>
+  <!-- Step 1 shows the username. Its submit shows the password field on the same URL. -->
+  <form id="login" method="post" action="/submit">
+    <p id="step1"><label for="login-user">Email</label> <input id="login-user" name="username"></p>
+    <p id="step2" hidden><label for="login-pass">Password</label> <input id="login-pass" name="password" type="password"></p>
+    <p><button type="submit">Next</button></p>
+  </form>
+  <script>
+    document.getElementById('login').addEventListener('submit', (event) => {
+      if (!document.getElementById('step2').hidden) return;
+      event.preventDefault();
+      setTimeout(() => {
+        document.getElementById('step1').hidden = true;
+        document.getElementById('step2').hidden = false;
+      }, 300);
+    });
+  </script>
+</body>
+</html>
