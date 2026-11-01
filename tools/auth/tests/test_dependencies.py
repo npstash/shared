@@ -9,6 +9,13 @@ import dependencies as dep
 REFERENCE = Path(__file__).resolve().parents[3] / "rules" / "submodule-dependencies.py"
 
 
+@pytest.fixture(autouse=True)
+def only_tmp_path(tmp_path, monkeypatch):
+    """The search goes up to the roots above. Keep it in tmp_path: tmp_path can be in a repository."""
+    real = dep.roots
+    monkeypatch.setattr(dep, "roots", lambda start=None: (r for r in real(start) if tmp_path in r.parents))
+
+
 def make(folder: Path) -> Path:
     """A folder that is not empty: a checked-out repository."""
     folder.mkdir(parents=True, exist_ok=True)
@@ -74,6 +81,19 @@ def test_dependencies_txt_without_git_is_a_root(tmp_path):
     (root / "dependencies.txt").write_text("[shared]\n../../shared\n")
     make(tmp_path / "workspace" / "shared")
     assert dep.find("shared", root / "a" / "b") == tmp_path / "workspace" / "shared"
+
+
+def test_the_search_continues_in_the_root_above(tmp_path):
+    workspace = repo(tmp_path / "ws", '[submodule "vaults/vault-x"]\n\tpath = vaults/vault-x\n\turl = ../vault-x.git\n')
+    make(workspace / "vaults" / "vault-x")
+    shared = workspace / "shared"
+    shared.mkdir()
+    (shared / ".git").write_text("gitdir: x\n")              # a submodule: .git is a file
+    (shared / "dependencies.txt").write_text("[vault-x]\n../missing\n")
+    assert [r for r in dep.roots(shared / "tools")][:2] == [shared, workspace]
+    assert dep.find("vault-x", shared / "tools") == workspace / "vaults" / "vault-x"
+    with pytest.raises(dep.DependencyError, match=r"vault-y is not found.*in these roots: .*shared, .*ws"):
+        dep.find("vault-y", shared / "tools")
 
 
 def test_not_found_lists_the_folders_tried(tmp_path):

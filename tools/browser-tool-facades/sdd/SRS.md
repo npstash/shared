@@ -161,16 +161,27 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 
 ## 3. Tool switches
 
+#### REQ-019 — Config folder
+
+- **Trigger:** The facade starts.
+- **Basic Flow:** The facade shall read its config files from the folder that `--config-dir DIR`
+  gives. A relative path is relative to the working folder. The facade shall not give the
+  argument to upstream. The files are in [DESIGN.md](DESIGN.md#data-model).
+- **Alternative Flow:** A config file is missing → the facade shall copy its template from the
+  tool folder.
+- **Exception Flow:** `--config-dir` is missing → the facade does not start. It writes the error
+  to stderr.
+
 #### REQ-020 — Tool list in the config
 
 - **Trigger:** The facade starts.
-- **Basic Flow:** The facade shall add a line `<tool> = enabled|disabled` to `playwright/config/tools.ini` for
+- **Basic Flow:** The facade shall add a line `<tool> = enabled|disabled` to `playwright-tools.ini` for
   each tool that the file does not list. The default is `disabled` for the tools in
   DANGEROUS_TOOLS and `enabled` for the others.
 - **Alternative Flow:**
   - A value is not `enabled` or `disabled` → the facade treats the tool as disabled and logs it.
   - The user changes the file → the facade uses the new values at the next call.
-- **Post-condition:** `tools.ini` lists each tool of the facade, sorted.
+- **Post-condition:** `playwright-tools.ini` lists each tool of the facade, sorted.
 
 #### REQ-021 — Call of a disabled tool
 
@@ -195,7 +206,7 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 #### REQ-031 — Provider order
 
 - **Basic Flow:** The facade shall ask the providers in the order of `[fill] providers` in
-  `config/facade.ini`. The first provider that has a value gives it.
+  `facade.ini`. The first provider that has a value gives it.
 - **Alternative Flow:** A provider has no value → the facade asks the next provider.
 
 #### REQ-032 — Scrub of filled values
@@ -217,27 +228,29 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 #### REQ-034 — Vault provider
 
 - **Basic Flow:**
-  1. The provider shall select the vault system whose `url` has the host of the page, or a parent
-     domain of it.
-  2. It shall give the secret whose name is the placeholder name, through the vault tool.
+  1. The provider shall select the line of `[systems]` in `provider-vault.ini` whose host is the
+     host of the page, or a parent domain of it. The line gives the exact name of a vault system.
+  2. It shall give the secret whose name is the placeholder name, through the vault tool, from the
+     vault that `[vault] vault` gives.
+  3. It shall not search the vault for systems.
 - **Alternative Flow:**
-  - More systems match → the system whose `url` is the longest prefix of the page URL wins.
-  - `providers-form-fill/vault/config.ini` gives `vault_home` → the provider uses that vault.
-  - No system matches, or the system has no such secret → the provider has no value.
+  - More lines match → the line whose URL prefix is the longest prefix of the page URL wins.
+  - No line matches, or the system has no such secret → the provider has no value.
 - **Exception Flow:**
-  - Two systems match equally → error with the system names.
+  - Two lines match equally → error with the keys of the lines.
+  - `[vault] vault` is empty → error.
   - The vault tool fails → error with its message.
 
 #### REQ-035 — INI provider
 
-- **Basic Flow:** The provider shall give the value of the key from `providers-form-fill/ini/config.ini`.
+- **Basic Flow:** The provider shall give the value of the key from `provider-ini.ini`.
   The most specific section wins: a section with the exact host, then a section with a longer
   host pattern, then `[all]`.
 
 #### REQ-036 — Ask provider
 
 - **Pre-condition:** The client declared the elicitation capability. The placeholder is in
-  `[ask] fields` of `providers-form-fill/ask/config.ini`.
+  `[ask] fields` of `provider-ask.ini`.
 - **Basic Flow:** The provider shall show a dialog to the user (UI-01) and give the answer.
 - **Alternative Flow:** The user gave the value for this host and placeholder before in the
   session → the provider gives it without a dialog.
@@ -251,7 +264,7 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 
 - **Trigger:** The client calls `browser_navigate`, or `browser_tabs` with `action = new` and a URL.
 - **Basic Flow:** The facade shall check the host of the URL: first `[deny]`, then the allow
-  provider (default: `[allow]` of `.local_assets/config/host-policy.ini`).
+  provider (default: `[allow]` of `host-policy.ini`).
 - **Alternative Flow:** The URL has no host (e.g. `about:blank`) → the facade allows it.
 - **Exception Flow:** The host is blocked → the facade forwards nothing. It gives an error result
   with the host and the pattern or the list (UI-02).
@@ -265,17 +278,17 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 
 #### REQ-042 — Record the opened hosts
 
-- **Pre-condition:** `[hosts] record` in `config/facade.ini` is not `false`.
+- **Pre-condition:** `[hosts] record` in `facade.ini` is not `false`.
 - **Trigger:** A page of an allowed host opened.
 - **Basic Flow:** The default allow provider shall add the exact host to `[allow]`, also if a
   pattern covers it. It shall keep each section of `host-policy.ini` sorted and unique, and keep the
   comment lines at the top.
 - **Alternative Flow:** The host is in `[deny]` → the provider does not add it.
 
-#### REQ-043 — Local host list
+#### REQ-043 — Host list in the config folder
 
-- **Trigger:** The facade reads the host list, and `.local_assets/config/host-policy.ini` is missing.
-- **Basic Flow:** The facade shall copy `config/host-policy.template.ini` to it.
+- **Trigger:** The facade reads the host list, and `host-policy.ini` is missing in the config folder.
+- **Basic Flow:** The facade shall copy `config/host-policy.template.ini` to it (REQ-019).
 - **Alternative Flow:** The template is missing → the facade shall write `[deny]` empty and `[allow] *`.
 
 ## 6. Logging

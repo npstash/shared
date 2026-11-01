@@ -44,7 +44,7 @@ table of section 7. They have no GitHub Issues yet.
   libraries, all in the tool folder.
 - Tool switches in a committed config file.
 - Placeholders in form values, filled by providers: vault, INI file, the user (dialog).
-- A deny-list and an allow-list of hosts in one committed file, with the record of opened hosts.
+- A deny-list and an allow-list of hosts in one file of the config folder, with the record of opened hosts.
 - A JSON Lines log of each call.
 - Setup instructions for Claude Code in VSCode, the CLI, the Desktop app, the Agent SDK and Cowork.
 

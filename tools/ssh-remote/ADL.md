@@ -8,3 +8,9 @@
 - 20261101-08 Opus-5.5 6a7c648a8e53 sudo always runs as root; the password of the sudo system is the password of the SSH user
 - 20261101-09 Opus-5.5 6a7c648a8e53 Send the sudo password only if sudo -n true fails; then use sudo -k so that sudo always reads it
 - 20261101-10 Opus-5.5 6a7c648a8e53 upload --sudo copies to a temporary file in /tmp of the host, then writes the target with cat as root
+- 20261101-11 Nestor 2c0de445e142 --system gives the exact name of the SSH system and is required; the tool does not search the vault for names
+- 20261101-12 Nestor 2c0de445e142 Remove the hosts command
+- 20261101-13 Opus-5.5 2c0de445e142 --sudo needs --sudo-system with the exact name of the sudo system
+- 20261101-14 Opus-5.5 2c0de445e142 Remove the HOST argument; the host comes only from the url of the SSH system
+- 20261101-15 Nestor 2c0de445e142 The CLI needs --vault NAME or --vault-home DIR; there is no default vault
+- 20261101-16 Opus-5.5 2c0de445e142 Find the vault with vault_home() of the vault tool; remove the copy of the reference lookup code

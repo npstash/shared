@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, test } from 'node:test';
-import { ASSETS_DIR, TOOL_DIR } from '../src/paths.js';
+import { after, before, describe, test } from 'node:test';
+import { ASSETS_DIR, CONFIG_TEMPLATES, TOOL_DIR, configFile } from '../src/paths.js';
 import { FillError, FillProvider } from '../src/fill/provider.js';
 import { FillRegistry, placeholdersIn } from '../src/fill/registry.js';
 import { FileAllowProvider } from '../src/hosts/file-allow-provider.js';
@@ -253,15 +253,47 @@ describe('ini provider', () => {
   });
 });
 
-describe('vault provider', () => {
-  const callLog = path.join(TMP, 'vault-calls.log');
-  const make = (extra = '') => new VaultProvider({
-    name: 'vault',
-    configFile: path.join(TMP, 'vault', 'config.ini'),
-    config: parseIni(`[vault]\ntool = ${path.join(FAKE_VAULT, 'run.sh')}\nvault_home = ${FAKE_VAULT}\n${extra}`),
+describe('config folder', () => {
+  test('a missing config file is a copy of its template; an existing file stays', () => {
+    const dir = path.join(TMP, 'config-folder');
+    fs.rmSync(dir, { recursive: true, force: true });
+    const file = configFile(dir, 'facade.ini');
+    assert.equal(file, path.join(dir, 'facade.ini'));
+    assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(CONFIG_TEMPLATES['facade.ini'], 'utf8'));
+    fs.writeFileSync(file, '[fill]\nproviders = ini\n');
+    assert.equal(fs.readFileSync(configFile(dir, 'facade.ini'), 'utf8'), '[fill]\nproviders = ini\n');
+    assert.equal(fs.existsSync(configFile(dir, 'other.ini')), false);   // no template: no file
   });
 
-  test('selects the system by the host of its url', async () => {
+  test('each provider has a template', () => {
+    for (const name of fs.readdirSync(path.join(TOOL_DIR, 'providers-form-fill'))) {
+      assert.ok(fs.existsSync(path.join(TOOL_DIR, 'providers-form-fill', name, 'config.template.ini')), name);
+    }
+  });
+});
+
+describe('vault provider', () => {
+  const callLog = path.join(TMP, 'vault-calls.log');
+  const make = (systems = '127.0.0.1 = Fixture site\nexample.com = Example C\nhttps://example.com/a = Example A\n'
+    + 'https://example.com/a/b = Example B\n', vault = 'vault-test') => new VaultProvider({
+    name: 'vault',
+    configFile: path.join(TMP, 'provider-vault.ini'),
+    config: parseIni(`[vault]\nvault = ${vault}\n\n[systems]\n${systems}`),
+  });
+  const calls = async (action) => {
+    fs.rmSync(callLog, { force: true });
+    process.env.FAKE_VAULT_LOG = callLog;
+    try {
+      await action();
+    } finally {
+      delete process.env.FAKE_VAULT_LOG;
+    }
+    return fs.existsSync(callLog) ? fs.readFileSync(callLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : [];
+  };
+  before(() => { process.env.BROWSER_FACADES_VAULT_TOOL = path.join(FAKE_VAULT, 'run.sh'); });
+  after(() => { delete process.env.BROWSER_FACADES_VAULT_TOOL; });
+
+  test('selects the system by the host in [systems]', async () => {
     const provider = make();
     assert.equal(await provider.resolve('password', { host: '127.0.0.1', url: 'http://127.0.0.1:8080/login' }), 'Fixture-Pa55-word');
     assert.deepEqual(await provider.list({ host: '127.0.0.1', url: 'http://127.0.0.1:8080/' }), ['username', 'password']);
@@ -270,22 +302,32 @@ describe('vault provider', () => {
     assert.equal(await provider.resolve('password', {}), undefined);
   });
 
-  test('the longest url prefix wins; an equal match is an error', async () => {
+  test('a host matches its subdomains; the longest url prefix wins; an equal match is an error', async () => {
     const provider = make();
     assert.equal(await provider.resolve('password', { host: 'example.com', url: 'https://example.com/a/b/c' }), 'pass-b');
+    assert.equal(await provider.resolve('password', { host: 'example.com', url: 'https://example.com/a/x' }), 'pass-a');
     assert.equal(await provider.resolve('password', { host: 'www.example.com', url: 'https://www.example.com/' }).catch((e) => e.message),
-      'more vault systems match the host www.example.com: Example A; Example B; Example C. Give each a more specific url.');
+      `more lines of [systems] in ${path.join(TMP, 'provider-vault.ini')} match the host www.example.com: `
+      + 'example.com; https://example.com/a; https://example.com/a/b. Give each a more specific URL prefix.');
+    assert.deepEqual(await provider.list({ host: 'www.example.com', url: 'https://www.example.com/' }), []);
   });
 
-  test('gives the vault home to the vault tool', async () => {
-    fs.rmSync(callLog, { force: true });
-    process.env.FAKE_VAULT_LOG = callLog;
-    try {
-      await make().list({ host: '127.0.0.1' });
-    } finally {
-      delete process.env.FAKE_VAULT_LOG;
-    }
-    assert.deepEqual(JSON.parse(fs.readFileSync(callLog, 'utf8')), ['--vault-home', FAKE_VAULT, 'list']);
+  test('asks the vault only for the systems in [systems], with the vault name', async () => {
+    const log = await calls(async () => {
+      const provider = make();
+      await provider.list({ host: '127.0.0.1' });
+      await provider.resolve('password', { host: '127.0.0.1' });
+      await provider.list({ host: 'other.example' });
+    });
+    assert.deepEqual(log, [['--vault', 'vault-test', 'get-system', 'Fixture site'],
+      ['--vault', 'vault-test', 'get-secret', 'Fixture site', 'password']]);
+  });
+
+  test('needs the vault name; an unknown system is an error of the vault tool', async () => {
+    assert.match(await make('127.0.0.1 = Fixture site\n', '').resolve('password', { host: '127.0.0.1' }).catch((e) => e.message),
+      /the vault provider needs "vault = vault-<name>"/);
+    assert.match(await make('127.0.0.1 = Missing\n').resolve('password', { host: '127.0.0.1' }).catch((e) => e.message),
+      /the vault tool failed \(get-system\): error: unknown system 'Missing'/);
   });
 });
 
@@ -299,9 +341,11 @@ describe('vault tool contract', () => {
 
   test('the vault tool has the options and commands of the vault provider', { skip: !fs.existsSync(tool) && `no vault tool at ${tool}` }, () => {
     const usage = help('--help');
-    assert.match(usage, /--vault-home/);
+    assert.match(usage, /--vault NAME/);
     const commands = usage.match(/\{([a-z,-]+)\}/)[1].split(',');
-    for (const command of ['list', 'get-secret']) assert.ok(commands.includes(command), `the vault tool has no command ${command}`);
+    for (const command of ['get-system', 'get-secret']) assert.ok(commands.includes(command), `the vault tool has no command ${command}`);
+    assert.ok(!commands.includes('list'), 'the vault tool lists its systems');
+    assert.match(help('get-system', '--help'), /get-system \[-h\] system/);
     assert.match(help('get-secret', '--help'), /get-secret \[-h\] system key/);
   });
 });

@@ -3,10 +3,11 @@
 The passwords go from the vault to paramiko and to the stdin of sudo. They never go to a
 command line, an environment variable, a file or the output.
 
-    run.sh hosts
-    run.sh exec HOST [--sudo] -- CMD ...
-    run.sh upload HOST LOCAL REMOTE [--sudo]
-    run.sh download HOST REMOTE LOCAL
+    run.sh exec --system NAME [--sudo --sudo-system NAME] -- CMD ...
+    run.sh upload --system NAME LOCAL REMOTE [--sudo --sudo-system NAME]
+    run.sh download --system NAME REMOTE LOCAL
+
+The user gives the exact system names. The tool does not search the vault for them.
 """
 from __future__ import annotations
 
@@ -20,12 +21,8 @@ from urllib.parse import urlsplit
 
 import paramiko
 
-from credstore import CredentialError, Store
-from dependencies import DependencyError, find
+from credstore import CredentialError, Store, vault_home
 
-TOOL = Path(__file__).resolve().parent.parent
-SSH_SUFFIX = " SSH"      # an SSH system is "<HOST> SSH...", e.g. "NUC15 SSH in LAN"
-SUDO_SUFFIX = " SUDO"    # its sudo system is "<HOST> SUDO"
 CONNECT_TIMEOUT = 15     # seconds
 POLL = 0.05              # seconds between reads of a channel
 
@@ -44,20 +41,6 @@ class Target:
     port: int
 
 
-def vault_home(arg: str | None) -> Path:
-    if arg:
-        return Path(arg)
-    try:
-        return find("vault-main", TOOL)
-    except DependencyError as exc:
-        raise RemoteError(f"{exc}; give --vault-home") from exc
-
-
-def ssh_systems(home: Path) -> dict[str, str | None]:
-    """SSH system name -> url, from the plaintext index."""
-    return {n: c.url for n, c in Store(home).read_index().items() if SSH_SUFFIX in n}
-
-
 def parse_url(system: str, url: str | None) -> tuple[str, int]:
     parts = urlsplit(url or "")
     if parts.scheme != "ssh" or not parts.hostname:
@@ -65,24 +48,13 @@ def parse_url(system: str, url: str | None) -> tuple[str, int]:
     return parts.hostname, parts.port or 22
 
 
-def resolve(home: Path, host: str, system: str | None = None, sudo_system: str | None = None) -> Target:
-    index = Store(home).read_index()
-    if system is None:
-        prefix = (host + SSH_SUFFIX).casefold()
-        found = [n for n in index if n.casefold().startswith(prefix)]
-        if len(found) != 1:
-            known = ", ".join(ssh_systems(home)) or "none"
-            what = "no system" if not found else f"more than one system ({', '.join(found)})"
-            raise RemoteError(f"{what} for {host!r}; give --system (SSH systems: {known})")
-        system = found[0]
-    elif system not in index:
-        raise RemoteError(f"unknown system {system!r}")
-    if sudo_system is None:
-        name = host + SUDO_SUFFIX
-        sudo_system = next((n for n in index if n.casefold() == name.casefold()), None)
-    elif sudo_system not in index:
-        raise RemoteError(f"unknown system {sudo_system!r}")
-    hostname, port = parse_url(system, index[system].url)
+def resolve(home: Path, system: str, sudo_system: str | None = None) -> Target:
+    """The target of the SSH system `system`. Both names must be exact."""
+    store = Store(home)
+    url = store.get_system(system).url
+    if sudo_system is not None:
+        store.get_system(sudo_system)
+    hostname, port = parse_url(system, url)
     return Target(system, sudo_system, hostname, port)
 
 
@@ -158,8 +130,7 @@ def run_command(home: Path, client: paramiko.SSHClient, target: Target, command:
     if not sudo:
         return _run(client, command, out, err)
     if not target.sudo_system:
-        raise RemoteError(f"no sudo system for {target.ssh_system!r}; add '<HOST>{SUDO_SUFFIX}' "
-                          "to the vault or give --sudo-system")
+        raise RemoteError("--sudo needs --sudo-system NAME")
     # sudo asks for the password of the SSH user; the SUDO system holds it.
     _, password = _login(home, target.sudo_system)
     # Send the password only if sudo asks for it. Else it would go to the stdin of the command.
@@ -199,15 +170,15 @@ def download(client: paramiko.SSHClient, remote: str, local: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ssh-remote", description="Remote Linux machines over SSH, "
                                  "with the credentials from the vault.")
-    ap.add_argument("--vault-home", help="the vault home; default: vault-main")
+    where = ap.add_mutually_exclusive_group()
+    where.add_argument("--vault-home", metavar="DIR", help="the folder of the vault")
+    where.add_argument("--vault", metavar="NAME", help="the folder name of the vault, e.g. vault-main")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("hosts", help="list the SSH systems of the vault")
 
     def host_parser(name: str, help: str) -> argparse.ArgumentParser:
         p = sub.add_parser(name, help=help)
-        p.add_argument("host", help="the first part of the system name, e.g. NUC15")
-        p.add_argument("--system", help="the SSH system; default: the one '<HOST> SSH...'")
-        p.add_argument("--sudo-system", help="the sudo system; default: '<HOST> SUDO'")
+        p.add_argument("--system", required=True, help="the exact name of the SSH system")
+        p.add_argument("--sudo-system", help="the exact name of the sudo system; --sudo needs it")
         return p
 
     p = host_parser("exec", "run a command; the exit code is that of the command")
@@ -225,14 +196,12 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     try:
-        home = vault_home(a.vault_home)
-        if a.cmd == "hosts":
-            for name, url in ssh_systems(home).items():
-                print(f"{name}\t{url or ''}")
-            return 0
+        home = vault_home(a.vault, a.vault_home)
         if (a.cmd == "exec") != bool(command):
             ap.error("give a command after -- only to exec")
-        target = resolve(home, a.host, a.system, a.sudo_system)
+        if getattr(a, "sudo", False) and not a.sudo_system:
+            ap.error("--sudo needs --sudo-system NAME")
+        target = resolve(home, a.system, a.sudo_system)
         client = connect(home, target)
         try:
             if a.cmd == "exec":

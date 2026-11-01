@@ -1,5 +1,5 @@
 // Placeholders in form values: the agent writes {{email}}, the facade puts in the value.
-// The facade asks the providers in the order of "[fill] providers" in config/facade.ini.
+// The facade asks the providers in the order of "[fill] providers" in facade.ini.
 // Each facade gives its fill arguments: the string arguments of its tools that hold placeholders.
 // The first provider that has a value gives it. The client never sees the value: the facade
 // replaces it with the placeholder in each result and in each file that upstream wrote (scrub).
@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readIni } from '../ini.js';
+import { configFile } from '../paths.js';
 import { FillError } from './provider.js';
 
 const PLACEHOLDER = /\{\{\s*([A-Za-z][A-Za-z0-9_.-]*)\s*\}\}/g;
@@ -26,13 +27,14 @@ export class FillRegistry {
     this.secrets = new Map();
   }
 
-  static async load({ names, providersDir, providersConfigDir, logger, fillArguments }) {
+  // The config of a provider is provider-<name>.ini in configDir, first a copy of its template.
+  static async load({ names, providersDir, configDir, logger, fillArguments }) {
     const providers = [];
     for (const name of names) {
       const dir = path.join(providersDir, name);
-      const configFile = path.join(providersConfigDir, name, 'config.ini');
+      const file = configFile(configDir, `provider-${name}.ini`, path.join(dir, 'config.template.ini'));
       const { default: Provider } = await import(pathToFileURL(path.join(dir, 'index.js')).href);
-      providers.push(new Provider({ name, dir, configFile, config: readIni(configFile), logger }));
+      providers.push(new Provider({ name, dir, configFile: file, config: readIni(file), logger }));
     }
     logger.info('fill_providers', { providers: names });
     return new FillRegistry({ providers, logger, fillArguments });

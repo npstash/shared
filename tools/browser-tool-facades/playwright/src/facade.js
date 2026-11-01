@@ -3,7 +3,7 @@
 //   MCP client (Claude Code) <-> facade server | facade client <-> Playwright MCP (child process)
 //
 // Each tool call goes through these steps (see callTool()):
-//   tool switch (playwright/config/tools.ini) → host check (.local_assets/config/host-policy.ini)
+//   tool switch (playwright-tools.ini) → host check (host-policy.ini); both in the config folder
 //   → placeholders (providers-form-fill/)
 //   → Playwright MCP → scrub of filled values → host check of the opened page → log
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -27,10 +27,10 @@ import { HostsFile } from '../../src/hosts/hosts-file.js';
 import { hostOfUrl } from '../../src/hosts/patterns.js';
 import { listValue, readIni, sectionValues } from '../../src/ini.js';
 import { summarizeResult } from '../../src/logger.js';
-import { VERSION, sharedConfigDirs } from '../../src/paths.js';
+import { PROVIDERS_DIR, VERSION, configFile } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
 import { CHROMIUM_BROWSERS, writeChromePrefs } from './chrome-prefs.js';
-import { DEFAULT_BROWSER, TMP_DIR, UPSTREAM_CLI, argValue, connectsToBrowser, facadeConfigDir, renderMode, tmpDirForChromium, upstreamEnv, withoutHeadless } from './config.js';
+import { DEFAULT_BROWSER, TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, UPSTREAM_CLI, argValue, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutHeadless } from './config.js';
 import { cleanStaleXvfb, startXvfb } from './xvfb.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
@@ -55,7 +55,7 @@ const INSTRUCTIONS = 'This server is a facade for Playwright MCP. Do not type pe
   + 'Write placeholders such as {{name}}, {{email}}, {{username}} or {{password}} as form values. '
   + 'Call fill_values_list to see the placeholders for the current page.';
 
-// The tools of the facade itself. Each one is also in playwright/config/tools.ini.
+// The tools of the facade itself. Each one is also in playwright-tools.ini.
 const FACADE_TOOLS = [{
   name: 'fill_values_list',
   description: 'List the placeholders that the facade can fill on the current page, e.g. {{email}}. '
@@ -82,22 +82,23 @@ const FILL_ARGUMENTS = {
 
 const FILL_TOOLS = new Set(Object.keys(FILL_ARGUMENTS));
 
-export async function startFacade({ args: givenArgs, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
+// configDir: the config folder (--config-dir). See src/paths.js.
+export async function startFacade({ args: givenArgs, configDir, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
   let markDownstreamReady;
   const downstreamReady = new Promise((resolve) => { markDownstreamReady = resolve; });
   let server;
 
   // 1. Load the config of the facade.
-  const dirs = sharedConfigDirs(env);
-  const facadeIni = readIni(path.join(dirs.config, 'facade.ini'));
-  const toolsConfig = new ToolsConfig(path.join(facadeConfigDir(env), 'tools.ini'), logger, DANGEROUS_TOOLS);
-  const hostsFile = new HostsFile(path.join(dirs.local, 'host-policy.ini'), path.join(dirs.config, 'host-policy.template.ini'));
+  logger.info('config_dir', { dir: configDir });
+  const facadeIni = readIni(configFile(configDir, 'facade.ini'));
+  const toolsConfig = new ToolsConfig(configFile(configDir, TOOLS_CONFIG, TOOLS_TEMPLATE), logger, DANGEROUS_TOOLS);
+  const hostsFile = new HostsFile(configFile(configDir, 'host-policy.ini'));
   const record = sectionValues(facadeIni, 'hosts').record !== 'false';
   const hostPolicy = new HostPolicy({ hostsFile, allowProvider: new FileAllowProvider({ hostsFile, record, logger }) });
   const fill = await FillRegistry.load({
     names: listValue(sectionValues(facadeIni, 'fill').providers),
-    providersDir: dirs.providers,
-    providersConfigDir: dirs.providersConfig,
+    providersDir: PROVIDERS_DIR,
+    configDir,
     logger,
     fillArguments: FILL_ARGUMENTS,
   });
@@ -167,7 +168,7 @@ export async function startFacade({ args: givenArgs, logger, serverTransport, cw
   const upstreamCapabilities = client.getServerCapabilities() ?? {};
   logger.info('upstream_ready', { pid: transport.pid, server: upstreamInfo, capabilities: upstreamCapabilities });
 
-  // Each tool of the facade has a line in playwright/config/tools.ini. Add the missing ones.
+  // Each tool of the facade has a line in playwright-tools.ini. Add the missing ones.
   toolsConfig.addMissing([...(await allTools(client)).map((tool) => tool.name), ...FACADE_TOOLS.map((tool) => tool.name)]);
 
   // 4. Make the server for the downstream client. It has the tools capability of upstream.

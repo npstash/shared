@@ -1,4 +1,4 @@
-// INI provider: values from providers-form-fill/ini/config.ini. For values that are not secret.
+// INI provider: values from provider-ini.ini in the config folder. For values that are not secret.
 //   [all]            values for each host
 //   [<host pattern>] values for matching hosts only, e.g. [*.example.com] (see src/hosts/patterns.js)
 // The most specific section wins: an exact host, then a longer wildcard pattern, then [all].

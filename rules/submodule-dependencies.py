@@ -78,26 +78,48 @@ def _exists(folder: Path) -> bool:
     return folder.is_dir() and any(folder.iterdir())
 
 
+def roots(start: Path | str | None = None):
+    """Each root from `start` upwards: the root of `start`, then the root above it, and so on."""
+    folder = Path(start if start is not None else Path(__file__).parent).resolve()
+    while True:
+        try:
+            root = repo_root(folder)
+        except DependencyError:
+            return
+        yield root
+        if root.parent == root:
+            return
+        folder = root.parent
+
+
 def find(name: str, start: Path | str | None = None) -> Path:
     """The folder of the shareable submodule `name`.
 
     `start` is a folder of the project or tool (default: the folder of this file). The search
-    uses the repository root above `start`: first its .gitmodules, then its dependencies.txt.
+    uses the root above `start`: first its .gitmodules, then its dependencies.txt. If the root
+    does not give `name`, the search continues in the root above it, e.g. the repository that
+    has this repository as a submodule.
     """
-    root = repo_root(Path(start) if start is not None else Path(__file__).parent)
-    path = submodules(root).get(name)
-    if path is not None:
-        folder = (root / path).resolve()
-        if not _exists(folder):
-            raise DependencyError(f"the submodule {name} in {folder} is empty; run setup.sh in {root}")
-        return folder
-    tried = [(root / p).resolve() for p in dependencies(root).get(name, [])]
-    for folder in tried:
-        if _exists(folder):
+    tried: list[Path] = []
+    checked: list[Path] = []
+    for root in roots(start):
+        checked.append(root)
+        path = submodules(root).get(name)
+        if path is not None:
+            folder = (root / path).resolve()
+            if not _exists(folder):
+                raise DependencyError(f"the submodule {name} in {folder} is empty; run setup.sh in {root}")
             return folder
+        for folder in [(root / p).resolve() for p in dependencies(root).get(name, [])]:
+            if _exists(folder):
+                return folder
+            tried.append(folder)
+    if not checked:
+        raise DependencyError(f"no folder with .git or {DEPENDENCIES} in {start} or above it")
     raise DependencyError(
-        f"{name} is not found: it is not a submodule in {root / '.gitmodules'}, and no folder of "
-        f"[{name}] in {root / DEPENDENCIES} exists" + "".join(f"\n  {f}" for f in tried))
+        f"{name} is not found: it is not a submodule in .gitmodules, and no folder of [{name}] in "
+        f"{DEPENDENCIES} exists, in these roots: {', '.join(map(str, checked))}"
+        + "".join(f"\n  {f}" for f in tried))
 
 
 def main(argv: list[str]) -> int:

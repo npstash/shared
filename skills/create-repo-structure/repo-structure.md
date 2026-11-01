@@ -31,11 +31,14 @@ projects/             projects and groups of projects; see "projects"
   skills/<name>/SKILL.md          skill; setup.sh links it to .claude/skills/<name>
   skills/<agent>/<name>/SKILL.md  skill for one agent only
   tools/<name>/                   tool; see "Tool and project folders"
+  configs/<name>/                 only in local/: config of the tool or project <name>, for this repository
 ```
 
 - Omit a folder that has no content.
 - Add an index line for each rule and skill to the section of its agent in `AGENTS.md`.
 - Do not index tools in `AGENTS.md`. A rule or a skill gives a link to a tool if necessary.
+- Put the config of a tool or a project that this repository uses into `local/configs/<name>/`.
+  Do not index configs in `AGENTS.md`.
 - Do not add a `CLAUDE.md`. Claude Code reads `AGENTS.md`.
 - A container that is a submodule also holds the root files of its repository.
 - The user decides the container and the folder of each rule, tool and skill.

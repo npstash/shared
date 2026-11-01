@@ -1,6 +1,7 @@
 // API of a fill provider. A provider gives the values for placeholders such as {{email}}.
 // To add a provider: make providers-form-fill/<name>/index.js (default export: a FillProvider subclass)
-// and providers-form-fill/<name>/config.ini, then add <name> to "[fill] providers" in config/facade.ini.
+// and providers-form-fill/<name>/config.template.ini, then add <name> to "[fill] providers" in facade.ini.
+// The config of the provider is provider-<name>.ini in the config folder (see src/paths.js).
 //
 // ctx = { host, url, tool, field, elicit }
 //   host, url  the page that gets the value (host is undefined if the page has no host)
@@ -10,7 +11,7 @@
 //              undefined if the client cannot show a form to the user
 
 export class FillProvider {
-  // dir: the folder of the provider; config: its parsed config.ini (see src/ini.js).
+  // dir: the folder of the provider; config: its parsed provider-<name>.ini (see src/ini.js).
   constructor({ name, dir, configFile, config, logger }) {
     this.name = name;
     this.dir = dir;

@@ -16,7 +16,8 @@ MCP client (Claude Code) <-stdio-> facade <-stdio-> Playwright MCP (child proces
   profiles and the output files stay in the tool folder.
 - At shutdown, it closes the browser. Then a persistent profile keeps its cookies and localStorage.
 
-Start: `../run.sh playwright [args]` (see [Run](../README.md#run)). Client setup:
+Start: `../run.sh playwright --config-dir DIR [args]` (see [Run](../README.md#run) and
+[Config folder](../README.md#config-folder)). Client setup:
 [docs/clients.md](docs/clients.md).
 
 ## Linux: libraries and fonts
@@ -33,8 +34,8 @@ also gets fonts. See [SRS REQ-012, REQ-013](../sdd/SRS.md#2-runtime-and-portabil
 
 ## Arguments and defaults
 
-Each argument after `playwright` goes to Playwright MCP. For the list, run
-`../run.sh playwright --help`. Examples: `--isolated`, `--browser firefox`,
+`--config-dir DIR` is for the facade. Each other argument after `playwright` goes to Playwright
+MCP. For the list, run `../run.sh playwright --config-dir DIR --help`. Examples: `--isolated`, `--browser firefox`,
 `--user-data-dir <path>`, `--caps vision,pdf`.
 
 The facade sets these defaults. An argument or an env variable of the user overrides each of them.
@@ -90,8 +91,9 @@ Some sites block a headless browser. Thus the facade never runs headless by defa
   keeps the result.
 ## Tool switches
 
-[config/tools.ini](config/tools.ini) has one line for each tool of this facade: `<tool> = enabled`
-or `<tool> = disabled`. At start, the facade adds the missing tools with their default.
+`playwright-tools.ini` in the config folder has one line for each tool of this facade:
+`<tool> = enabled` or `<tool> = disabled`. Its template is
+[config/tools.template.ini](config/tools.template.ini). At start, the facade adds the missing tools with their default.
 
 - Disabled by default: `browser_run_code_unsafe`, `browser_evaluate`, `browser_file_upload` and
   `browser_drop`. A web page can misuse them through prompt injection.

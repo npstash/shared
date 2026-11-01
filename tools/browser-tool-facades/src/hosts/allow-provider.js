@@ -1,5 +1,5 @@
 // API of an allow provider. The facade checks the deny-list first, then asks the provider.
-// To add a provider: extend AllowProvider and select it in config/facade.ini ([hosts] provider).
+// To add a provider: extend AllowProvider and select it in facade.ini ([hosts] provider).
 //
 // ctx = { url, tool }: the URL that the page opens or opened, and the tool that caused it.
 

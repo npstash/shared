@@ -20,7 +20,7 @@ describe('tool switches', () => {
   after(async () => { await facade?.close(); });
 
   test('tools.ini gets a line for each tool; dangerous tools are disabled', async () => {
-    const file = path.join(facade.config.facadeConfigDir, 'tools.ini');
+    const file = path.join(facade.config.configDir, 'playwright-tools.ini');
     const values = Object.fromEntries(readIni(file).sections.get('tools').map((line) => [line.key, line.value]));
     const names = (await facade.client.listTools()).tools.map((tool) => tool.name);
     assert.deepEqual(Object.keys(values).sort(), [...names].sort());
@@ -79,7 +79,7 @@ describe('host lists', () => {
       await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
       const blocked = await callText(facade.client, 'browser_navigate', { url: `${site.otherUrl}/` });
       assert.match(blocked.text, /the host localhost is not in \[allow\]/);
-      const text = fs.readFileSync(path.join(facade.config.localConfigDir, 'host-policy.ini'), 'utf8');
+      const text = fs.readFileSync(path.join(facade.config.configDir, 'host-policy.ini'), 'utf8');
       assert.equal(text, '# keep me\n\n[deny]\n\n[allow]\n127.0.0.*\n127.0.0.1\nzz.example\n');
     } finally {
       await facade.close();
@@ -91,7 +91,7 @@ describe('host lists', () => {
     const facade = await startFacadeClient({ name: 'policy-norecord', config: { hosts, facade: '[fill]\nproviders = ini\n[hosts]\nrecord = false\n' } });
     try {
       await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
-      assert.equal(fs.readFileSync(path.join(facade.config.localConfigDir, 'host-policy.ini'), 'utf8'), hosts);
+      assert.equal(fs.readFileSync(path.join(facade.config.configDir, 'host-policy.ini'), 'utf8'), hosts);
     } finally {
       await facade.close();
     }

@@ -65,3 +65,14 @@ The log of the decisions that change the design. Format and rules:
 - 20261101-09 Nestor 6fa20c67240a Resolve DEFAULT to HEADED_INVISIBLE on WSL and on Linux without a display, else to HEADED; resolve HEADED without a display to HEADED_INVISIBLE; never fall back to HEADLESS; stop with an error when Xvfb is necessary and not available
 - 20261101-10 Nestor 6fa20c67240a Apply the render mode also with a config file of Playwright MCP
 - 20261101-11 Nestor 6fa20c67240a Stop Xvfb with the parent-death signal of setpriv; record each Xvfb in .local_assets/xvfb/ and kill the Xvfb of each facade that does not run at each facade start; do not reuse Xvfb
+- 20261101-12 Nestor 2c0de445e142 Keep all config files of the facades in a config folder outside the tool, e.g. local/configs/browser-facade of the repository
+- 20261101-13 Nestor 2c0de445e142 The facade needs the argument --config-dir DIR; a relative path is relative to the working folder
+- 20261101-14 Nestor 2c0de445e142 The tool keeps a template of each config file; the facade copies a template to a missing file
+- 20261101-15 Nestor 2c0de445e142 The config folder is flat: facade.ini, host-policy.ini, <facade>-tools.ini, provider-<name>.ini
+- 20261101-16 Nestor 2c0de445e142 The host list is host-policy.ini in the config folder; .local_assets/config/host-policy.ini is removed
+- 20261101-17 Nestor 2c0de445e142 The vault provider selects a vault system only from [systems] of provider-vault.ini: <host or URL prefix> = <exact system name>; it does not search the vault
+- 20261101-18 Nestor 2c0de445e142 A [systems] key is a host or a URL prefix; a host also matches its subdomains; the longest URL prefix wins
+- 20261101-19 Nestor 2c0de445e142 provider-vault.ini gives the folder name of the vault in [vault] vault; it has no default
+- 20261101-20 Nestor 2c0de445e142 The vault provider finds the vault tool beside this tool; the config gives no paths
+- 20261101-21 Opus-5.5 2c0de445e142 The vault provider gets the secret names of a system with get-system and keeps them for the session
+- 20261101-22 Opus-5.5 2c0de445e142 BROWSER_FACADES_VAULT_TOOL gives a test double of the vault tool; the other config env variables are removed

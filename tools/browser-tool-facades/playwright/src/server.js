@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Entry point: the Playwright facade as an MCP server on stdio.
-// Each argument goes to Playwright MCP without a change. See README.md.
+// --config-dir DIR gives the config folder. Each other argument goes to Playwright MCP without a
+// change. See README.md.
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loggerOptions } from './config.js';
+import { loggerOptions, takeConfigDir } from './config.js';
 import { startFacade } from './facade.js';
 import { createLogger } from '../../src/logger.js';
 
-const args = process.argv.slice(2);
 const logger = createLogger(loggerOptions());
 
 process.on('uncaughtException', (error) => {
@@ -18,8 +18,10 @@ process.on('unhandledRejection', (error) => {
 });
 
 try {
+  const { configDir, args } = takeConfigDir(process.argv.slice(2));
   const facade = await startFacade({
     args,
+    configDir,
     logger,
     serverTransport: new StdioServerTransport(),
     // Without Playwright MCP the facade has no tools. Stop, so that the client shows the failure.

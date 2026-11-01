@@ -9,59 +9,85 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 
 | File in the vault home | Committed | Contents |
 | --- | --- | --- |
-| `credentials.json` | yes | Source of truth: system → `url`, `authority_info`, `credentials`. Secret values are always cleared. |
-| `credentials.enc` | yes | The same document with secret values, encrypted with the master key in the `openssl enc -aes-256-cbc -pbkdf2` format. |
+| `vault.json` | yes | The vault: entry ID → encrypted name and encrypted entry. See "Entries". |
 | `master.enc.key` | yes | The master key (256 random bits, base64), encrypted with the passphrase. |
+| `admin.enc.key` | yes | The admin private key, encrypted with the passphrase. Only `rotate-master-key` uses it. |
+| `admin.pub` | yes | The admin public key. It encrypts the name of each entry. |
 | `recipients/<name>.pub` | yes | Public key (RSA-3072) of the clone `<name>`. |
 | `recipients/<name>.master.enc` | yes | The master key, encrypted for `<name>` (RSA-OAEP, SHA-256). |
 | `recipients/<name>.inf` | yes | Information about the clone of `<name>`: OS, WSL, IP addresses, path, repository URL. See [docs/clone-keys.md](docs/clone-keys.md#clone-information). |
 | `clone.<name>.key` | no | Private key of a clone. Plain, or encrypted with a key passphrase in the OS keyring. |
+| `entry-<ID>.json` | no | Edit file of one entry. See "Edit". |
 | `access.log` | no | One line for each secret given out, key operation and failed open. |
-| `.githooks/pre-commit` | yes | Stops a commit of `credentials.json` with secret values, of a key file and of the log. Needs only `sh` and `awk`. |
+| `.githooks/pre-commit` | yes | Stops a commit of an edit file, a key file and the log. Needs only `sh`. |
 | `setup.sh`, `setup.bat` | yes | Turn the hook on in a clone: `git config core.hooksPath .githooks`. |
+
+## Entries
+
+No command lists the entries. To use an entry, a caller must know its exact name.
+
+- The entry ID is HMAC-SHA256 of the name. Its key comes from the master key.
+- Each entry is encrypted with AES-256-GCM. Its key comes from the master key and the name.
+- The name is also encrypted with the admin public key. Only the passphrase opens these names.
+  `rotate-master-key` needs them.
+- `vault.json` shows no names, URLs or secrets. `openssl` cannot open an entry.
 
 ## Finding the vault
 
 - Python: give `vault_home`. It has no default.
-- CLI: give `--vault-home DIR`. Without it, the CLI finds `vault-main` as the rule
-  [submodule-dependencies](../../rules/submodule-dependencies.md) says. It starts in this folder.
-  See [dependencies.txt](../../dependencies.txt) of the repository shared.
+- CLI: give `--vault-home DIR`, or `--vault NAME` with the folder name of a vault, e.g.
+  `vault-main`. The CLI finds `NAME` as the rule
+  [submodule-dependencies](../../rules/submodule-dependencies.md) says. It starts in this
+  folder and continues in the repositories above it.
+- The CLI has no default vault. Without the two options, it stops and gives the vaults that it
+  finds: the submodules `vault-*` and the sections `[vault-*]` of `dependencies.txt` in the
+  repositories above this folder.
 - `create-vault` needs `--vault-home`.
+
+## Edit
+
+1. `run.sh edit NAME ...` writes an edit file `entry-<ID>.json` for each system into the
+   vault home, and prints its path. A new system gets a file with empty fields.
+2. Change the file. Do not change `name` and `revision`.
+3. `run.sh sync` applies each edit file, then deletes it. Commit the vault home.
 
 ```json
 {
-  "Github npstash/all 01": {
-    "url": "https://github.com/npstash",
-    "authority_info": ["What this credential is allowed to do"],
-    "credentials": { "username": "npstash", "token": "" }
-  }
+  "name": "Github npstash/all 01",
+  "revision": "3f1c0d9a7b2e4c55",
+  "url": "https://github.com/npstash",
+  "authority_info": ["What this credential is allowed to do"],
+  "credentials": { "username": "", "token": "" }
 }
 ```
 
-The two files mirror each other, secret values excepted. `credentials.json` decides which
-systems and secrets exist. A blank secret keeps the stored value. A blank secret with no
-stored value is an error. Use `rename-system` or `rename-secret` to change a name.
+- The secret values are empty. An empty value keeps the stored value. A new value replaces it.
+- Remove a field to remove it from the system. Add a field to add it.
+- A new secret with an empty value is an error.
+- If the entry changed after `edit`, `sync` refuses the file. Run `edit` again.
+- `sync` applies all files, or none.
+- To rename, use `rename-system` or `rename-secret`. To delete a system, use `delete-system`.
 
 ## Aliases
 
 Give `"alias_of": "TARGET"` to a system to use the secrets of `TARGET`. The secrets of
 the alias add to the target secrets, or replace them. The alias keeps its own `url` and
-`authority_info`. `get-system`, `get-secret` and `list` show the resolved secrets.
+`authority_info`. `get-system` and `get-secret` show the resolved secrets.
 
 ```json
 {
-  "CORP LDAP": { "credentials": { "username": "", "password": "" } },
-  "GitHub Enterprise": {
-    "url": "https://github.example.com",
-    "alias_of": "CORP LDAP",
-    "credentials": { "token": "" }
-  }
+  "name": "GitHub Enterprise",
+  "revision": "",
+  "url": "https://github.example.com",
+  "alias_of": "CORP LDAP",
+  "credentials": { "token": "t0ken" }
 }
 ```
 
 - The target must exist and must not be an alias.
+- The entry of a target keeps the names of its aliases.
 - `set-system` refuses a secret that the alias takes from the target. Set it on the target.
-- `rename-system` refuses a target that has aliases.
+- `rename-system` and `delete-system` refuse a target that has aliases.
 
 ## Opening the vault
 
@@ -77,31 +103,35 @@ opens the vault there.
 
 ```bash
 run.sh create-vault                      # new vault; asks for a new passphrase
+run.sh migrate-vault                     # convert credentials.enc and credentials.json to vault.json; needs the passphrase
 run.sh enrol [NAME]                      # key pair for this clone; see "Enrolment"
 run.sh approve-enrol NAME                # in a trusted clone: approve a request
 run.sh unenrol [NAME]                    # delete the recipient files; see "Unenrolment"
 run.sh delete-private-clone-key [NAME]   # after the push of unenrol
 run.sh unenrol-and-rotate-master-key NAME  # unenrol, new master key; needs the passphrase
 run.sh rotate-master-key                 # new master key, same passphrase; needs the passphrase
-run.sh change-passphrase                 # new passphrase, same master key
+run.sh change-passphrase                 # new passphrase, same keys; needs the old passphrase
 run.sh list-keyring-secrets              # key passphrases of this tool in the OS keyring
 run.sh delete-keyring-secret NAME ...    # delete them, and the key files they open
 run.sh delete-all-keyring-secrets        # delete all of them, and the key files they open
-run.sh sync                              # mirror credentials.json into the vault
-run.sh list                              # name, url, secret names; no key needed
-run.sh get-system NAME                   # url, secret names, authority info; no values
-run.sh get-secret NAME KEY               # print one secret value
-run.sh set-system NAME [--url U] [--info LINE ...] [--secret KEY=VALUE ...]
-run.sh rename-system NAME NEW
-run.sh rename-secret NAME OLD NEW
+run.sh edit SYSTEM ...                   # write edit files; see "Edit"
+run.sh sync                              # apply the edit files
+run.sh get-system SYSTEM                 # url, secret names, authority info; no values
+run.sh get-secret SYSTEM KEY             # print one secret value
+run.sh set-system SYSTEM [--url U] [--info LINE ...] [--secret KEY=VALUE ...]
+run.sh delete-system SYSTEM
+run.sh rename-system SYSTEM NEW
+run.sh rename-secret SYSTEM OLD NEW
 run.sh --vault-home DIR ...
+run.sh --vault NAME ...
 ```
 
 `NAME` of `unenrol` and `delete-private-clone-key` is optional. Without it, the command uses
 the recipient of this clone: the one `clone.<name>.key` in the vault home.
 
-After `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
-`rotate-master-key` and `sync`, commit and push the vault home.
+After `migrate-vault`, `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
+`rotate-master-key`, `sync`, `set-system`, `delete-system` and `rename-*`, commit and push the
+vault home.
 
 The Python API has the same names, e.g. `Store.approve_enrol()` and `Store.unenrol()`.
 
@@ -148,32 +178,12 @@ An unenrolled clone knows the current master key, and git history keeps its
 
 `rotate-master-key` makes a new master key. It wraps the key for each approved recipient and
 with the passphrase. `unenrol-and-rotate-master-key NAME` unenrols the recipient, then rotates.
-Both need the passphrase, so run them in a terminal. `change-passphrase` encrypts
-`master.enc.key` with a new passphrase. Each copies the files into `.local_assets/` of this
-folder first.
+Both need the passphrase, so run them in a terminal. Each entry gets a new ID.
+`change-passphrase` encrypts `master.enc.key` and `admin.enc.key` with a new passphrase. It
+needs the old passphrase. Each command copies the files into `.local_assets/` of this folder first.
 
 A clone that is unenrolled keeps the secret values from before the rotation, and git history
 keeps old vault files. Change those secrets at the source if necessary.
-
-## Reading the vault without this tool
-
-Run these commands from the vault home, e.g. `vaults/vault-main`. With a plain clone key:
-
-```bash
-KEY=$(openssl pkeyutl -decrypt -inkey clone.NAME.key \
-  -in recipients/NAME.master.enc \
-  -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 -pkeyopt rsa_mgf1_md:sha256)
-openssl enc -d -aes-256-cbc -pbkdf2 -in credentials.enc -pass "pass:$KEY"
-```
-
-With the passphrase:
-
-```bash
-openssl enc -d -aes-256-cbc -pbkdf2 -in master.enc.key   # prints the master key
-```
-
-Both print secrets. The format is AES-256-CBC without a MAC: a wrong key or a damaged file
-shows as a padding or JSON error.
 
 ## Python
 
@@ -181,13 +191,13 @@ Add the `src` folder of this tool to `PYTHONPATH` (`shared/tools/auth/src` from 
 root):
 
 ```python
-from credstore import get_credential, list_systems
+from credstore import get_credential
 c = get_credential("Github npstash/all 01", vault_home="vaults/vault-main")     # clone key
 c = get_credential("jira", home, passphrase=value_the_script_asked_for)  # no clone key
 c.url, c.authority_info, c.secrets()["token"]   # secrets() is an immutable map
 ```
 
-Each call writes a line into `access.log`: the system, the secrets, the key
+Each call writes a line into `access.log`: the entry ID, the secrets, the key
 (`clone-key:<name>:<plain|provider>`) and the file name of the calling script.
 
 Tests: `run.sh test`. The hook tests need `sh` and `awk`.

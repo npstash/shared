@@ -68,33 +68,22 @@ function html(res, body) {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body);
 }
 
-// Make a config folder for one test. The committed config stays unchanged.
+// Make a config folder for one test (see src/paths.js). The config of the repository stays unchanged.
 // browser_evaluate is enabled because the tests read the page with it.
 export function makeConfig(name, { facade, hosts, tools, ini, ask, vault } = {}) {
   const root = path.join(TEST_CONFIG_DIR, name);
   fs.rmSync(root, { recursive: true, force: true });
-  const write = (file, text) => {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, text);
-  };
-  write(path.join(root, 'config', 'facade.ini'), facade ?? '[fill]\nproviders = vault, ini, ask\n\n[hosts]\nrecord = true\n');
-  write(path.join(root, 'local', 'host-policy.ini'), hosts ?? '[deny]\n\n[allow]\n*\n');
-  write(path.join(root, 'playwright', 'tools.ini'), tools ?? '[tools]\nbrowser_evaluate = enabled\n');
-  write(path.join(root, 'providers', 'ini', 'config.ini'), ini ?? '[all]\n');
-  write(path.join(root, 'providers', 'ask', 'config.ini'), ask ?? '[ask]\nfields = phone\n');
-  write(path.join(root, 'providers', 'vault', 'config.ini'), vault ?? `[vault]\ntool = ${path.join(FAKE_VAULT, 'run.sh')}\nvault_home = ${FAKE_VAULT}\n`);
+  fs.mkdirSync(root, { recursive: true });
+  const write = (file, text) => fs.writeFileSync(path.join(root, file), text);
+  write('facade.ini', facade ?? '[fill]\nproviders = vault, ini, ask\n\n[hosts]\nrecord = true\n');
+  write('host-policy.ini', hosts ?? '[deny]\n\n[allow]\n*\n');
+  write('playwright-tools.ini', tools ?? '[tools]\nbrowser_evaluate = enabled\n');
+  write('provider-ini.ini', ini ?? '[all]\n');
+  write('provider-ask.ini', ask ?? '[ask]\nfields = phone\n');
+  write('provider-vault.ini', vault ?? '[vault]\nvault = vault-test\n\n[systems]\n127.0.0.1 = Fixture site\nlocalhost = Fixture other\n');
   return {
-    // Shared config (facade.ini), local config (host-policy.ini), config of the Playwright facade (tools.ini).
-    sharedConfigDir: path.join(root, 'config'),
-    localConfigDir: path.join(root, 'local'),
-    facadeConfigDir: path.join(root, 'playwright'),
-    providersConfigDir: path.join(root, 'providers'),
-    env: {
-      BROWSER_FACADES_CONFIG_DIR: path.join(root, 'config'),
-      BROWSER_FACADES_LOCAL_CONFIG_DIR: path.join(root, 'local'),
-      BROWSER_FACADES_PROVIDERS_CONFIG_DIR: path.join(root, 'providers'),
-      PLAYWRIGHT_FACADE_CONFIG_DIR: path.join(root, 'playwright'),
-    },
+    configDir: root,
+    env: { BROWSER_FACADES_VAULT_TOOL: path.join(FAKE_VAULT, 'run.sh') },
   };
 }
 
@@ -108,7 +97,7 @@ export async function startFacadeClient({ name, args = ['--isolated'], env = {},
   const testConfig = makeConfig(name, config);
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [path.join(TOOL_DIR, 'playwright', 'src', 'server.js'), ...args],
+    args: [path.join(TOOL_DIR, 'playwright', 'src', 'server.js'), '--config-dir', testConfig.configDir, ...args],
     env: { ...process.env, PLAYWRIGHT_RENDER_MODE: 'HEADLESS', PLAYWRIGHT_FACADE_LOG_FILE: logFile, ...testConfig.env, ...env },
     cwd: TOOL_DIR,
     stderr: 'inherit',

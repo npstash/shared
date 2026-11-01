@@ -52,7 +52,7 @@ Quality attribute scenarios in the ADD (SEI) format. The containers and componen
 
 - **Quality attribute:** Security (prompt injection)
 - **Source of stimulus:** The agent, maybe misled by a web page
-- **Stimulus:** Calls a tool that `<facade>/config/tools.ini` disables
+- **Stimulus:** Calls a tool that `<facade>-tools.ini` disables
 - **Environment:** Normal operation
 - **Artifact:** Facade process: tool switches
 - **Response:** The facade gives an error result with the reason.

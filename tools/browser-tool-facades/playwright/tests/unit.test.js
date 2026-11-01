@@ -7,7 +7,7 @@ import { ASSETS_DIR } from '../../src/paths.js';
 import { redact, summarizeResult } from '../../src/logger.js';
 import { packageCandidates, parseLdd } from '../src/setup/syslibs.js';
 import { CHROME_PREFS, writeChromePrefs } from '../src/chrome-prefs.js';
-import { TMP_DIR, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutHeadless } from '../src/config.js';
+import { TMP_DIR, connectsToBrowser, renderMode, takeConfigDir, tmpDirForChromium, upstreamEnv, withoutHeadless } from '../src/config.js';
 import { patchXkbBinDir } from '../src/xvfb.js';
 
 describe('redact', () => {
@@ -138,6 +138,18 @@ describe('render mode arguments', () => {
     assert.ok(connectsToBrowser(['--cdp-endpoint=http://x']));
     assert.ok(connectsToBrowser(['--extension']));
     assert.ok(!connectsToBrowser(['--isolated']));
+  });
+});
+
+describe('takeConfigDir', () => {
+  test('takes --config-dir out of the arguments; a relative path is relative to cwd', () => {
+    assert.deepEqual(takeConfigDir(['--isolated', '--config-dir', 'local/c', '--browser', 'chrome'], '/repo'),
+      { configDir: path.resolve('/repo', 'local/c'), args: ['--isolated', '--browser', 'chrome'] });
+    assert.deepEqual(takeConfigDir(['--config-dir=/abs/c'], '/repo'), { configDir: path.resolve('/abs/c'), args: [] });
+  });
+
+  test('the argument is necessary', () => {
+    assert.throws(() => takeConfigDir(['--isolated']), /give the config folder with --config-dir DIR/);
   });
 });
 

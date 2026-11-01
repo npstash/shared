@@ -12,8 +12,9 @@ environment of the machine (rule credentials-from-vault).
 - `TOOL` is `tools/auth` next to the `skills/` folder of this skill. The skill folder can
   be a link, so resolve it: `TOOL="$(realpath <skill folder>)/../../tools/auth"`.
 - The **vault home** is a separate folder with the vault files: a repository `vault-<name>`
-  in `vaults/`. Without `--vault-home`, the CLI finds `vault-main` itself. For another vault,
-  add `--vault-home <vault home>`. Find the vault home as the rule submodule-dependencies says.
+  in `vaults/`. Each command needs `--vault vault-<name>` or `--vault-home <vault home>` after
+  `run.sh`. The commands below leave it out. Use the vault that the user gives. If the user gives
+  none, ask. Without an option, the CLI stops and gives the vaults that it finds.
 
 The rule credentials-from-vault tells which commands, commits and pushes need the
 confirmation of the user. It also gives the forbidden sources of secrets. It applies to each
@@ -26,20 +27,23 @@ give the passphrase. Do not ask for it.
 
 | You run these | The user runs these in a terminal |
 | --- | --- |
-| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `sync`, `list`, `get-system`, `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `create-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
+| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`, `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `create-vault`, `migrate-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
 
 For a command in the right column, give the user the full command, e.g.
 `shared/tools/auth/run.sh unenrol-and-rotate-master-key old-laptop`. Then wait.
 
 Do not run `get-secret` to see or to pass a secret. Use a script (section 3).
 
-## 2. See what is stored
+## 2. System names
 
-```bash
-$TOOL/run.sh list
-```
+No command lists the systems. Use only a system name that the user gives, with the exact
+spelling.
 
-It writes name, url and secret names, with tabs. It needs no key.
+- Do not guess names. Do not look for names in `vault.json`, `access.log`, git history or
+  other files.
+- Do not decrypt the vault in another way than through the tool.
+- To see the URL, the secret names and the authority info of a named system:
+  `$TOOL/run.sh get-system "<name>"`. It shows no values.
 
 ## 3. Use a secret in a script
 
@@ -80,19 +84,27 @@ For each error: stop and ask. Do not use an env var or a file of the machine ins
 | `... is still enrolled ...` | `delete-private-clone-key` before the push of `unenrol`. | Commit and push the vault home first. |
 | `more than one recipient` | This clone has more key files in the vault home. | Show the names and ask which one. |
 | `Skipped keys: ...` | A key file is from another machine, or its keyring entry is missing. | Tell the user. Enrol again with a new name if the user agrees. |
-| `unknown system 'X'` | No entry. | Show the `list` output and ask which system to use, or ask the user to add it. |
+| `unknown system 'X'` | No entry with this exact name. | Ask the user for the exact name, or ask the user to add the system. Do not try other names. |
 | `secret 'K' is blank and the vault has no value for it` | The key has no value. | Ask the user to fill it. Never use a different secret. |
-| `vault-main is not found ...` | The CLI found no vault home. | Give `--vault-home`. |
+| `give the vault with --vault NAME ...` | No vault option. | Give `--vault` with the vault that the user gives. |
+| `vault-<name> is not found ...` | The CLI found no folder of this vault. | Give `--vault-home`. |
 | `the submodule ... is empty` | The vault submodule has no checkout. | Run `setup.sh` of the repository. |
 | `recipient name 'X' is taken` | Another clone has this name. | Enrol with no name, or with another name. |
 | `this command needs the master passphrase` | The command needs the passphrase. | Give the user the command to run in a terminal. |
 
-## After a secret changes
+## Add or change a system
 
-After a manual edit of `credentials.json`, run `$TOOL/run.sh sync`: it moves the value into
-`credentials.enc` and clears the plaintext file. Then commit the
-vault home. Its pre-commit hook stops the commit if a secret is still visible, or if a key
-file or the access log is staged.
+Do this only when the user asks, with the names that the user gives.
+
+1. `$TOOL/run.sh edit "<name>" ...` writes an edit file for each system and prints its path.
+   The secret values in the file are empty.
+2. Give the paths to the user. The user writes the secret values into the files. Never write a
+   secret value yourself, unless the user gives it in the task.
+3. When the user tells you, run `$TOOL/run.sh sync`. It applies the files and deletes them.
+4. Commit the vault home, with the confirmation of the user. The pre-commit hook stops a
+   commit of an edit file, a key file or the access log.
+
+The tool [README](../../tools/auth/README.md#edit) gives the rules of the edit file.
 
 Rotation of the master key does not protect secrets committed under the old key. Tell the
 user to change those at the source system.

@@ -10,7 +10,7 @@ Each clone opens the vault with its own key pair. Do not copy the master key to 
 | --- | --- |
 | clone | One working copy of a repository that uses the vault. A cloud session that enrols is a different clone. |
 | recipient | A clone that has a key pair for a vault. Its recipient name identifies it. |
-| master key | The key that encrypts `credentials.enc`. |
+| master key | The key that the entry IDs and the entry keys come from. See the [README](../README.md#entries). |
 | passphrase | The secret that encrypts `master.enc.key`. |
 | key passphrase | A random secret that encrypts one `clone.<name>.key`. |
 | provider | A store for key passphrases, e.g. the OS keyring. |
@@ -21,9 +21,10 @@ Each clone opens the vault with its own key pair. Do not copy the master key to 
 
 | File | Committed | Contents |
 | --- | --- | --- |
-| `credentials.json` | yes | As before. Secret values are cleared. |
-| `credentials.enc` | yes | As before. Encrypted with the master key. |
-| `master.enc.key` | yes | As before: the master key, encrypted with the passphrase. |
+| `vault.json` | yes | The entries. See the [README](../README.md#entries). |
+| `admin.pub` | yes | The admin public key. It encrypts the entry names. |
+| `master.enc.key` | yes | The master key, encrypted with the passphrase. |
+| `admin.enc.key` | yes | The admin private key, encrypted with the passphrase. |
 | `recipients/<name>.pub` | yes | RSA-3072 public key of the recipient `<name>`. |
 | `recipients/<name>.master.enc` | yes | The master key, encrypted for `<name>` with RSA-OAEP and SHA-256. |
 | `recipients/<name>.inf` | yes | Information about the clone of `<name>`. See "Clone information". |
@@ -128,8 +129,8 @@ clone. Each `enrol` writes the file again. The format is INI with one section `[
 
 ## Selecting a vault
 
-The API needs the parameter `vault_home`. The CLI has `--vault-home`. Without it, the CLI
-finds `vault-main` with the rule submodule-dependencies. To limit the secrets of a
+The API needs the parameter `vault_home`. The CLI needs `--vault-home DIR` or `--vault NAME`.
+See the [README](../README.md#finding-the-vault). To limit the secrets of a
 clone, use a separate vault, e.g. `vaults/vault-<project>`.
 
 ## Commands
@@ -143,13 +144,14 @@ clone, use a separate vault, e.g. `vaults/vault-<project>`.
 | `delete-private-clone-key [NAME]` | nothing | Deletes `clone.NAME.key` and its key passphrase. Without `NAME`: the one key file of this clone. |
 | `rotate-master-key` | clone key or passphrase to open; passphrase (TTY) to write | Makes a new master key. Wraps it for each approved recipient and with the passphrase. |
 | `unenrol-and-rotate-master-key NAME` | as `rotate-master-key` | Deletes the files of `NAME` in `recipients/`, then rotates the master key. |
-| `change-passphrase` | clone key or old passphrase (TTY); new passphrase (TTY, typed twice) | Encrypts `master.enc.key` with the new passphrase. |
+| `change-passphrase` | old passphrase (TTY); new passphrase (TTY, typed twice) | Encrypts `master.enc.key` and `admin.enc.key` with the new passphrase. |
 | `list-keyring-secrets` | nothing | Lists the key passphrases of this tool in each available provider: provider and name. |
 | `delete-keyring-secret NAME ...` | nothing | Deletes these key passphrases from the providers, and the key files of this clone that they open. |
 | `delete-all-keyring-secrets` | nothing | Deletes each key passphrase of this tool from the providers, and the key files of this clone that they open. |
-| `sync`, `list` | as before | As before. |
-| `get-system NAME` | as `sync` | Prints the url, the secret names and the authority info. No values, no log line. |
-| `get-secret NAME KEY` | as `sync` | Prints one secret value. Logs only that secret. |
+| `edit SYSTEM ...`, `sync` | clone key | See the [README](../README.md#edit). |
+| `set-system`, `delete-system`, `rename-system`, `rename-secret` | clone key | Change one system. |
+| `get-system NAME` | clone key | Prints the url, the secret names and the authority info. No values, no log line. |
+| `get-secret NAME KEY` | clone key | Prints one secret value. Logs only that secret. |
 | `set-system`, `rename-system`, `rename-secret` | as `sync` | Change a system or a secret name. |
 
 - `get-secret` stays in the CLI.
@@ -319,11 +321,13 @@ The log of a cloud clone is lost with the clone.
 ### credentials
 
 - It runs only commands that need no passphrase: `enrol` (request), `approve-enrol`,
-  `unenrol`, `delete-private-clone-key`, `sync`, `list`, `get-system`,
-  `set-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`,
+  `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`,
+  `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`,
   `delete-keyring-secret` and `delete-all-keyring-secrets`.
-- For `create-vault`, self-enrolment, `rotate-master-key`, `unenrol-and-rotate-master-key` and
-  `change-passphrase`, it tells the user the command to run in a terminal.
+- For `create-vault`, `migrate-vault`, self-enrolment, `rotate-master-key`,
+  `unenrol-and-rotate-master-key` and `change-passphrase`, it tells the user the command to run
+  in a terminal.
+- It uses only the system names that the user gives.
 - It explains how a script gets secrets through the API.
 - It does not use `CREDSTORE_PASSPHRASE`.
 
@@ -338,6 +342,8 @@ The log of a cloud clone is lost with the clone.
 - There is no migration command.
 - After the change, run `rotate-master-key` once in a terminal. Copies of `master.key` exist on many
   clones, and the rotation makes them unusable.
+- `migrate-vault` converts `credentials.enc` and `credentials.json` to `vault.json`. See the
+  [README](../README.md#commands).
 - Old versions of `credentials.enc` stay in git history. An old `master.key` opens them. Change
   those secrets at the source if necessary.
 

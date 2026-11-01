@@ -1,5 +1,5 @@
-// .local_assets/config/host-policy.ini: the deny-list and the allow-list in one file.
-// A missing file is a copy of the template config/host-policy.template.ini.
+// host-policy.ini in the config folder: the deny-list and the allow-list in one file.
+// configFile() copies the template config/host-policy.template.ini to a missing file.
 //   [deny]   hosts that the facade blocks; deny wins over allow
 //   [allow]  hosts that the facade allows; the default allow provider adds each opened host
 // Each section has one pattern on each line (see patterns.js). After each write, the lines of

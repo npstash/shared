@@ -1,6 +1,7 @@
-# Private keys of clones, and the access log. Never commit them.
+# Private keys of clones, the access log and edit files. Never commit them.
 clone.*.key
 access.log
+entry-*.json
 
 # A decrypted master key of an older version of the tool. Never commit it.
 master.key

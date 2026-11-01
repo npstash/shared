@@ -1,6 +1,8 @@
 # tools/auth — requirements
 
-Collected from the user's requests.
+Collected from the user's requests. The vault format of 2026-11-01 replaces the items about
+`credentials.json`, `credentials.enc`, `list` and `openssl`. See the [README](README.md#entries)
+and the [ADL](ADL.md).
 
 ## Requirements
 

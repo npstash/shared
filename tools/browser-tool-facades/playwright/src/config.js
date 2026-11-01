@@ -17,9 +17,22 @@ const LIB_TRIPLETS = { x64: 'x86_64-linux-gnu', arm64: 'aarch64-linux-gnu' };
 const require = createRequire(import.meta.url);
 export const UPSTREAM_CLI = path.join(path.dirname(require.resolve('@playwright/mcp/package.json')), 'cli.js');
 
-// The config of this facade only (tools.ini). The shared config: src/paths.js.
-export function facadeConfigDir(env = process.env) {
-  return env.PLAYWRIGHT_FACADE_CONFIG_DIR || path.join(FACADE_DIR, 'config');
+// The tool switches of this facade: playwright-tools.ini in the config folder. See src/paths.js.
+export const TOOLS_CONFIG = 'playwright-tools.ini';
+export const TOOLS_TEMPLATE = path.join(FACADE_DIR, 'config', 'tools.template.ini');
+
+// Take --config-dir DIR out of the arguments: the facade uses it, Playwright MCP does not know it.
+// Give { configDir, args }. A relative path is relative to cwd. The argument is necessary.
+export function takeConfigDir(args, cwd = process.cwd()) {
+  const rest = [];
+  let configDir;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--config-dir') configDir = args[++i];
+    else if (args[i].startsWith('--config-dir=')) configDir = args[i].slice('--config-dir='.length);
+    else rest.push(args[i]);
+  }
+  if (!configDir) throw new Error('give the config folder with --config-dir DIR, e.g. --config-dir local/configs/browser-facade');
+  return { configDir: path.resolve(cwd, configDir), args: rest };
 }
 
 // Paths of the libraries and fonts that playwright/src/setup/syslibs.js unpacks (Linux only).

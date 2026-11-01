@@ -10,10 +10,10 @@ agents.
 - **deliverables-only** — commit only what you cannot regenerate. @rules/deliverables-only.md
 - **per-project-runtimes** — runtime in the project folder, launched by `run.sh` / `run.bat`. @rules/per-project-runtimes.md
 - **tests-and-ci** — tests per project, `run.sh test`, CI finds them. @rules/tests-and-ci.md
-- **credentials-from-vault** — secrets only from the vault; `git` and `gh` can also use other sources. @rules/credentials-from-vault.md
+- **credentials-from-vault** — secrets only from the vault, by the names that the user gives; `git` and `gh` can also use other sources. @rules/credentials-from-vault.md
 - **nothing-outside-repo** — write files only inside the repository. @rules/nothing-outside-repo.md
 - **simplified-english** — repository text in STE (ASD-STE100), brief. @rules/simplified-english.md
-- **confirm-design-choices** — the user confirms each design choice. @rules/confirm-design-choices.md
+- **confirm-design-choices** — the user confirms each design choice and each security choice before it is applied; an agent never takes one. @rules/confirm-design-choices.md
 - **decision-gates** — ask open decisions first; one question section per reply. @rules/decision-gates.md
 - **voice-mode** — in voice mode the input can have speech recognition errors: repair them; the reply is spoken: short, one question at a time, no visual formatting. @rules/voice-mode.md
 - **agent-identity** — an agent is not a person: not an author, no decisions, takes actions, no feelings. @rules/agent-identity.md

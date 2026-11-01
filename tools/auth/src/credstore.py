@@ -1,29 +1,31 @@
 """credstore - credential vault for the tools in this repository.
 
 Design: docs/clone-keys.md. The vault home holds the files below. The API needs it. The CLI
-takes --vault-home; without it, the CLI finds vault-main with dependencies.py (rule
-submodule-dependencies).
+takes --vault-home DIR, or --vault NAME and finds the folder with dependencies.py (rule
+submodule-dependencies). It has no default vault.
 
-credentials.json        committed index: system -> url, authority_info, credentials (values cleared)
-credentials.enc         committed vault: the same document, with secret values, encrypted with
-                        the master key (the `openssl enc -aes-256-cbc -pbkdf2` format)
+vault.json              committed vault: entry ID -> the encrypted name and the encrypted entry
 master.enc.key          the master key, encrypted with the passphrase
+admin.enc.key           the admin private key, encrypted with the passphrase
+admin.pub               the admin public key: it encrypts the entry names
 recipients/<name>.pub   public key of a clone; <name>.master.enc is the master key for it;
                         <name>.inf tells the approver which clone made the request
 clone.<name>.key        gitignored private key of a clone for this vault: plain, or encrypted
                         with a key passphrase that a provider (the OS keyring) holds
+entry-<ID>.json         gitignored edit file of one entry; `edit` writes it, `sync` applies it
 access.log              gitignored access log
+
+The entry ID is an HMAC of the name, keyed with the master key. The key of an entry is
+derived from the master key and the name. Thus only a caller that knows the name finds and
+opens an entry. The names are also encrypted with the admin public key. Only the passphrase
+opens them, for the rotation of the master key. No command lists the entries.
 
 A clone key opens the vault. Else the passphrase does: the API parameter, or a prompt of
 the CLI in an interactive terminal. This tool never reads environment variables.
 
-The two files mirror each other exactly, except that only the vault holds secret values.
-credentials.json is the source of truth for structure; the vault is stale data that fills
-in secrets. Commands read credentials.json first and decrypt only when values are needed.
-Files are rewritten only when their content changes.
-
 A system with "alias_of" takes the secrets of its target. Its own secrets add to them or
-replace them. get_credential() and list give the resolved secrets.
+replace them. The target keeps the names of its aliases. get_credential() gives the
+resolved secrets.
 
     from credstore import get_credential          # PYTHONPATH must include this folder
     c = get_credential("jira", "vaults/vault-main"); c.secrets()["token"]
@@ -34,6 +36,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import getpass
+import hmac
 import importlib.util
 import io
 import ipaddress
@@ -44,7 +47,7 @@ import shutil
 import socket
 import subprocess
 import sys
-from base64 import b64encode
+from base64 import b64decode, b64encode
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -54,17 +57,21 @@ from types import MappingProxyType
 from typing import Mapping
 
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
-DEFAULT_VAULT = "vault-main"          # the vault of the CLI without --vault-home
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that create-vault puts next to a new vault
 SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # create-vault copies them too
 RECIPIENTS = "recipients"             # public keys and wrapped master keys
 LOG = "access.log"                    # in the vault home, gitignored
-IGNORED = ("clone.*.key", LOG)        # the vault home must ignore these; see _ensure_ignored()
+EDIT = "entry-*.json"                 # edit files in the vault home, gitignored
+IGNORED = ("clone.*.key", LOG, EDIT)  # the vault home must ignore these; see _ensure_ignored()
 KEY_BITS = 3072
 PROVIDER_LINE = "credstore-provider:"  # first line of a key file that a provider unlocks
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 ID_LIMIT = 30                         # generated names: computer-user-repo, without auto- and the date
+FORMAT = 2                            # the format of vault.json
+ID_HEX = 32                           # hex digits of an entry ID (128 bits)
+NAME_BYTES = 256                      # RSA-OAEP with SHA-256 and a 3072-bit key takes 318 bytes at most
+EDIT_FIELDS = ("name", "revision", "url", "authority_info", "alias_of", "credentials")
 
 
 class CredentialError(RuntimeError):
@@ -73,15 +80,6 @@ class CredentialError(RuntimeError):
 
 class NoWayToOpen(CredentialError):
     """No clone key opens the vault and no passphrase was given."""
-
-
-EXAMPLE = {  # the credentials.json that create-vault writes; fill the secrets in, then run sync
-    "Example system": {
-        "url": "https://example.com",
-        "authority_info": ["What this credential is allowed to do"],
-        "credentials": {"username": "", "token": ""},
-    }
-}
 
 
 @dataclass(frozen=True)
@@ -93,82 +91,44 @@ class Credential:
     authority_info: tuple[str, ...] = ()
     _secrets: dict[str, str] = field(default_factory=dict, repr=False)
     alias_of: str | None = field(default=None, repr=False)  # the system that gives the secrets
+    aliases: tuple[str, ...] = field(default=(), repr=False)  # the systems that are aliases of this one
 
     def secrets(self) -> Mapping[str, str]:
         return MappingProxyType(self._secrets)
 
 
-def _parse(raw, source: str) -> dict[str, Credential]:
-    if not isinstance(raw, dict):
-        raise CredentialError(f"{source}: the top level must be an object of systems")
-    systems = {}
-    for name, e in raw.items():
-        creds, info = (e.get("credentials"), e.get("authority_info")) if isinstance(e, dict) else (None, None)
-        alias = e.get("alias_of") if isinstance(e, dict) else None
-        if not isinstance(e, dict) or not isinstance(creds or {}, dict) or not isinstance(info or [], list) \
-                or not isinstance(alias or "", str):
-            raise CredentialError(f"{source}: system {name!r} is malformed")
-        systems[name] = Credential(name, e.get("url"), tuple(str(i) for i in info or []),
-                                   {str(k): str(v or "") for k, v in (creds or {}).items()}, alias or None)
-    return systems
-
-
-def _document(systems: dict[str, Credential], redact: bool = False) -> dict:
-    doc = {}
-    for name, c in systems.items():
-        entry: dict = {}
-        if c.url is not None:
-            entry["url"] = c.url
-        if c.authority_info:
-            entry["authority_info"] = list(c.authority_info)
-        if c.alias_of:
-            entry["alias_of"] = c.alias_of
-        if c._secrets or not c.alias_of:
-            entry["credentials"] = {k: "" if redact else v for k, v in c._secrets.items()}
-        doc[name] = entry
+def _entry_doc(c: Credential) -> dict:
+    """The plaintext of an entry in vault.json."""
+    doc: dict = {"name": c.name}
+    if c.url is not None:
+        doc["url"] = c.url
+    if c.authority_info:
+        doc["authority_info"] = list(c.authority_info)
+    if c.alias_of:
+        doc["alias_of"] = c.alias_of
+    if c.aliases:
+        doc["aliases"] = sorted(c.aliases)
+    doc["credentials"] = dict(c._secrets)
     return doc
 
 
-def _canonical(systems: dict[str, Credential]) -> bytes:
-    return json.dumps(_document(systems), sort_keys=True, separators=(",", ":")).encode()
+def _strings(value, source: str, what: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise CredentialError(f"{source}: {what} must be a list of strings")
+    return value
 
 
-def _merge(index: dict[str, Credential], stored: dict[str, Credential]) -> dict[str, Credential]:
-    """Mirror the index, filling blank secrets from the vault.
-
-    A secret that is blank in the index and absent from the vault is an error: it would
-    otherwise be listed as a secret this system has, while holding nothing.
-    """
-    merged = {}
-    for name, e in index.items():
-        old = stored.get(name)
-        secrets = {}
-        for key, value in e._secrets.items():
-            kept = value or (old._secrets.get(key, "") if old else "")
-            if not kept:
-                raise CredentialError(
-                    f"system {name!r}: secret {key!r} is blank and the vault has no value for it - "
-                    f"fill it in credentials.json, or remove the key")
-            secrets[key] = kept
-        merged[name] = replace(e, _secrets=secrets)
-    _resolve(merged)
-    return merged
-
-
-def _resolve(systems: dict[str, Credential]) -> dict[str, Credential]:
-    """Each alias with the secrets of its target, then its own secrets on top."""
-    resolved = {}
-    for name, c in systems.items():
-        if c.alias_of is None:
-            resolved[name] = c
-            continue
-        target = systems.get(c.alias_of)
-        if target is None or target.alias_of is not None:
-            raise CredentialError(
-                f"system {name!r} is an alias of {c.alias_of!r}, which is "
-                f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
-        resolved[name] = replace(c, _secrets={**target._secrets, **c._secrets}, alias_of=None)
-    return resolved
+def _from_doc(doc, source: str) -> Credential:
+    if not isinstance(doc, dict) or not isinstance(doc.get("name"), str):
+        raise CredentialError(f"{source}: the entry is malformed")
+    creds = doc.get("credentials", {})
+    if not isinstance(creds, dict) or not all(isinstance(v, str) for v in creds.values()):
+        raise CredentialError(f"{source}: credentials must be an object of strings")
+    url, alias = doc.get("url"), doc.get("alias_of")
+    if not isinstance(url or "", str) or not isinstance(alias or "", str):
+        raise CredentialError(f"{source}: url and alias_of must be strings")
+    return Credential(doc["name"], url or None, tuple(_strings(doc.get("authority_info", []), source, "authority_info")),
+                      dict(creds), alias or None, tuple(_strings(doc.get("aliases", []), source, "aliases")))
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -180,6 +140,13 @@ def _write(path: Path, data: bytes) -> None:
 def _check_name(name: str, what: str) -> str:
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise CredentialError(f"{what} name {name!r} is not valid: use letters, digits, '.', '_', '-'")
+    return name
+
+
+def _check_system(name: str) -> str:
+    if not isinstance(name, str) or not name.strip() or any(ord(ch) < 32 for ch in name) \
+            or len(name.encode()) > NAME_BYTES:
+        raise CredentialError(f"system name {name!r} is not valid: give 1 to {NAME_BYTES} bytes, no control characters")
     return name
 
 
@@ -319,10 +286,10 @@ def _write_info(path: Path, info: dict[str, str]) -> None:
     _write(path, buffer.getvalue().rstrip("\n").encode() + b"\n")
 
 
-# -- crypto (imported lazily: `list` needs no cryptography package) -------------------
+# -- crypto (imported lazily: the CLI starts without the cryptography package) ---------
 
 HEADER = b"Salted__"      # openssl enc marks a salted file with this
-ITERATIONS = 10_000       # the default of `openssl enc -pbkdf2`; the README command relies on it
+ITERATIONS = 10_000       # the default of `openssl enc -pbkdf2`
 
 
 def _derive(passphrase: str, salt: bytes) -> tuple[bytes, bytes]:
@@ -335,7 +302,7 @@ def _derive(passphrase: str, salt: bytes) -> tuple[bytes, bytes]:
 
 
 def encrypt(data: bytes, passphrase: str) -> bytes:
-    """`openssl enc -aes-256-cbc -pbkdf2` output: HEADER, salt, then the ciphertext."""
+    """`openssl enc -aes-256-cbc -pbkdf2` output: HEADER, salt, then the ciphertext. For master.enc.key."""
     from cryptography.hazmat.primitives import padding as pkcs7
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     salt = token_bytes(8)
@@ -359,6 +326,42 @@ def decrypt(data: bytes, passphrase: str, what: str = "vault") -> bytes:
         return unpad.update(dec.update(data[16:]) + dec.finalize()) + unpad.finalize()
     except ValueError as exc:
         raise CredentialError(f"could not decrypt the {what} - wrong key or corrupted file") from exc
+
+
+def _subkey(master: str, info: bytes) -> bytes:
+    """A 256-bit key, derived from the master key with HKDF-SHA256."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(b64decode(master))
+
+
+def entry_id(master: str, name: str) -> str:
+    """The ID of an entry: HMAC-SHA256 of the name, keyed with a key from the master key."""
+    return hmac.new(_subkey(master, b"credstore entry id"), name.encode(), sha256).hexdigest()[:ID_HEX]
+
+
+def _seal(master: str, name: str, eid: str, plain: bytes) -> str:
+    """AES-256-GCM with a key from the master key and the name. The ID is the associated data."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    nonce = token_bytes(12)
+    key = _subkey(master, b"credstore entry key\0" + name.encode())
+    return b64encode(nonce + AESGCM(key).encrypt(nonce, plain, eid.encode())).decode()
+
+
+def _unseal(master: str, name: str, eid: str, data: str) -> bytes:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = _subkey(master, b"credstore entry key\0" + name.encode())
+    try:
+        raw = b64decode(data)
+        return AESGCM(key).decrypt(raw[:12], raw[12:], eid.encode())
+    except (InvalidTag, ValueError) as exc:
+        raise CredentialError(f"entry {eid} cannot be decrypted - wrong key or damaged vault.json") from exc
+
+
+def _revision(record: dict) -> str:
+    """Changes with each write of the entry. An edit file keeps it, sync compares it."""
+    return sha256(record["data"].encode()).hexdigest()[:16]
 
 
 def _read_key(data: bytes, path: Path) -> str:
@@ -585,12 +588,12 @@ def _check_mode(path: Path) -> None:
 
 
 def _ensure_ignored(home: Path) -> None:
-    """Private keys and the access log must never be committed."""
+    """Private keys, the access log and edit files must never be committed."""
     path = home / ".gitignore"
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
     missing = [p for p in IGNORED if p not in lines]
     if missing and home.is_dir():
-        _write(path, ("\n".join(lines + ["# Private keys of clones, and the access log", *missing]) + "\n").encode())
+        _write(path, ("\n".join(lines + ["# Private keys of clones, the access log and edit files", *missing]) + "\n").encode())
 
 
 # -- access log -------------------------------------------------------------------------
@@ -634,7 +637,8 @@ LOG_HEADER = "\t".join(["time", "event", "vault", "system", "secrets", "method",
 def _log(home: Path, event: str, system: str = "", secrets=(), method: str = "") -> None:
     """One tab-separated line. The system and the caller are in quotes: they can hold spaces.
 
-    The vault column is always "main": it stays for the format of existing logs."""
+    The system column holds the entry ID, never the name, or a recipient name. The vault
+    column is always "main": it stays for the format of existing logs."""
     clean = lambda s: re.sub(r"[\t\r\n\"]", " ", s)  # noqa: E731
     line = "\t".join([datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), event, "main",
                       f'"{clean(system)}"', clean(",".join(secrets)), method, f'"{clean(_caller())}"'])
@@ -653,15 +657,54 @@ def _log(home: Path, event: str, system: str = "", secrets=(), method: str = "")
 
 # -- the store ------------------------------------------------------------------------------
 
-def default_vault_home() -> Path:
-    """The folder of DEFAULT_VAULT, found by dependencies.py from the folder of this tool."""
+def _dependencies():
+    """dependencies.py of this tool, the copy of the reference code of the rule submodule-dependencies."""
     spec = importlib.util.spec_from_file_location("credstore_dependencies", TOOL / "src" / "dependencies.py")
     dependencies = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dependencies)
+    return dependencies
+
+
+def find_vault(name: str) -> Path:
+    """The folder of the vault `name`, e.g. vault-main, found from the folder of this tool."""
+    dependencies = _dependencies()
     try:
-        return dependencies.find(DEFAULT_VAULT, start=TOOL)
+        return dependencies.find(name, start=TOOL)
     except dependencies.DependencyError as exc:
         raise CredentialError(f"{exc}\ngive the vault home with --vault-home DIR") from None
+
+
+def known_vaults() -> list[str]:
+    """The names vault-* in .gitmodules and dependencies.txt of each root above this tool."""
+    dependencies = _dependencies()
+    names = set()
+    for root in dependencies.roots(TOOL):
+        try:
+            sections = dependencies.dependencies(root)
+        except dependencies.DependencyError:
+            sections = {}
+        names.update(n for n in dependencies.submodules(root) if n.startswith("vault-"))
+        names.update(n for n, paths in sections.items()
+                     if n.startswith("vault-") and any((root / p).is_dir() for p in paths))
+    return sorted(names)
+
+
+def vault_home(vault: str | None = None, home: Path | str | None = None) -> Path:
+    """The vault home of the CLI options --vault-home and --vault. There is no default vault."""
+    if home:
+        return Path(home)
+    if vault:
+        return find_vault(vault)
+    raise CredentialError("give the vault with --vault NAME or --vault-home DIR; vaults found: "
+                          + (", ".join(known_vaults()) or "none"))
+
+
+def _admin_key(pem: bytes):
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    try:
+        return load_pem_private_key(pem, None)
+    except (ValueError, TypeError) as exc:
+        raise CredentialError("admin.enc.key holds a damaged admin key") from exc
 
 
 class Store:
@@ -676,8 +719,9 @@ class Store:
         if not vault_home:
             raise CredentialError("give the vault home")
         self.home = Path(vault_home)
-        self.index = self.home / "credentials.json"
-        self.vault = self.home / "credentials.enc"
+        self.vault = self.home / "vault.json"
+        self.admin_pub = self.home / "admin.pub"
+        self.admin_enc = self.home / "admin.enc.key"
         self.recipients = self.home / RECIPIENTS
         self.key_enc = self.home / "master.enc.key"
         self.interactive = interactive
@@ -685,7 +729,7 @@ class Store:
         self.method = ""                   # how the vault was opened, for the access log
         self._passphrase = passphrase
         self._key: str | None = None       # the master key, once loaded
-        self._stored: bytes | None = None  # canonical vault content as last read/written
+        self._records: dict[str, dict] | None = None   # the entries of vault.json, once read
 
     # -- opening ------------------------------------------------------------------------
 
@@ -743,51 +787,114 @@ class Store:
             raise
 
     def _confirm_passphrase(self) -> str:
-        """The passphrase, checked against master.enc.key: writing it needs the passphrase."""
+        """The passphrase, checked against master.enc.key."""
         self._load_key()
         passphrase = self._ask_passphrase()
         if not passphrase:
             raise CredentialError("this command needs the master passphrase: run it in a terminal, "
                                   "or give passphrase= to the API")
         try:
-            same = _read_key(decrypt(self.key_enc.read_bytes(), passphrase, "master key"), self.key_enc) == self._key
+            plain = decrypt(self.key_enc.read_bytes(), passphrase, "master key")
+            same = _read_key(plain, self.key_enc) == self._key
         except CredentialError:
             same = False
         if not same:
             raise CredentialError("the passphrase does not open master.enc.key")
         return passphrase
 
-    # -- files --------------------------------------------------------------------------
-
-    def read_index(self) -> dict[str, Credential]:
-        """The plaintext index - no passphrase needed."""
-        if not self.index.exists():
-            return {}
+    def _admin_pem(self, passphrase: str) -> bytes:
+        """The admin private key PEM from admin.enc.key."""
         try:
-            return _parse(json.loads(self.index.read_text(encoding="utf-8") or "{}"), str(self.index))
-        except json.JSONDecodeError as exc:
-            raise CredentialError(f"{self.index} is not valid JSON: {exc}") from exc
+            blob = self.admin_enc.read_bytes()
+        except FileNotFoundError:
+            raise CredentialError(f"admin key not found: {self.admin_enc} (run migrate-vault)") from None
+        return decrypt(blob, passphrase, what="admin key")
 
-    def _read_vault(self) -> dict[str, Credential]:
-        if not self.vault.exists():
-            self._stored = None
-            return {}
+    # -- entries --------------------------------------------------------------------------
+
+    def _entries(self) -> dict[str, dict]:
+        """ID -> {"name", "data"} of vault.json. Nothing is decrypted."""
+        if self._records is None:
+            if not self.vault.is_file():
+                hint = "run migrate-vault" if (self.home / "credentials.enc").exists() else "run create-vault"
+                raise CredentialError(f"no vault: {self.vault} does not exist ({hint})")
+            try:
+                doc = json.loads(self.vault.read_text(encoding="utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise CredentialError(f"{self.vault} is not valid JSON") from exc
+            if not isinstance(doc, dict) or doc.get("format") != FORMAT or not isinstance(doc.get("entries"), dict):
+                raise CredentialError(f"{self.vault} is not a vault of format {FORMAT}")
+            self._records = doc["entries"]
+        return self._records
+
+    def _save(self) -> None:
+        """Write vault.json if it changed. Unchanged entries keep their ciphertext."""
+        doc = {"format": FORMAT, "entries": dict(sorted(self._entries().items()))}
+        data = (json.dumps(doc, indent=2) + "\n").encode()
+        if not self.vault.is_file() or self.vault.read_bytes() != data:
+            _write(self.vault, data)
+
+    def _id(self, name: str) -> str:
+        return entry_id(self._load_key(), _check_system(name))
+
+    def _get(self, name: str) -> Credential | None:
+        """The stored entry `name`, unresolved, or None."""
+        eid = self._id(name)
+        record = self._entries().get(eid)
+        if record is None:
+            return None
         try:
-            systems = _parse(json.loads(decrypt(self.vault.read_bytes(), self._load_key())), str(self.vault))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise CredentialError(f"vault is corrupted: {self.vault}") from exc
-        self._stored = _canonical(systems)
-        return systems
+            c = _from_doc(json.loads(_unseal(self._key, name, eid, record["data"])), f"entry {eid}")
+        except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CredentialError(f"entry {eid} in {self.vault} is damaged") from exc
+        if c.name != name:
+            raise CredentialError(f"entry {eid} in {self.vault} is damaged")
+        return c
 
-    def _save(self, systems: dict[str, Credential]) -> dict[str, Credential]:
-        content = _canonical(systems)
-        if content != self._stored:
-            _write(self.vault, encrypt(content, self._load_key()))
-            self._stored = content
-        index = (json.dumps(_document(systems, redact=True), indent=2) + "\n").encode()
-        if not self.index.exists() or self.index.read_bytes() != index:
-            _write(self.index, index)
-        return systems
+    def _need(self, name: str) -> Credential:
+        c = self._get(name)
+        if c is None:
+            raise CredentialError(f"unknown system {name!r}")
+        return c
+
+    def _put(self, c: Credential, name_blob: str | None = None) -> None:
+        """Encrypt the entry `c`. Its name is encrypted to the admin key once."""
+        eid = self._id(c.name)
+        old = self._entries().get(eid)
+        if name_blob is None:
+            name_blob = old["name"] if old else b64encode(
+                _load_public(self.admin_pub).encrypt(c.name.encode(), _oaep())).decode()
+        plain = json.dumps(_entry_doc(c), sort_keys=True).encode()
+        self._entries()[eid] = {"name": name_blob, "data": _seal(self._key, c.name, eid, plain)}
+
+    def _drop(self, name: str) -> None:
+        del self._entries()[self._id(name)]
+
+    def _resolve(self, c: Credential) -> Credential:
+        """An alias with the secrets of its target, then its own secrets on top."""
+        if c.alias_of is None:
+            return replace(c, aliases=())
+        target = self._get(c.alias_of)
+        if target is None or target.alias_of is not None:
+            raise CredentialError(
+                f"system {c.name!r} is an alias of {c.alias_of!r}, which is "
+                f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
+        return replace(c, _secrets={**target._secrets, **c._secrets}, alias_of=None, aliases=())
+
+    def _names(self, admin) -> dict[str, str]:
+        """ID -> name of each entry. Only the admin key (the passphrase) opens the names."""
+        names = {}
+        for eid, record in self._entries().items():
+            try:
+                name = admin.decrypt(b64decode(record["name"]), _oaep()).decode()
+            except (KeyError, ValueError) as exc:
+                raise CredentialError(f"the name of entry {eid} cannot be decrypted") from exc
+            if entry_id(self._key, name) != eid:
+                raise CredentialError(f"entry {eid} in {self.vault} is damaged")
+            names[eid] = name
+        return names
+
+    # -- wrapping and backups --------------------------------------------------------------
 
     def _approved(self) -> list[str]:
         """Recipients with a public key and a wrapped master key. A request has only the key."""
@@ -813,7 +920,8 @@ class Store:
         """Copy keys and vaults aside first: a crash between two writes would strand them."""
         target = BACKUPS / f"{label}-{datetime.now():%Y%m%d-%H%M%S}"
         target.mkdir(parents=True, exist_ok=True)
-        for path in (self.key_enc, self.vault):
+        for path in (self.key_enc, self.admin_enc, self.vault, self.admin_pub, self.home / "credentials.enc",
+                     self.home / "credentials.json"):
             if path.exists():
                 shutil.copy2(path, target / path.name)
         if self.recipients.is_dir():
@@ -821,21 +929,32 @@ class Store:
                             ignore=shutil.ignore_patterns("*.tmp"))
         return target
 
+    def _new_admin_key(self, passphrase: str) -> None:
+        """A new admin key pair: admin.pub, and admin.enc.key encrypted with the passphrase."""
+        from cryptography.hazmat.primitives import serialization as s
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        private = rsa.generate_private_key(public_exponent=65537, key_size=KEY_BITS)
+        _write(self.admin_enc, encrypt(private.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8,
+                                                             s.NoEncryption()), passphrase))
+        _write(self.admin_pub, _public_pem(private))
+
     # -- master key -----------------------------------------------------------------------
 
     def create_vault(self) -> list[Path]:
-        """A new vault: master key, example credentials.json, the files from templates/, setup scripts.
+        """A new vault: master key, admin key, empty vault.json, the files from templates/, setup scripts.
 
         Stops if any vault file exists already. Template files that exist are kept.
         """
-        existing = [p for p in (self.key_enc, self.index, self.vault) if p.exists()]
+        existing = [p for p in (self.key_enc, self.admin_enc, self.vault, self.admin_pub) if p.exists()]
         if existing:
             raise CredentialError(f"a vault exists already: {', '.join(map(str, existing))}")
         passphrase = self._passphrase or _prompt_new_passphrase()   # before any file is written
         self.home.mkdir(parents=True, exist_ok=True)
         self._new_key(passphrase)
-        _write(self.index, (json.dumps(EXAMPLE, indent=2) + "\n").encode())
-        written = [self.key_enc, self.index]
+        self._new_admin_key(passphrase)
+        self._records = {}
+        self._save()
+        written = [self.key_enc, self.admin_enc, self.admin_pub, self.vault]
         sources = [(p, p.relative_to(TEMPLATES)) for p in sorted(TEMPLATES.rglob("*")) if p.is_file()]
         for source, name in sources + [(p, Path(p.name)) for p in SETUP]:
             target = self.home / name
@@ -843,35 +962,107 @@ class Store:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
                 written.append(target)
+        _ensure_ignored(self.home)
         return written
 
-    def _new_key(self, passphrase: str) -> None:
-        """A new random master key, stored encrypted with the passphrase."""
-        key = _new_master_key()
+    def migrate_vault(self) -> Path:
+        """Convert credentials.enc and credentials.json (format 1) to vault.json. Needs the passphrase.
+
+        Applies the secret values that credentials.json still holds, as sync of format 1 did.
+        Deletes both old files and updates the files from templates/. A vault.json whose
+        master.enc.key also holds the admin key gets a separate admin.enc.key. Returns the backup.
+        """
+        old_vault, old_index = self.home / "credentials.enc", self.home / "credentials.json"
+        if self.vault.exists():
+            return self._split_admin_key()
+        if not old_vault.is_file():
+            raise CredentialError(f"no {old_vault} to migrate")
+        passphrase = self._confirm_passphrase()
+        try:
+            stored = json.loads(decrypt(old_vault.read_bytes(), self._key))
+            index = json.loads(old_index.read_text(encoding="utf-8") or "{}") if old_index.exists() else stored
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CredentialError(f"{old_vault} or {old_index} is corrupted") from exc
+        systems: dict[str, Credential] = {}
+        for name, e in index.items():
+            c = _from_doc({**e, "name": _check_system(name)}, f"{old_index}: {name!r}")
+            old = stored.get(name, {}).get("credentials", {})
+            secrets = {k: v or old.get(k, "") for k, v in c._secrets.items()}
+            blank = [k for k, v in secrets.items() if not v]
+            if blank:
+                raise CredentialError(f"system {name!r}: secret {blank[0]!r} is blank and the vault has no value "
+                                      f"for it - fill it in {old_index}, or remove the key")
+            systems[name] = replace(c, _secrets=secrets)
+        for name, c in list(systems.items()):
+            if c.alias_of:
+                target = systems.get(c.alias_of)
+                if target is None or target.alias_of is not None:
+                    raise CredentialError(f"system {name!r} is an alias of {c.alias_of!r}, which is "
+                                          f"{'unknown' if target is None else 'an alias too'}")
+                systems[c.alias_of] = replace(target, aliases=(*target.aliases, name))
+        backup = self._backup("migrate-vault")
+        if not self.admin_enc.exists():
+            self._new_admin_key(passphrase)
+        self._records = {}
+        for c in systems.values():
+            self._put(c)
+        self._save()
+        old_vault.unlink()
+        old_index.unlink(missing_ok=True)
+        for source in sorted(TEMPLATES.rglob("*")):
+            if source.is_file():
+                target = self.home / source.relative_to(TEMPLATES)
+                if source.name != ".gitignore":
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+        _ensure_ignored(self.home)
+        _log(self.home, "migrate-vault", method=self.method)
+        return backup
+
+    def _split_admin_key(self) -> Path:
+        """Move an admin key out of master.enc.key into admin.enc.key. Returns the backup."""
+        passphrase = self._confirm_passphrase()
+        pem = decrypt(self.key_enc.read_bytes(), passphrase, "master key").partition(b"\n")[2]
+        if not pem.strip() or self.admin_enc.exists():
+            raise CredentialError(f"{self.vault} exists already: the vault is migrated")
+        _admin_key(pem)
+        backup = self._backup("migrate-vault")
+        _write(self.admin_enc, encrypt(pem, passphrase))
+        self._new_key(passphrase, key=self._key)
+        _log(self.home, "migrate-vault", method=self.method)
+        return backup
+
+    def _new_key(self, passphrase: str, key: str | None = None) -> None:
+        """Write master.enc.key: the master key, a new random one by default."""
+        key = key or _new_master_key()
         _write(self.key_enc, encrypt((key + "\n").encode(), passphrase))
         self._key = key
 
     def rotate_master_key(self, backup: Path | None = None) -> Path:
         """A new master key, wrapped for each approved recipient and with the passphrase.
 
-        Returns the backup.
+        Each entry gets a new ID and a new encryption. Returns the backup.
         """
-        stored, order = self._read_vault(), list(self.read_index())
-        systems = {**{n: stored[n] for n in order if n in stored}, **stored}   # keep the index order
         passphrase = self._confirm_passphrase()
+        names = self._names(_admin_key(self._admin_pem(passphrase)))
+        systems = [(self._need(name), self._entries()[eid]["name"]) for eid, name in names.items()]
         backup = backup or self._backup("rotate-master-key")
         self._new_key(passphrase)
-        self._stored = None       # the vault must be written again, under the new key
-        self._save(systems)
+        self._records = {}
+        for c, name_blob in systems:
+            self._put(c, name_blob)
+        self._save()
         self._wrap_all(self._key)
         _log(self.home, "rotate-master-key", method=self.method)
         return backup
 
     def change_passphrase(self, new: str) -> Path:
-        """Encrypt master.enc.key with a new passphrase. Key and vault are untouched."""
-        key = self._load_key()
+        """Encrypt master.enc.key and admin.enc.key with a new passphrase. The keys stay."""
+        passphrase = self._confirm_passphrase()
+        admin_pem = self._admin_pem(passphrase)
         backup = self._backup("change-passphrase")
-        _write(self.key_enc, encrypt((key + "\n").encode(), new))
+        self._new_key(new, key=self._key)
+        _write(self.admin_enc, encrypt(admin_pem, new))
         _log(self.home, "change-passphrase", method=self.method)
         return backup
 
@@ -1004,7 +1195,7 @@ class Store:
         files = self._recipient_files(name)
         if not any(p.exists() for p in files[:2]):
             raise CredentialError(f"unknown recipient {name!r} in {self.recipients}")
-        self._read_vault()
+        self._entries()
         self._confirm_passphrase()   # before anything is deleted
         backup = self._backup("unenrol-and-rotate-master-key")
         for p in files:
@@ -1041,23 +1232,17 @@ class Store:
         """Delete each key passphrase of this tool, and the key files they unlock here."""
         return self._delete_keyring_secrets(None)
 
-    # -- operations -------------------------------------------------------------------
 
-    def sync(self) -> dict[str, Credential]:
-        """Mirror credentials.json into the vault and clear the index's secret values."""
-        return self._save(_merge(self.read_index(), self._read_vault()))
+    # -- operations -------------------------------------------------------------------
 
     def get_system(self, system: str) -> Credential:
         """A system, with no access log line. Use get_credential() or get_secret() to hand out secrets."""
-        systems = _resolve(self.sync())
-        if system not in systems:
-            raise CredentialError(f"unknown system {system!r} (known: {', '.join(systems) or 'none'})")
-        return systems[system]
+        return self._resolve(self._need(system))
 
     def get_credential(self, system: str) -> Credential:
         """A system with all its secrets. Logs each secret."""
         c = self.get_system(system)
-        _log(self.home, "get", c.name, list(c.secrets()), self.method)
+        _log(self.home, "get", self._id(system), list(c.secrets()), self.method)
         return c
 
     def get_secret(self, system: str, key: str) -> str:
@@ -1066,77 +1251,169 @@ class Store:
         if key not in c.secrets():
             raise CredentialError(f"no secret {key!r} in system {system!r} "
                                   f"(known: {', '.join(c.secrets()) or 'none'})")
-        _log(self.home, "get", c.name, [key], self.method)
+        _log(self.home, "get", self._id(system), [key], self.method)
         return c.secrets()[key]
+
+    def edit_path(self, system: str) -> Path:
+        return self.home / f"entry-{self._id(system)}.json"
+
+    def edit(self, systems: list[str]) -> list[Path]:
+        """Write an edit file for each system: all fields, secret values empty. Returns the paths.
+
+        A new system gets a file with no fields. sync applies the files.
+        """
+        if not systems:
+            raise CredentialError("give one or more system names")
+        paths = [self.edit_path(s) for s in systems]
+        existing = [p.name for p in paths if p.exists()]
+        if existing:
+            raise CredentialError(f"{', '.join(existing)} exists already: run sync, or delete the file")
+        _ensure_ignored(self.home)
+        for system, path in zip(systems, paths):
+            record = self._entries().get(self._id(system))
+            doc: dict = {"name": system, "revision": _revision(record) if record else ""}
+            c = self._get(system)
+            if c is None:
+                doc |= {"url": "", "authority_info": [], "credentials": {}}
+            else:
+                doc |= {k: v for k, v in _entry_doc(c).items() if k not in ("name", "aliases")}
+                doc["credentials"] = {k: "" for k in c._secrets}
+            _write(path, (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode())
+        return paths
+
+    def _from_edit(self, path: Path, current) -> tuple[str, Credential]:
+        """The system of an edit file, merged with its stored values. Checks the name and the revision."""
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise CredentialError(f"{path.name} is not valid JSON: {exc}") from exc
+        if not isinstance(doc, dict) or not isinstance(doc.get("name"), str) \
+                or not isinstance(doc.get("revision"), str):
+            raise CredentialError(f"{path.name}: name and revision must be strings")
+        unknown = sorted(set(doc) - set(EDIT_FIELDS))
+        if unknown:
+            raise CredentialError(f"{path.name}: unknown fields: {', '.join(unknown)}")
+        name = doc["name"]
+        if path != self.edit_path(name):
+            raise CredentialError(f"{path.name}: the name {name!r} does not belong to this file; "
+                                  f"to rename a system, use rename-system")
+        record = self._entries().get(self._id(name))
+        if doc["revision"] != (_revision(record) if record else ""):
+            raise CredentialError(f"{path.name}: system {name!r} changed after edit; run edit again")
+        new = _from_doc({k: v for k, v in doc.items() if k != "revision"}, path.name)
+        old = current(name)
+        secrets = {}
+        for key, value in new._secrets.items():
+            kept = value or (old._secrets.get(key, "") if old else "")
+            if not kept:
+                raise CredentialError(f"system {name!r}: secret {key!r} is blank and the vault has no value "
+                                      f"for it - fill it in {path.name}, or remove the key")
+            secrets[key] = kept
+        return name, replace(new, _secrets=secrets, aliases=old.aliases if old else ())
+
+    def sync(self) -> list[str]:
+        """Apply each edit file of the vault home, then delete the files. Returns the system names.
+
+        An empty secret keeps the stored value. A field that the file does not have is removed.
+        All files are applied, or none.
+        """
+        files = sorted(self.home.glob(EDIT))
+        if not files:
+            raise CredentialError(f"no {EDIT} in {self.home}: run edit NAME first")
+        changed: dict[str, Credential] = {}   # the systems of the files, and the targets of their aliases
+        names = []
+        current = lambda n: changed[n] if n in changed else self._get(n)  # noqa: E731
+        for path in files:
+            name, new = self._from_edit(path, current)
+            names.append(name)
+            old = current(name)
+            if old and old.alias_of and old.alias_of != new.alias_of:
+                target = current(old.alias_of)
+                if target:
+                    changed[target.name] = replace(target, aliases=tuple(a for a in target.aliases if a != name))
+            changed[name] = new
+        for c in list(changed.values()):   # after all files: a target can be new in this sync
+            target = current(c.alias_of) if c.alias_of else None
+            if target and c.name not in target.aliases:
+                changed[target.name] = replace(target, aliases=(*target.aliases, c.name))
+        for c in changed.values():
+            if c.alias_of:
+                target = current(c.alias_of)
+                if target is None or target.alias_of is not None:
+                    raise CredentialError(
+                        f"system {c.name!r} is an alias of {c.alias_of!r}, which is "
+                        f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
+        for c in changed.values():
+            if c.alias_of and c.aliases:
+                raise CredentialError(f"system {c.name!r} cannot be an alias: "
+                                      f"{', '.join(c.aliases)} are aliases of it")
+        updates = [c for c in changed.values() if c != self._get(c.name)]
+        for c in updates:
+            self._put(c)
+        self._save()
+        for path in files:
+            path.unlink()
+        return names
 
     def set_system(self, system: str, url: str | None = None, authority_info: list | None = None,
                    secrets: dict | None = None) -> Credential:
-        systems = dict(self.sync())
-        old = systems.get(system)
+        old = self._get(system)
         if old and old.alias_of:
-            inherited = set(systems[old.alias_of]._secrets) - set(old._secrets)
+            target = self._get(old.alias_of)
+            inherited = set(target._secrets if target else ()) - set(old._secrets)
             if inherited & set(secrets or {}):
                 raise CredentialError(f"system {system!r} is an alias of {old.alias_of!r}; "
                                       f"set {', '.join(sorted(inherited & set(secrets)))} there")
-        systems[system] = Credential(
+        new = Credential(
             system,
             url if url is not None else (old.url if old else None),
             tuple(authority_info) if authority_info is not None else (old.authority_info if old else ()),
             {**(old._secrets if old else {}), **{k: v for k, v in (secrets or {}).items()}},
             old.alias_of if old else None,
+            old.aliases if old else (),
         )
-        return self._save(systems)[system]
+        if new != old:
+            self._put(new)
+            self._save()
+        return new
+
+    def delete_system(self, system: str) -> None:
+        """Delete a system. Refused while it has aliases."""
+        c = self._need(system)
+        if c.aliases:
+            raise CredentialError(f"cannot delete {system!r}: {', '.join(c.aliases)} are aliases of it")
+        if c.alias_of:
+            target = self._get(c.alias_of)
+            if target:
+                self._put(replace(target, aliases=tuple(a for a in target.aliases if a != system)))
+        eid = self._id(system)
+        self._drop(system)
+        self._save()
+        _log(self.home, "delete-system", eid, method=self.method)
 
     def rename_system(self, system: str, new: str) -> None:
-        """Rename a system, keeping the stored values."""
-        self._rename(system, new)
+        """Rename a system, keeping the stored values. The entry gets a new ID."""
+        c = self._need(system)
+        if self._get(new) is not None:
+            raise CredentialError(f"system {new!r} already exists")
+        if c.aliases:
+            raise CredentialError(f"cannot rename {system!r}: {', '.join(c.aliases)} are aliases of it")
+        if c.alias_of:
+            target = self._get(c.alias_of)
+            if target:
+                self._put(replace(target, aliases=tuple(new if a == system else a for a in target.aliases)))
+        self._drop(system)
+        self._put(replace(c, name=new))
+        self._save()
 
     def rename_secret(self, system: str, old: str, new: str) -> None:
         """Rename a secret key of a system, keeping the stored value."""
-        self._rename(system, new, secret=old)
-
-    def _rename(self, system: str, new: str, secret: str | None = None) -> None:
-        """Reads both files without merging first: the index may already carry the new name."""
-        stored, index = self._read_vault(), self.read_index()
-        if not new:
-            raise CredentialError("the new name must not be empty")
-        if system not in stored:
-            raise CredentialError(f"unknown system {system!r}")
-        if secret is None:
-            if new in stored:
-                raise CredentialError(f"system {new!r} already exists")
-            if system in index and new in index:
-                raise CredentialError(f"{self.index} holds both {system!r} and {new!r}")
-            aliases = sorted({n for d in (stored, index) for n, c in d.items() if c.alias_of == system})
-            if aliases:
-                raise CredentialError(f"cannot rename {system!r}: {', '.join(aliases)} are aliases of it")
-            rename = lambda d: {(new if n == system else n): (c if n != system else  # noqa: E731
-                                replace(c, name=new)) for n, c in d.items()}
-            stored, index, target = rename(stored), rename(index), new
-        else:
-            keys = stored[system]._secrets
-            if secret not in keys or new in keys:
-                raise CredentialError(f"cannot rename secret {secret!r} to {new!r} in system {system!r}")
-            swap = lambda s: {(new if k == secret else k): v for k, v in s.items()}  # noqa: E731
-            stored[system] = replace(stored[system], _secrets=swap(keys))
-            if system in index:
-                if secret in index[system]._secrets and new in index[system]._secrets:
-                    raise CredentialError(f"{self.index} holds both {secret!r} and {new!r} for {system!r}")
-                index[system] = replace(index[system], _secrets=swap(index[system]._secrets))
-            target = system
-        if target not in index:  # the index does not describe it yet; mirror it in
-            index[target] = replace(stored[target], _secrets={k: "" for k in stored[target]._secrets})
-        self._save(_merge(index, stored))
-
-
-# -- secret check (templates/.githooks/pre-commit does the same in sh and awk) ------------
-
-def exposed_secrets(raw) -> list[str]:
-    """SYSTEM.KEY for each secret that has a value. credentials.json must give none."""
-    return [f"{name}.{k}"
-            for name, e in (raw.items() if isinstance(raw, dict) else [])
-            if isinstance(e, dict) and isinstance(e.get("credentials"), dict)
-            for k, v in e["credentials"].items() if v]
+        c = self._need(system)
+        keys = c._secrets
+        if not new or old not in keys or new in keys:
+            raise CredentialError(f"cannot rename secret {old!r} to {new!r} in system {system!r}")
+        self._put(replace(c, _secrets={(new if k == old else k): v for k, v in keys.items()}))
+        self._save()
 
 
 # -- API and CLI -----------------------------------------------------------------------
@@ -1166,11 +1443,6 @@ def get_credential(system: str, vault_home: Path | str,
     return Store(vault_home, passphrase).get_credential(system)
 
 
-def list_systems(vault_home: Path | str) -> list[str]:
-    """System names from credentials.json - no key, no decryption."""
-    return list(Store(vault_home).read_index())
-
-
 def _enrol_cli(store: Store, name: str | None) -> None:
     provider: Provider | str | None = "auto"
     if _tty():
@@ -1198,10 +1470,13 @@ def main(argv: list[str] | None = None) -> int:
     global _CLI
     _CLI = True
     ap = argparse.ArgumentParser(prog="credstore", description="Credential vault (see docs/clone-keys.md).")
-    ap.add_argument("--vault-home", metavar="DIR",
-                    help=f"vault home (default: {DEFAULT_VAULT}, found by dependencies.txt or .gitmodules)")
+    where = ap.add_mutually_exclusive_group()
+    where.add_argument("--vault-home", metavar="DIR", help="the folder of the vault")
+    where.add_argument("--vault", metavar="NAME",
+                       help="the folder name of the vault, e.g. vault-main, found by .gitmodules or dependencies.txt")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("create-vault", help="create a vault: master key, example credentials.json, git hook")
+    sub.add_parser("create-vault", help="create a vault: master key, admin key, empty vault.json, git hook")
+    sub.add_parser("migrate-vault", help="convert credentials.enc and credentials.json to vault.json")
     p = sub.add_parser("enrol", help="make a key pair for this clone; self-enrol in a terminal, else leave a request")
     p.add_argument("name", nargs="?", help="recipient name (default: a generated one)")
     p = sub.add_parser("approve-enrol", help="wrap the master key for a request")
@@ -1219,8 +1494,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("delete-keyring-secret", help="delete key passphrases, and the key files they open")
     p.add_argument("names", nargs="+", metavar="NAME", help="recipient name")
     sub.add_parser("delete-all-keyring-secrets", help="delete each key passphrase, and the key files they open")
-    sub.add_parser("sync", help="mirror credentials.json into the vault and clear its secrets")
-    sub.add_parser("list", help="systems, urls and secret names from credentials.json")
+    p = sub.add_parser("edit", help="write an edit file for each system; secret values empty")
+    p.add_argument("systems", nargs="+", metavar="SYSTEM")
+    sub.add_parser("sync", help="apply the edit files to the vault, then delete them")
     p = sub.add_parser("get-system", help="show a system: url, secret names, authority info; no values")
     p.add_argument("system")
     p = sub.add_parser("get-secret", help="print one secret value")
@@ -1231,6 +1507,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--url")
     p.add_argument("--info", action="append", help="authority_info line (repeatable)")
     p.add_argument("--secret", action="append", default=[], metavar="KEY=VALUE")
+    p = sub.add_parser("delete-system", help="delete a system")
+    p.add_argument("system")
     p = sub.add_parser("rename-system", help="rename a system")
     p.add_argument("system")
     p.add_argument("new")
@@ -1246,11 +1524,13 @@ def main(argv: list[str] | None = None) -> int:
             store = Store(a.vault_home, interactive=_tty())
             for path in store.create_vault():
                 print(f"wrote {path}")
-            print(f"next: fill the secrets in {store.index}, run sync, enrol this clone, "
-                  f"then run setup.sh in {store.home}")
+            print(f"next: enrol this clone, add systems with edit and sync, then run setup.sh in {store.home}")
             return 0
-        store = Store(a.vault_home or default_vault_home(), interactive=_tty())
-        if a.cmd == "enrol":
+        store = Store(vault_home(a.vault, a.vault_home), interactive=_tty())
+        if a.cmd == "migrate-vault":
+            backup = store.migrate_vault()
+            print(f"migrated to {store.vault} (backup: {backup}); commit and push the vault home")
+        elif a.cmd == "enrol":
             _enrol_cli(store, a.name)
         elif a.cmd == "approve-enrol":
             info = store.request_info(a.name) or "no request info\n"
@@ -1269,7 +1549,7 @@ def main(argv: list[str] | None = None) -> int:
             backup = store.rotate_master_key()
             print(f"new master key; vault re-encrypted (backup: {backup}); commit and push the vault home")
         elif a.cmd == "change-passphrase":
-            store._load_key()
+            store._confirm_passphrase()
             backup = store.change_passphrase(_prompt_new_passphrase())
             print(f"passphrase changed (backup: {backup})")
         elif a.cmd == "list-keyring-secrets":
@@ -1280,11 +1560,11 @@ def main(argv: list[str] | None = None) -> int:
                        else store.delete_all_keyring_secrets())
             for provider, name in removed:
                 print(f"removed {name} from {provider}")
+        elif a.cmd == "edit":
+            for path in store.edit(a.systems):
+                print(path)
         elif a.cmd == "sync":
-            print(f"synced {len(store.sync())} system(s)")
-        elif a.cmd == "list":
-            for name, c in _resolve(store.read_index()).items():
-                print(f"{name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
+            print(f"synced {len(store.sync())} system(s); commit and push the vault home")
         elif a.cmd == "get-system":
             c = store.get_system(a.system)
             print(f"{c.name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
@@ -1298,6 +1578,9 @@ def main(argv: list[str] | None = None) -> int:
                 raise CredentialError("--secret expects KEY=VALUE")
             store.set_system(a.system, a.url, a.info, {k: v for k, _, v in pairs})
             print(f"stored {a.system!r}")
+        elif a.cmd == "delete-system":
+            store.delete_system(a.system)
+            print(f"deleted {a.system!r}")
         elif a.cmd == "rename-system":
             store.rename_system(a.system, a.new)
             print("renamed")

@@ -121,3 +121,34 @@
 - 20261030-02 Nestor 53811b07d8ef The API has no default vault home; the CLI without --vault-home finds vault-main with the lookup of the rule submodule-dependencies
 - 20261030-03 Opus-5.5 53811b07d8ef create-vault needs --vault-home
 - 20261030-04 Nestor f5a998b60f00 enrol prints a key line that tells if the key passphrase is in the keyring
+- 20261101-01 Nestor 2c0de445e142 Remove the list command, list_systems() and read_index(); a caller must know the exact name of a system
+- 20261101-02 Nestor 2c0de445e142 Keep the vault in vault.json: a map of entry ID to a separately encrypted entry
+- 20261101-03 Nestor 2c0de445e142 The entry ID is an HMAC of the name, keyed with a key from the master key; the key of an entry comes from the master key and the name
+- 20261101-04 Nestor 2c0de445e142 Encrypt the name of each entry with an admin public key; only the passphrase opens the admin private key
+- 20261101-05 Nestor 2c0de445e142 Remove credentials.json and credentials.enc; the tool gives credentials.json no special meaning
+- 20261101-06 Nestor 2c0de445e142 edit NAME ... writes an edit file entry-<ID>.json for each system and prints its path; a clone key and the name are sufficient
+- 20261101-07 Nestor 2c0de445e142 An edit file has all fields of the system; the secret values are empty
+- 20261101-08 Nestor 2c0de445e142 sync applies each edit file: an empty or unchanged value keeps the stored value, a changed value replaces it, a removed field is removed, a new field is added
+- 20261101-09 Nestor 2c0de445e142 sync deletes the edit files after success and fails if there is no edit file
+- 20261101-10 Nestor 2c0de445e142 An edit file holds the revision of its entry; sync refuses the file if the entry changed after edit
+- 20261101-11 Nestor 2c0de445e142 delete-system deletes a system
+- 20261101-12 Nestor 2c0de445e142 The pre-commit hook stops a commit of entry-*.json by the file name; it does not parse JSON
+- 20261101-13 Nestor 2c0de445e142 The access log writes the entry ID, not the system name
+- 20261101-14 Nestor 2c0de445e142 The CLI takes --vault NAME, the folder name of a vault; it finds the folder with the lookup of the rule submodule-dependencies
+- 20261101-15 Nestor 2c0de445e142 An agent can run sync
+- 20261101-16 Opus-5.5 2c0de445e142 The entry ID is the first 32 hex digits of HMAC-SHA256; the key of an entry comes from HKDF-SHA256
+- 20261101-17 Opus-5.5 2c0de445e142 Encrypt each entry with AES-256-GCM; the entry ID is the associated data
+- 20261101-18 Nestor 2c0de445e142 Keep the admin private key in a separate file admin.enc.key, encrypted with the passphrase; master.enc.key holds only the master key
+- 20261101-19 Opus-5.5 2c0de445e142 change-passphrase needs the old passphrase; it encrypts master.enc.key and admin.enc.key again
+- 20261101-20 Opus-5.5 2c0de445e142 The entry of a target holds the names of its aliases; rename-system and delete-system refuse a target with aliases
+- 20261101-21 Opus-5.5 2c0de445e142 A system name has 1 to 256 bytes and no control characters
+- 20261101-22 Opus-5.5 2c0de445e142 sync applies all edit files or none
+- 20261101-23 Opus-5.5 2c0de445e142 edit refuses a system that has an edit file
+- 20261101-24 Opus-5.5 2c0de445e142 The revision of an entry is a hash of its ciphertext
+- 20261101-25 Opus-5.5 2c0de445e142 sync refuses an edit file whose name does not give its file name; rename-system renames a system
+- 20261101-26 Opus-5.5 2c0de445e142 rotate-master-key gives each entry a new ID
+- 20261101-27 Opus-5.5 2c0de445e142 migrate-vault converts a vault of format 1 with the passphrase; it applies the values in credentials.json, deletes the old files and copies the files from templates/
+- 20261101-28 Nestor 2c0de445e142 The CLI has no default vault; it needs --vault NAME or --vault-home DIR
+- 20261101-29 Nestor 2c0de445e142 Without a vault option, the CLI stops and gives the vaults that it finds in the repositories above the tool
+- 20261101-30 Nestor 2c0de445e142 shared names no vault; the lookup of the rule submodule-dependencies continues in the repositories above, where the vault is a submodule
+- 20261101-31 Opus-5.5 2c0de445e142 A found vault is a submodule vault-* or a section [vault-*] of dependencies.txt with a folder that exists

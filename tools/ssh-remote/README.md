@@ -7,28 +7,27 @@ Decisions: [ADL.md](ADL.md).
 ## Commands
 
 ```bash
-run.sh hosts                                       # SSH systems of the vault, with url
-run.sh exec HOST [--sudo] -- CMD ...               # run CMD; the exit code is that of CMD
-run.sh upload HOST LOCAL REMOTE [--sudo]           # copy a local file to the host
-run.sh download HOST REMOTE LOCAL                  # copy a file from the host
-run.sh --vault-home DIR ...                        # another vault; default: vault-main
+run.sh exec --system NAME [--sudo --sudo-system NAME] -- CMD ...   # run CMD; the exit code is that of CMD
+run.sh upload --system NAME LOCAL REMOTE [--sudo --sudo-system NAME]   # copy a local file to the host
+run.sh download --system NAME REMOTE LOCAL                         # copy a file from the host
+run.sh --vault NAME ...                                            # the vault, e.g. vault-main; necessary
+run.sh --vault-home DIR ...                                        # or the folder of the vault
 ```
 
 - `exec` writes the stdout and the stderr of the remote command.
 - One argument after `--` is a shell command line, e.g. `-- 'ls | wc -l'`. More arguments
   are quoted one by one.
-- `HOST`, `--system` and `--sudo-system` select the vault systems. See "Vault entries".
+- `--system` and `--sudo-system` give the exact names of the vault systems. See "Vault entries".
 
 ## Vault entries
 
 | System | Secrets | Example |
 | --- | --- | --- |
-| `<HOST> SSH...` with `url` `ssh://HOST[:PORT]` | `username`, `password` | `NUC15 SSH in LAN` |
-| `<HOST> SUDO` (optional) | `username`, `password` | `NUC15 SUDO` |
+| SSH system, with `url` `ssh://HOST[:PORT]` | `username`, `password` | `NUC15 SSH in LAN` |
+| sudo system (optional) | `username`, `password` | `NUC15 SUDO` |
 
-- The tool uses the one system whose name starts with `<HOST> SSH`. Case is ignored.
-- Give `--system NAME` to use another SSH system.
-- `--sudo` needs the sudo system. Give `--sudo-system NAME` to use another sudo system.
+- The tool does not search the vault. The user gives the exact system names.
+- `--sudo` needs `--sudo-system NAME`.
 
 ## Security
 

@@ -14,11 +14,14 @@ applies.
 
 ## Steps
 
-1. Find the host: `$TOOL/run.sh hosts`. `HOST` is the first part of the system name,
-   e.g. `NUC15` for `NUC15 SSH in LAN`.
-2. Run a command: `$TOOL/run.sh exec HOST -- 'CMD'`. Add `--sudo` for root.
-3. Copy a file: `$TOOL/run.sh upload HOST LOCAL REMOTE [--sudo]` or
-   `$TOOL/run.sh download HOST REMOTE LOCAL`. Put local files into `.local_assets/`.
+1. Get the exact name of the SSH system from the user, e.g. `NUC15 SSH in LAN`. For root, get
+   also the name of the sudo system, e.g. `NUC15 SUDO`. Do not search the vault for names.
+   Get also the vault, e.g. `vault-main`. Each command needs `--vault <vault>` after `run.sh`.
+   The commands below leave it out.
+2. Run a command: `$TOOL/run.sh exec --system "SSH NAME" -- 'CMD'`. For root, add
+   `--sudo --sudo-system "SUDO NAME"`.
+3. Copy a file: `$TOOL/run.sh upload --system "SSH NAME" LOCAL REMOTE [--sudo --sudo-system "SUDO NAME"]`
+   or `$TOOL/run.sh download --system "SSH NAME" REMOTE LOCAL`. Put local files into `.local_assets/`.
 
 - Each call opens a new connection. There is no interactive shell. Give the full command
   line, e.g. `-- 'cd /var/log && tail -n 50 syslog'`.
@@ -33,8 +36,8 @@ For each error: stop and tell the user.
 | Error | Action |
 | --- | --- |
 | `... is not in ~/.ssh/known_hosts` | Give the user the `ssh` command from the error, for a terminal. The user compares the fingerprint. Do not add the key yourself. |
-| `no system for 'X'` | Show the `hosts` output and ask which host. |
-| `no sudo system for ...` | Ask the user to add `<HOST> SUDO` to the vault. |
+| `unknown system 'X'` | Ask the user for the exact system name. Do not try other names. |
+| `--sudo needs --sudo-system NAME` | Ask the user for the exact name of the sudo system. |
 | `has no password` / `has no username` | Ask the user to fill the secret in the vault. |
 | `Authentication failed` | Ask the user to check the password in the vault. |
 | `no way to open the vault` | See the [credentials](../credentials/SKILL.md) skill. |

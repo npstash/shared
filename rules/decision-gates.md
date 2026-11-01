@@ -19,7 +19,8 @@ That content gets rewritten and wastes tokens.
   wait.
 - Deliver content that needs no decision without a stop.
 - If the decisions are few and cheap to reverse, skip the gate: take the actions, list
-  them, continue.
+  them, continue. This does not apply to design choices and security choices: the rule
+  [confirm-design-choices](confirm-design-choices.md) applies to them.
 - At the top of each reply, under the heading "Actions taken", list the actions taken
   without input from the user. Write one line each, with no reasons and no options. This
   includes skipped gates, assumptions, and questions that the agent answered. See

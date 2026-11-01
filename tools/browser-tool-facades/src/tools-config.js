@@ -1,4 +1,4 @@
-// Tool switches of a facade (<facade>/config/tools.ini). They do not change the browser tool.
+// Tool switches of a facade (<facade>-tools.ini in the config folder). They do not change the browser tool.
 // Each facade tool has one line: "name = enabled" or "name = disabled".
 // A disabled tool stays in the tool list, but a call to it fails with the reason.
 import fs from 'node:fs';

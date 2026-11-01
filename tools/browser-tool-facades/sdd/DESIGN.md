@@ -7,7 +7,8 @@ defined in [SRS.md](SRS.md#default-values) and [QAS.md](QAS.md#default-values).
 
 The tool holds facades for browser tools. Each facade has its own folder (`playwright/`). The
 facades share the launcher, the runtime, the code in `src/`, the form-fill providers
-(`providers-form-fill/`) and the config in `config/`. A second facade is an open issue
+(`providers-form-fill/`) and the config templates in `config/`. The config files are in a config
+folder of the repository that uses the tool, e.g. `local/configs/browser-facade`. A second facade is an open issue
 (section 11).
 
 The Playwright facade is an MCP server on stdio between an MCP client (Claude Code, a wrapper with
@@ -36,7 +37,8 @@ flowchart TD
     U[User<br/><i>person</i>] -->|answers dialogs, MCP elicitation via the client| S
     U -->|edits config files| S
     S -->|HTTP/HTTPS, browser| W[Web sites<br/><i>external systems</i>]
-    S -->|list, get secret; CLI| V[Vault tool shared/tools/auth<br/><i>near, outside</i>]
+    S -->|get system, get secret; CLI| V[Vault tool shared/tools/auth<br/><i>near, outside</i>]
+    S -->|reads, writes| K[(Config folder<br/><i>--config-dir, outside</i>)]
     S -->|download Node.js; HTTPS| N[nodejs.org]
     S -->|download Chromium; HTTPS| P[Playwright CDN]
     S -->|apt-get download; HTTP| D[Ubuntu archive]
@@ -55,14 +57,14 @@ flowchart TD
 flowchart TD
     C[MCP client] -->|MCP, stdio| F
     subgraph S[browser-tool-facades]
-        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.js</i>] -->|starts: run.sh playwright| F[Playwright facade process<br/><i>Node.js, MCP SDK</i>]
+        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.js</i>] -->|starts: run.sh playwright --config-dir DIR| F[Playwright facade process<br/><i>Node.js, MCP SDK</i>]
         F -->|MCP, stdio| M[Playwright MCP<br/><i>Node.js child process</i>]
         M -->|CDP, pipe| B[Chromium<br/><i>downloaded browser</i>]
-        F -->|reads, writes| K[(Config files<br/><i>config/, playwright/config/, providers-form-fill/*/config.ini</i>)]
         F -->|appends| G[(Log<br/><i>JSON Lines</i>)]
         L -->|writes| R[(Runtime files<br/><i>.local_assets/</i>)]
     end
     F -->|CLI| V[Vault tool]
+    F -->|reads, writes| K[(Config folder<br/><i>--config-dir</i>)]
 ```
 
 - **Launcher:** one for all facades. It makes and updates the shared runtime: Node.js, npm
@@ -75,11 +77,10 @@ flowchart TD
 - **Chromium:** the browser of Playwright, from the tool folder.
 - **Xvfb:** the virtual display of a headed browser on Linux without a display. The facade
   starts and stops it. Unpacked into the tool folder.
-- **Config files:** committed. Shared by all facades: `config/facade.ini`,
-  `config/host-policy.template.ini`, `providers-form-fill/*/config.ini`. For one facade:
-  `<facade>/config/tools.ini`. The facade adds tool lines.
-- **Host list:** `.local_assets/config/host-policy.ini`, gitignored, shared by all facades. A copy
-  of the template. The facade records hosts in it.
+- **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). Shared by
+  all facades: `facade.ini`, `host-policy.ini`, `provider-<name>.ini`. For one facade:
+  `<facade>-tools.ini`. A missing file is a copy of its template in the tool folder. The facade
+  adds tool lines and records hosts.
 - **Log:** `LOG_FILE`, gitignored.
 - **Runtime files:** Node.js, browsers, libraries, profiles, output, temp files; gitignored.
 
@@ -115,7 +116,7 @@ flowchart TD
   roots, progress, cancellation and tool-list changes between them.
 - **Call pipeline:** the steps of one call, in this order: tool switch → host check of the target
   URL → placeholders → upstream → scrub → host check of the opened page and record → log.
-- **Tool switches:** `src/tools-config.js` with `playwright/config/tools.ini` and the dangerous
+- **Tool switches:** `src/tools-config.js` with `playwright-tools.ini` and the dangerous
   tools of Playwright MCP; adds missing tools; gives the error of a disabled tool.
 - **Host policy:** `[deny]` first, then the allow provider. Patterns: `src/hosts/patterns.js`.
 - **Allow provider:** the default reads `[allow]` and records each opened host.
@@ -124,7 +125,8 @@ flowchart TD
   `browser_fill_form.fields[].value`, `browser_select_option.values[]`), scrubs the results and the
   text files that upstream wrote in the call, gives
   `fill_values_list`.
-- **Vault, INI, ask providers:** `providers-form-fill/<name>/index.js` with `providers-form-fill/<name>/config.ini`.
+- **Vault, INI, ask providers:** `providers-form-fill/<name>/index.js` with `provider-<name>.ini`.
+  The vault provider uses only the systems that `[systems]` names (REQ-034 of SRS).
 - **Xvfb starter:** `playwright/src/xvfb.js`. `renderMode()` of `playwright/src/config.js`
   resolves `PLAYWRIGHT_RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the facade starts
   Xvfb through `setpriv --pdeathsig KILL` before upstream, records it in XVFB_DIR and gives
@@ -151,10 +153,10 @@ flowchart TD
 | Facade process | MCP `tools/list` | The tools of upstream, then `fill_values_list`; notes for disabled tools and placeholders. |
 | Facade process | MCP `tools/call` | The call pipeline (5.1). Error results: UI-02 of SRS. |
 | Facade process | MCP `elicitation/create` (to the client) | The dialog of the ask provider (UI-01). |
-| Facade process | arguments | Each argument goes to Playwright MCP, e.g. `--isolated`. The facade removes `--headless`. |
-| Facade process | environment | `PLAYWRIGHT_RENDER_MODE` (REQ-015 of SRS; the facade ignores `PLAYWRIGHT_MCP_HEADLESS`); `PLAYWRIGHT_FACADE_LOG_FILE`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_CONFIG_DIR` (tools.ini); `BROWSER_FACADES_CONFIG_DIR`, `BROWSER_FACADES_PROVIDERS_CONFIG_DIR` (shared config). |
+| Facade process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument goes to Playwright MCP, e.g. `--isolated`. The facade removes `--headless`. |
+| Facade process | environment | `PLAYWRIGHT_RENDER_MODE` (REQ-015 of SRS; the facade ignores `PLAYWRIGHT_MCP_HEADLESS`); `PLAYWRIGHT_FACADE_LOG_FILE`, `_LOG_LEVEL`, `_LOG_SECRETS`; `BROWSER_FACADES_VAULT_TOOL` (tests: a test double of the vault tool). |
 | Launcher | `run.sh [install|test|args]` | Makes the runtime; `install` stops after it; `test` runs the tests. |
-| Vault tool (used) | `run.sh [--vault-home D] list` / `get-secret NAME KEY` | Systems with url and secret names; one secret on stdout. |
+| Vault tool (used) | `run.sh --vault NAME get-system SYSTEM` / `get-secret SYSTEM KEY` | The secret names of one system; one secret on stdout. |
 
 ### 6.2 Component interfaces
 
@@ -213,19 +215,22 @@ sequenceDiagram
 
 | File | Committed | Format | Written by |
 | --- | --- | --- | --- |
-| `config/facade.ini` | yes | `[fill] providers = vault, ini, ask`; `[hosts] record = true|false` | user |
-| `playwright/config/tools.ini` | yes | `[tools]` `<tool> = enabled|disabled`, sorted | user; facade adds missing tools |
-| `config/host-policy.template.ini` | yes | as `host-policy.ini` | user |
-| `.local_assets/config/host-policy.ini` | no | header comments; `[deny]`, `[allow]`: one host pattern per line, sorted, unique; a copy of the template | user; facade copies the template and records hosts |
-| `providers-form-fill/vault/config.ini` | yes | `[vault]` `vault_home`, `tool` (paths relative to the folder) | user |
-| `providers-form-fill/ini/config.ini` | yes | `[all]` and `[<host pattern>]` with `key = value` | user |
-| `providers-form-fill/ask/config.ini` | yes | `[ask]` `fields = a, b, c` | user |
+| `<config>/facade.ini` | yes | `[fill] providers = vault, ini, ask`; `[hosts] record = true|false` | user |
+| `<config>/playwright-tools.ini` | yes | `[tools]` `<tool> = enabled|disabled`, sorted | user; facade adds missing tools |
+| `<config>/host-policy.ini` | yes | header comments; `[deny]`, `[allow]`: one host pattern per line, sorted, unique | user; facade records hosts |
+| `<config>/provider-vault.ini` | yes | `[vault]` `vault = vault-<name>`; `[systems]` `<host or URL prefix> = <system name>` | user |
+| `<config>/provider-ini.ini` | yes | `[all]` and `[<host pattern>]` with `key = value` | user |
+| `<config>/provider-ask.ini` | yes | `[ask]` `fields = a, b, c` | user |
+| `config/*.template.ini`, `<facade>/config/tools.template.ini`, `providers-form-fill/<name>/config.template.ini` | yes | the first content of each file above | user; facade copies a template to a missing file |
 | `LOG_FILE` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | facade |
 | `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of facade and Xvfb), profiles, output, tmp | launcher, Playwright |
 | `<repo>/.local_assets/tmp/` | no | temp files of Chromium when the tool folder cannot hold its socket | Playwright |
 
 Host patterns: `*` (each host), `*.example.com` (subdomains only), `example.com` (exact),
 `192.168.1.*` (IPv4 octets). Host only, no case. A URL without a host passes.
+
+`<config>` is the config folder that `--config-dir` gives, e.g. `local/configs/browser-facade` of the
+repository.
 
 Placeholders: `{{<name>}}`, the name is a letter, then letters, digits, `_`, `.`, `-`. No case.
 
@@ -258,7 +263,6 @@ All decisions are in [ADL.md](ADL.md).
 
 - A second facade, for the browser that Claude opens in a chat of the Claude desktop app.
 - Composite tools that combine Playwright tools, e.g. `fill_form_by_labels`.
-- Location of the host list: maybe outside the committed config, per clone or per workspace.
 - A pop-up allow provider (MCP elicitation) for hosts that are not in `[allow]`.
 - A network fill provider.
 - Proof of QAS-001 in clean Ubuntu 22.04 and 24.04 containers, with instructions (B3).

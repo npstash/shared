@@ -20,15 +20,19 @@ In the examples, `<TOOL>` is the absolute path of the tool folder `browser-tool-
 `/mnt/c/work/my_workspace/shared/tools/browser-tool-facades` (WSL)
 or `C:\work\my_workspace\shared\tools\browser-tool-facades` (Windows).
 
+`<CONFIG>` is the config folder of the facade, e.g. `local/configs/browser-facade` of the workspace.
+See [Config folder](../../README.md#config-folder). Give an absolute path when the client does not
+start the server in the workspace folder.
+
 To block a Playwright MCP that is also configured, see [Settings of Claude Code](#settings-of-claude-code).
 
 ## Select the launcher
 
 | Claude Code runs in | `command` | `args` |
 | --- | --- | --- |
-| Linux, macOS, WSL | `<TOOL>/run.sh` | `["playwright"]` |
-| Windows (native) | `cmd` | `["/c", "<TOOL>\\run.bat", "playwright"]` |
-| Windows, browser in WSL | `wsl.exe` | `["<TOOL in WSL>/run.sh", "playwright"]` |
+| Linux, macOS, WSL | `<TOOL>/run.sh` | `["playwright", "--config-dir", "<CONFIG>"]` |
+| Windows (native) | `cmd` | `["/c", "<TOOL>\\run.bat", "playwright", "--config-dir", "<CONFIG>"]` |
+| Windows, browser in WSL | `wsl.exe` | `["<TOOL in WSL>/run.sh", "playwright", "--config-dir", "<CONFIG in WSL>"]` |
 
 - On Windows, a client cannot start a `.bat` file directly. Use `cmd /c`.
 - The first argument selects the facade: `playwright`. Add the arguments of Playwright MCP after it,
@@ -39,8 +43,8 @@ To block a Playwright MCP that is also configured, see [Settings of Claude Code]
 Add the server for the user (all projects):
 
 ```bash
-claude mcp add --scope user playwright-facade -- <TOOL>/run.sh playwright
-claude mcp add --scope user playwright-facade -- <TOOL>/run.sh playwright --isolated    # with an argument
+claude mcp add --scope user playwright-facade -- <TOOL>/run.sh playwright --config-dir <CONFIG>
+claude mcp add --scope user playwright-facade -- <TOOL>/run.sh playwright --config-dir <CONFIG> --isolated    # with an argument
 claude mcp list                                                       # check: "playwright-facade: ... Connected"
 ```
 
@@ -53,7 +57,7 @@ this file. Claude Code asks for an approval at the first start:
     "playwright-facade": {
       "type": "stdio",
       "command": "<TOOL>/run.sh",
-      "args": ["playwright"]
+      "args": ["playwright", "--config-dir", "<CONFIG>"]
     }
   }
 }
@@ -84,11 +88,11 @@ the user scope in `~/.claude.json` and the `.mcp.json` of the project folder.
 - Windows: the desktop app runs Claude Code on Windows. Use `cmd /c <TOOL>\run.bat playwright`:
 
   ```powershell
-  claude mcp add --scope user playwright-facade -- cmd /c C:\work\my_workspace\shared\tools\browser-tool-facades\run.bat playwright
+  claude mcp add --scope user playwright-facade -- cmd /c C:\work\my_workspace\shared\tools\browser-tool-facades\run.bat playwright --config-dir C:\work\my_workspace\local\configs\browser-facade
   ```
 
   If Claude Code is not installed on Windows, add the entry to `%USERPROFILE%\.claude.json` under
-  `"mcpServers"`, with `"command": "cmd"` and `"args": ["/c", "<TOOL>\\run.bat", "playwright"]`.
+  `"mcpServers"`, with `"command": "cmd"` and `"args": ["/c", "<TOOL>\\run.bat", "playwright", "--config-dir", "<CONFIG>"]`.
 - macOS: use `run.sh`.
 - Start a new session in the Code tab. Type `/mcp` to see the state.
 
@@ -106,7 +110,7 @@ options = ClaudeAgentOptions(
         "playwright-facade": {
             "type": "stdio",
             "command": "<TOOL>/run.sh",
-            "args": ["playwright", "--isolated"],
+            "args": ["playwright", "--config-dir", "<CONFIG>", "--isolated"],
             "env": {"PLAYWRIGHT_FACADE_LOG_FILE": "<TOOL>/.local_assets/logs/my-wrapper.log"},
         }
     },
@@ -126,7 +130,7 @@ for await (const message of query({
   prompt: "Open https://example.com and give the title.",
   options: {
     mcpServers: {
-      "playwright-facade": { type: "stdio", command: "<TOOL>/run.sh", args: ["playwright", "--isolated"] },
+      "playwright-facade": { type: "stdio", command: "<TOOL>/run.sh", args: ["playwright", "--config-dir", "<CONFIG>", "--isolated"] },
     },
     allowedTools: ["mcp__playwright-facade__*"],
   },
@@ -139,7 +143,7 @@ for await (const message of query({
   has its own profile in memory.
 - `PLAYWRIGHT_RENDER_MODE` in `env` selects the render mode. The facade never runs headless by default. See [Render mode](../README.md#render-mode).
 - An `env` entry goes to the facade and to Playwright MCP, e.g. `PLAYWRIGHT_FACADE_LOG_LEVEL`.
-- On Windows, use `"command": "cmd"` and `"args": ["/c", "<TOOL>\\run.bat", "playwright", ...]`.
+- On Windows, use `"command": "cmd"` and `"args": ["/c", "<TOOL>\\run.bat", "playwright", "--config-dir", "<CONFIG>", ...]`.
 
 ## Claude Cowork (Claude Desktop app)
 
@@ -157,13 +161,13 @@ facade runs on the computer, outside the sandbox. The browser then opens on the 
      "mcpServers": {
        "playwright-facade": {
          "command": "cmd",
-         "args": ["/c", "C:\\work\\my_workspace\\shared\\tools\\browser-tool-facades\\run.bat", "playwright"]
+         "args": ["/c", "C:\\work\\my_workspace\\shared\\tools\\browser-tool-facades\\run.bat", "playwright", "--config-dir", "C:\\work\\my_workspace\\local\\configs\\browser-facade"]
        }
      }
    }
    ```
 
-   On macOS, use `"command": "<TOOL>/run.sh"` and `"args": ["playwright"]`.
+   On macOS, use `"command": "<TOOL>/run.sh"` and `"args": ["playwright", "--config-dir", "<CONFIG>"]`.
 3. Quit the app fully and start it again.
 4. In a Cowork task, look for the `playwright-facade` tools in the list of connectors and tools.
 

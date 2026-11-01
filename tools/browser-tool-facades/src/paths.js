@@ -1,4 +1,5 @@
-// Paths that all facades share: the tool folder, the runtime files and the shared config.
+// Paths that all facades share: the tool folder, the runtime files and the config files.
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,17 +11,26 @@ export const PLATFORM = `${process.platform === 'win32' ? 'win' : process.platfo
 const require = createRequire(import.meta.url);
 export const VERSION = require('../package.json').version;
 
-// The shared config of the facades. Tests point the env variables to copies.
-//   config           facade.ini (fill provider order, host recording), host-policy.template.ini
-//   local            host-policy.ini (host list of this clone; the facade writes it); gitignored
-//   providers        the code of the form-fill providers
-//   providersConfig  the config.ini of each form-fill provider
-export function sharedConfigDirs(env = process.env) {
-  const providers = path.join(TOOL_DIR, 'providers-form-fill');
-  return {
-    config: env.BROWSER_FACADES_CONFIG_DIR || path.join(TOOL_DIR, 'config'),
-    local: env.BROWSER_FACADES_LOCAL_CONFIG_DIR || path.join(ASSETS_DIR, 'config'),
-    providers,
-    providersConfig: env.BROWSER_FACADES_PROVIDERS_CONFIG_DIR || providers,
-  };
+// The code of the form-fill providers.
+export const PROVIDERS_DIR = path.join(TOOL_DIR, 'providers-form-fill');
+
+// The config files are in the config folder that the argument --config-dir gives, e.g.
+// local/configs/browser-facade of the repository. The tool folder has a template of each file.
+//   facade.ini            fill provider order, host recording      config/facade.template.ini
+//   host-policy.ini       deny-list and allow-list of hosts         config/host-policy.template.ini
+//   <facade>-tools.ini    tool switches of one facade               <facade>/config/tools.template.ini
+//   provider-<name>.ini   config of one form-fill provider          providers-form-fill/<name>/config.template.ini
+export const CONFIG_TEMPLATES = {
+  'facade.ini': path.join(TOOL_DIR, 'config', 'facade.template.ini'),
+  'host-policy.ini': path.join(TOOL_DIR, 'config', 'host-policy.template.ini'),
+};
+
+// The path of a config file. A missing file is first a copy of its template.
+export function configFile(configDir, name, template = CONFIG_TEMPLATES[name]) {
+  const file = path.join(configDir, name);
+  if (!fs.existsSync(file) && template && fs.existsSync(template)) {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.copyFileSync(template, file);
+  }
+  return file;
 }

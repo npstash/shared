@@ -15,7 +15,12 @@ Follow the rule [submodule-dependencies](../../rules/submodule-dependencies.md).
    If that folder is empty, stop: the submodule has no checkout. Run `setup.sh`.
 3. Else, use the first folder of the section `[<name>]` of `dependencies.txt` of the root that
    exists and is not empty.
-4. Else, stop with an error. The error gives the folders that the lookup tried.
+4. Else, go up from the root to the next root, e.g. the repository that has this repository as a
+   submodule. Do steps 2 and 3 there. Continue to the last root.
+5. Else, stop with an error. The error gives the roots and the folders that the lookup tried.
+
+Thus `shared` needs no `dependencies.txt` for a vault: the repository that uses `shared` has the
+vault as a submodule.
 
 ## dependencies.txt
 
