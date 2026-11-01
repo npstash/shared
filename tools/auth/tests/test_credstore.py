@@ -267,7 +267,7 @@ def test_secrets_map_is_immutable(home):
         cs.Store(home, PW).get_credential(SYS).secrets()["token"] = "x"
 
 
-def test_nothing_lists_the_systems(home, capsys):
+def test_no_listing_without_the_passphrase(home, capsys):
     put(home, SYS, token="t")
     assert not hasattr(cs, "list_systems") and not hasattr(cs.Store, "read_index")
     with pytest.raises(SystemExit):
@@ -275,6 +275,25 @@ def test_nothing_lists_the_systems(home, capsys):
     with pytest.raises(cs.CredentialError) as error:
         cs.Store(home, PW).get_credential("Github")
     assert str(error.value) == "unknown system 'Github'"   # no names of other systems
+
+
+def test_list_systems_needs_a_terminal_and_the_passphrase(home, monkeypatch, capsys):
+    put(home, "b", token="t")
+    put(home, "a", token="t")
+    cs.Store(home, PW).enrol("here", None)
+    with pytest.raises(cs.CredentialError, match="needs the master passphrase"):
+        cs.Store(home).list_systems()                      # a clone key alone does not open the names
+    assert cs.Store(home, PW).list_systems() == ["a", "b"]
+    assert log_lines(home)[-1][1] == "list-systems"
+    asked = []
+    monkeypatch.setattr(cs.getpass, "getpass", lambda prompt: asked.append(prompt) or PW)
+    monkeypatch.setattr(cs, "_tty", lambda: False)
+    capsys.readouterr()
+    assert cs.main(["--vault-home", str(home), "list-systems"]) == 1 and not asked
+    assert "list-systems runs only in a terminal" in capsys.readouterr().err
+    monkeypatch.setattr(cs, "_tty", lambda: True)
+    assert cs.main(["--vault-home", str(home), "list-systems"]) == 0 and asked == ["Master passphrase: "]
+    assert capsys.readouterr().out == "a\nb\n"
 
 
 def test_set_system_adds_and_updates(home):
@@ -548,72 +567,6 @@ def test_new_passphrase_is_typed_twice(monkeypatch):
         cs._prompt_new_passphrase()
     typed = iter(["abc", "abc"])
     assert cs._prompt_new_passphrase() == "abc"
-
-
-# -- migration -------------------------------------------------------------------------------
-
-@pytest.fixture
-def old_vault(tmp_path):
-    """A vault of format 1: credentials.enc, credentials.json, master.enc.key with the master key only."""
-    home = tmp_path / "old"
-    home.mkdir()
-    key = cs._new_master_key()
-    (home / "master.enc.key").write_bytes(cs.encrypt((key + "\n").encode(), PW))
-    stored = {SYS: {"url": "https://g", "credentials": {"username": "u", "token": "t"}},
-              "LDAP": {"credentials": {"password": "p"}},
-              "wiki": {"url": "https://w", "alias_of": "LDAP"},
-              "gone": {"credentials": {"x": "y"}}}
-    (home / "credentials.enc").write_bytes(cs.encrypt(json.dumps(stored).encode(), key))
-    index = {SYS: {"url": "https://g", "authority_info": ["scope"], "credentials": {"username": "", "token": "new"}},
-             "LDAP": {"credentials": {"password": ""}},
-             "wiki": {"url": "https://w", "alias_of": "LDAP"}}
-    (home / "credentials.json").write_text(json.dumps(index))
-    (home / ".githooks").mkdir()
-    (home / ".githooks" / "pre-commit").write_text("old hook")
-    return home
-
-
-def test_migrate_vault(old_vault):
-    with pytest.raises(cs.CredentialError, match=r"no vault: .*\(run migrate-vault\)"):
-        cs.Store(old_vault, PW).get_credential(SYS)
-    with pytest.raises(cs.NoWayToOpen):
-        cs.Store(old_vault).migrate_vault()
-    backup = cs.Store(old_vault, PW).migrate_vault()
-    assert (backup / "credentials.enc").exists() and (backup / "credentials.json").exists()
-    assert not (old_vault / "credentials.enc").exists() and not (old_vault / "credentials.json").exists()
-    assert (old_vault / "admin.pub").exists() and (old_vault / "admin.enc.key").exists()
-    assert cs.decrypt((old_vault / "master.enc.key").read_bytes(), PW).count(b"\n") == 1   # the master key only
-    assert secrets(old_vault, SYS) == {"username": "u", "token": "new"}     # the unsynced value too
-    assert cs.Store(old_vault, PW).get_system(SYS).authority_info == ("scope",)
-    assert secrets(old_vault, "wiki") == {"password": "p"}
-    assert cs.Store(old_vault, PW)._get("LDAP").aliases == ("wiki",)
-    with pytest.raises(cs.CredentialError, match="unknown system 'gone'"):  # not in the index
-        cs.Store(old_vault, PW).get_system("gone")
-    assert (old_vault / ".githooks" / "pre-commit").read_bytes() == (cs.TEMPLATES / ".githooks" / "pre-commit").read_bytes()
-    assert "entry-*.json" in (old_vault / ".gitignore").read_text().splitlines()
-    cs.Store(old_vault, PW).rotate_master_key()                             # the admin key opens the names
-    assert secrets(old_vault, "wiki") == {"password": "p"}
-    with pytest.raises(cs.CredentialError, match="the vault is migrated"):
-        cs.Store(old_vault, PW).migrate_vault()
-
-
-def test_migrate_vault_moves_the_admin_key_out_of_master_enc_key(home):
-    """A vault.json of 2026-11-01 kept the admin key in master.enc.key, after the master key."""
-    put(home, SYS, token="t")
-    key = cs.Store(home, PW)._load_key()
-    admin = cs.decrypt((home / "admin.enc.key").read_bytes(), PW)
-    (home / "master.enc.key").write_bytes(cs.encrypt((key + "\n").encode() + admin, PW))
-    (home / "admin.enc.key").unlink()
-    with pytest.raises(cs.CredentialError, match="admin key not found.*run migrate-vault"):
-        cs.Store(home, PW).rotate_master_key()
-    backup = cs.Store(home, PW).migrate_vault()
-    assert cs.decrypt((backup / "master.enc.key").read_bytes(), PW).endswith(admin)
-    assert cs.decrypt((home / "master.enc.key").read_bytes(), PW) == (key + "\n").encode()
-    assert cs.decrypt((home / "admin.enc.key").read_bytes(), PW) == admin
-    with pytest.raises(cs.CredentialError, match="the vault is migrated"):
-        cs.Store(home, PW).migrate_vault()
-    cs.Store(home, PW).rotate_master_key()
-    assert secrets(home, SYS) == {"token": "t"}
 
 
 # -- clone keys ------------------------------------------------------------------------------
@@ -992,7 +945,6 @@ def test_create_vault_writes_an_empty_vault(home):
     for name in ("master.enc.key", "admin.enc.key", "admin.pub", "vault.json", ".gitignore", ".gitattributes",
                  ".githooks/pre-commit", "setup.sh", "setup.bat"):
         assert (home / name).is_file(), name
-    assert not (home / "credentials.json").exists() and not (home / "credentials.enc").exists()
     assert {"clone.*.key", "access.log", "entry-*.json"} <= set((home / ".gitignore").read_text().splitlines())
     assert vault_doc(home) == {"format": 2, "entries": {}}
 

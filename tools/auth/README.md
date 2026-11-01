@@ -24,12 +24,13 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 
 ## Entries
 
-No command lists the entries. To use an entry, a caller must know its exact name.
+To use an entry, a caller must know its exact name. Only `list-systems` lists the names: it runs
+only in a terminal and needs the passphrase.
 
 - The entry ID is HMAC-SHA256 of the name. Its key comes from the master key.
 - Each entry is encrypted with AES-256-GCM. Its key comes from the master key and the name.
 - The name is also encrypted with the admin public key. Only the passphrase opens these names.
-  `rotate-master-key` needs them.
+  `rotate-master-key` and `list-systems` need them.
 - `vault.json` shows no names, URLs or secrets. `openssl` cannot open an entry.
 
 ## Finding the vault
@@ -103,7 +104,6 @@ opens the vault there.
 
 ```bash
 run.sh create-vault                      # new vault; asks for a new passphrase
-run.sh migrate-vault                     # convert credentials.enc and credentials.json to vault.json; needs the passphrase
 run.sh enrol [NAME]                      # key pair for this clone; see "Enrolment"
 run.sh approve-enrol NAME                # in a trusted clone: approve a request
 run.sh unenrol [NAME]                    # delete the recipient files; see "Unenrolment"
@@ -114,6 +114,7 @@ run.sh change-passphrase                 # new passphrase, same keys; needs the 
 run.sh list-keyring-secrets              # key passphrases of this tool in the OS keyring
 run.sh delete-keyring-secret NAME ...    # delete them, and the key files they open
 run.sh delete-all-keyring-secrets        # delete all of them, and the key files they open
+run.sh list-systems                      # names of all systems; only in a terminal, needs the passphrase
 run.sh edit SYSTEM ...                   # write edit files; see "Edit"
 run.sh sync                              # apply the edit files
 run.sh get-system SYSTEM                 # url, secret names, authority info; no values
@@ -129,7 +130,7 @@ run.sh --vault NAME ...
 `NAME` of `unenrol` and `delete-private-clone-key` is optional. Without it, the command uses
 the recipient of this clone: the one `clone.<name>.key` in the vault home.
 
-After `migrate-vault`, `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
+After `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
 `rotate-master-key`, `sync`, `set-system`, `delete-system` and `rename-*`, commit and push the
 vault home.
 

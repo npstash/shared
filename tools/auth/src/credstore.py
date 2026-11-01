@@ -807,7 +807,7 @@ class Store:
         try:
             blob = self.admin_enc.read_bytes()
         except FileNotFoundError:
-            raise CredentialError(f"admin key not found: {self.admin_enc} (run migrate-vault)") from None
+            raise CredentialError(f"admin key not found: {self.admin_enc}") from None
         return decrypt(blob, passphrase, what="admin key")
 
     # -- entries --------------------------------------------------------------------------
@@ -816,8 +816,7 @@ class Store:
         """ID -> {"name", "data"} of vault.json. Nothing is decrypted."""
         if self._records is None:
             if not self.vault.is_file():
-                hint = "run migrate-vault" if (self.home / "credentials.enc").exists() else "run create-vault"
-                raise CredentialError(f"no vault: {self.vault} does not exist ({hint})")
+                raise CredentialError(f"no vault: {self.vault} does not exist (run create-vault)")
             try:
                 doc = json.loads(self.vault.read_text(encoding="utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -920,8 +919,7 @@ class Store:
         """Copy keys and vaults aside first: a crash between two writes would strand them."""
         target = BACKUPS / f"{label}-{datetime.now():%Y%m%d-%H%M%S}"
         target.mkdir(parents=True, exist_ok=True)
-        for path in (self.key_enc, self.admin_enc, self.vault, self.admin_pub, self.home / "credentials.enc",
-                     self.home / "credentials.json"):
+        for path in (self.key_enc, self.admin_enc, self.vault, self.admin_pub):
             if path.exists():
                 shutil.copy2(path, target / path.name)
         if self.recipients.is_dir():
@@ -964,73 +962,6 @@ class Store:
                 written.append(target)
         _ensure_ignored(self.home)
         return written
-
-    def migrate_vault(self) -> Path:
-        """Convert credentials.enc and credentials.json (format 1) to vault.json. Needs the passphrase.
-
-        Applies the secret values that credentials.json still holds, as sync of format 1 did.
-        Deletes both old files and updates the files from templates/. A vault.json whose
-        master.enc.key also holds the admin key gets a separate admin.enc.key. Returns the backup.
-        """
-        old_vault, old_index = self.home / "credentials.enc", self.home / "credentials.json"
-        if self.vault.exists():
-            return self._split_admin_key()
-        if not old_vault.is_file():
-            raise CredentialError(f"no {old_vault} to migrate")
-        passphrase = self._confirm_passphrase()
-        try:
-            stored = json.loads(decrypt(old_vault.read_bytes(), self._key))
-            index = json.loads(old_index.read_text(encoding="utf-8") or "{}") if old_index.exists() else stored
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise CredentialError(f"{old_vault} or {old_index} is corrupted") from exc
-        systems: dict[str, Credential] = {}
-        for name, e in index.items():
-            c = _from_doc({**e, "name": _check_system(name)}, f"{old_index}: {name!r}")
-            old = stored.get(name, {}).get("credentials", {})
-            secrets = {k: v or old.get(k, "") for k, v in c._secrets.items()}
-            blank = [k for k, v in secrets.items() if not v]
-            if blank:
-                raise CredentialError(f"system {name!r}: secret {blank[0]!r} is blank and the vault has no value "
-                                      f"for it - fill it in {old_index}, or remove the key")
-            systems[name] = replace(c, _secrets=secrets)
-        for name, c in list(systems.items()):
-            if c.alias_of:
-                target = systems.get(c.alias_of)
-                if target is None or target.alias_of is not None:
-                    raise CredentialError(f"system {name!r} is an alias of {c.alias_of!r}, which is "
-                                          f"{'unknown' if target is None else 'an alias too'}")
-                systems[c.alias_of] = replace(target, aliases=(*target.aliases, name))
-        backup = self._backup("migrate-vault")
-        if not self.admin_enc.exists():
-            self._new_admin_key(passphrase)
-        self._records = {}
-        for c in systems.values():
-            self._put(c)
-        self._save()
-        old_vault.unlink()
-        old_index.unlink(missing_ok=True)
-        for source in sorted(TEMPLATES.rglob("*")):
-            if source.is_file():
-                target = self.home / source.relative_to(TEMPLATES)
-                if source.name != ".gitignore":
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, target)
-        _ensure_ignored(self.home)
-        _log(self.home, "migrate-vault", method=self.method)
-        return backup
-
-    def _split_admin_key(self) -> Path:
-        """Move an admin key out of master.enc.key into admin.enc.key. Returns the backup."""
-        passphrase = self._confirm_passphrase()
-        pem = decrypt(self.key_enc.read_bytes(), passphrase, "master key").partition(b"\n")[2]
-        if not pem.strip() or self.admin_enc.exists():
-            raise CredentialError(f"{self.vault} exists already: the vault is migrated")
-        _admin_key(pem)
-        backup = self._backup("migrate-vault")
-        _write(self.admin_enc, encrypt(pem, passphrase))
-        self._new_key(passphrase, key=self._key)
-        _log(self.home, "migrate-vault", method=self.method)
-        return backup
 
     def _new_key(self, passphrase: str, key: str | None = None) -> None:
         """Write master.enc.key: the master key, a new random one by default."""
@@ -1234,6 +1165,12 @@ class Store:
 
 
     # -- operations -------------------------------------------------------------------
+
+    def list_systems(self) -> list[str]:
+        """The names of all systems, sorted. Needs the passphrase: only the admin key opens the names."""
+        names = self._names(_admin_key(self._admin_pem(self._confirm_passphrase())))
+        _log(self.home, "list-systems", method=self.method)
+        return sorted(names.values())
 
     def get_system(self, system: str) -> Credential:
         """A system, with no access log line. Use get_credential() or get_secret() to hand out secrets."""
@@ -1476,7 +1413,6 @@ def main(argv: list[str] | None = None) -> int:
                        help="the folder name of the vault, e.g. vault-main, found by .gitmodules or dependencies.txt")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("create-vault", help="create a vault: master key, admin key, empty vault.json, git hook")
-    sub.add_parser("migrate-vault", help="convert credentials.enc and credentials.json to vault.json")
     p = sub.add_parser("enrol", help="make a key pair for this clone; self-enrol in a terminal, else leave a request")
     p.add_argument("name", nargs="?", help="recipient name (default: a generated one)")
     p = sub.add_parser("approve-enrol", help="wrap the master key for a request")
@@ -1494,6 +1430,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("delete-keyring-secret", help="delete key passphrases, and the key files they open")
     p.add_argument("names", nargs="+", metavar="NAME", help="recipient name")
     sub.add_parser("delete-all-keyring-secrets", help="delete each key passphrase, and the key files they open")
+    sub.add_parser("list-systems", help="print the names of all systems; only in a terminal, needs the passphrase")
     p = sub.add_parser("edit", help="write an edit file for each system; secret values empty")
     p.add_argument("systems", nargs="+", metavar="SYSTEM")
     sub.add_parser("sync", help="apply the edit files to the vault, then delete them")
@@ -1527,10 +1464,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"next: enrol this clone, add systems with edit and sync, then run setup.sh in {store.home}")
             return 0
         store = Store(vault_home(a.vault, a.vault_home), interactive=_tty())
-        if a.cmd == "migrate-vault":
-            backup = store.migrate_vault()
-            print(f"migrated to {store.vault} (backup: {backup}); commit and push the vault home")
-        elif a.cmd == "enrol":
+        if a.cmd == "enrol":
             _enrol_cli(store, a.name)
         elif a.cmd == "approve-enrol":
             info = store.request_info(a.name) or "no request info\n"
@@ -1560,6 +1494,11 @@ def main(argv: list[str] | None = None) -> int:
                        else store.delete_all_keyring_secrets())
             for provider, name in removed:
                 print(f"removed {name} from {provider}")
+        elif a.cmd == "list-systems":
+            if not _tty():
+                raise CredentialError("list-systems runs only in a terminal: it needs the master passphrase")
+            for name in store.list_systems():
+                print(name)
         elif a.cmd == "edit":
             for path in store.edit(a.systems):
                 print(path)

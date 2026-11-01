@@ -152,3 +152,5 @@
 - 20261101-29 Nestor 2c0de445e142 Without a vault option, the CLI stops and gives the vaults that it finds in the repositories above the tool
 - 20261101-30 Nestor 2c0de445e142 shared names no vault; the lookup of the rule submodule-dependencies continues in the repositories above, where the vault is a submodule
 - 20261101-31 Opus-5.5 2c0de445e142 A found vault is a submodule vault-* or a section [vault-*] of dependencies.txt with a folder that exists
+- 20261101-32 Nestor 2424c2e08958 list-systems prints the names of all systems; it runs only in a terminal and needs the passphrase
+- 20261101-33 Nestor 2424c2e08958 Remove migrate-vault after the migration of each vault

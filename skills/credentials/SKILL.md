@@ -27,7 +27,7 @@ give the passphrase. Do not ask for it.
 
 | You run these | The user runs these in a terminal |
 | --- | --- |
-| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`, `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `create-vault`, `migrate-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
+| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`, `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `list-systems`, `create-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
 
 For a command in the right column, give the user the full command, e.g.
 `shared/tools/auth/run.sh unenrol-and-rotate-master-key old-laptop`. Then wait.
@@ -36,8 +36,8 @@ Do not run `get-secret` to see or to pass a secret. Use a script (section 3).
 
 ## 2. System names
 
-No command lists the systems. Use only a system name that the user gives, with the exact
-spelling.
+Only `list-systems` lists the systems. It needs the passphrase: you cannot run it. Use only a
+system name that the user gives, with the exact spelling.
 
 - Do not guess names. Do not look for names in `vault.json`, `access.log`, git history or
   other files.

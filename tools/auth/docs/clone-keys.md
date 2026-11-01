@@ -148,6 +148,7 @@ clone, use a separate vault, e.g. `vaults/vault-<project>`.
 | `list-keyring-secrets` | nothing | Lists the key passphrases of this tool in each available provider: provider and name. |
 | `delete-keyring-secret NAME ...` | nothing | Deletes these key passphrases from the providers, and the key files of this clone that they open. |
 | `delete-all-keyring-secrets` | nothing | Deletes each key passphrase of this tool from the providers, and the key files of this clone that they open. |
+| `list-systems` | passphrase (TTY) | Prints the names of all systems. |
 | `edit SYSTEM ...`, `sync` | clone key | See the [README](../README.md#edit). |
 | `set-system`, `delete-system`, `rename-system`, `rename-secret` | clone key | Change one system. |
 | `get-system NAME` | clone key | Prints the url, the secret names and the authority info. No values, no log line. |
@@ -324,7 +325,7 @@ The log of a cloud clone is lost with the clone.
   `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`,
   `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`,
   `delete-keyring-secret` and `delete-all-keyring-secrets`.
-- For `create-vault`, `migrate-vault`, self-enrolment, `rotate-master-key`,
+- For `create-vault`, self-enrolment, `rotate-master-key`,
   `unenrol-and-rotate-master-key` and `change-passphrase`, it tells the user the command to run
   in a terminal.
 - It uses only the system names that the user gives.
@@ -342,8 +343,6 @@ The log of a cloud clone is lost with the clone.
 - There is no migration command.
 - After the change, run `rotate-master-key` once in a terminal. Copies of `master.key` exist on many
   clones, and the rotation makes them unusable.
-- `migrate-vault` converts `credentials.enc` and `credentials.json` to `vault.json`. See the
-  [README](../README.md#commands).
 - Old versions of `credentials.enc` stay in git history. An old `master.key` opens them. Change
   those secrets at the source if necessary.
 
