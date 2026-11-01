@@ -29,6 +29,7 @@ agents.
 - [create-adr](skills/create-adr/SKILL.md)
 - [create-repo-structure](skills/create-repo-structure/SKILL.md)
 - [submodule-dependencies](skills/submodule-dependencies/SKILL.md)
+- [ssh-remote](skills/ssh-remote/SKILL.md)
 
 ## Claude Code
 

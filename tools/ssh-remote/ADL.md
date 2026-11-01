@@ -1,0 +1,10 @@
+- 20261101-01 Nestor 6a7c648a8e53 Get the SSH and sudo passwords from the vault in the script; never pass them as arguments, environment variables or files
+- 20261101-02 Nestor 6a7c648a8e53 Use paramiko for SSH and SFTP, with the password login only
+- 20261101-03 Nestor 6a7c648a8e53 HOST selects the one system "<HOST> SSH..." and the system "<HOST> SUDO"; --system and --sudo-system override them
+- 20261101-04 Nestor 6a7c648a8e53 The host and the port come from the ssh:// url of the SSH system
+- 20261101-05 Nestor 6a7c648a8e53 sudo reads the password from stdin with sudo -S
+- 20261101-06 Nestor 6a7c648a8e53 Accept only host keys from ~/.ssh/known_hosts and do not write to it; refuse an unknown host
+- 20261101-07 Nestor 6a7c648a8e53 The commands are hosts, exec, upload and download; exec and upload accept --sudo; no interactive shell
+- 20261101-08 Opus-5.5 6a7c648a8e53 sudo always runs as root; the password of the sudo system is the password of the SSH user
+- 20261101-09 Opus-5.5 6a7c648a8e53 Send the sudo password only if sudo -n true fails; then use sudo -k so that sudo always reads it
+- 20261101-10 Opus-5.5 6a7c648a8e53 upload --sudo copies to a temporary file in /tmp of the host, then writes the target with cat as root
