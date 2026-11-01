@@ -51,6 +51,17 @@ The log of the decisions that change the design. Format and rules:
 - 20261028-02 Nestor 14e8c70de325 Give each facade its own folder and share the form-fill providers among all facades
 - 20261028-03 Opus-5.5 14e8c70de325 Share config/facade.ini, config/hosts.ini, the launcher, the runtime and the core code among all facades; keep tools.ini, the dangerous tools and the fill arguments in each facade
 - 20261028-04 Opus-5.5 14e8c70de325 Select the facade with the first argument of run.sh / run.bat
+- 20261031-01 Nestor 6852177487b8 Keep the host list local in .local_assets/config/host-policy.ini; copy it once from the committed config/host-policy.template.ini
+- 20261031-02 Nestor 6852177487b8 Put the temp files of Chromium into the first folder that can hold its socket: .local_assets/tmp of the tool, then .local_assets/tmp of the repository root, then the temp folder of the OS
 - 20261031-03 Opus-5.5 6852177487b8 Remove the sub-vault option of the vault provider; the vault tool has no sub-vaults
 - 20261101-01 Nestor f426c130bb37 Scrub the filled values also from the text files that upstream writes in a call: the files that the result links, and the changed files of the output folder
 - 20261101-02 Nestor 88f93a9fc667 Stop the bubbles and prompts of Chrome with fixed settings in Default/Preferences of the persistent profile, written before each browser start; do not change the switches of Playwright
+- 20261101-03 Nestor 6fa20c67240a Run the browser headed by default; PLAYWRIGHT_MCP_HEADLESS takes true, false or xvfb
+- 20261101-04 Nestor 6fa20c67240a On Linux without a display, run the headed browser on Xvfb that the facade starts and stops
+- 20261101-05 Nestor 6fa20c67240a Unpack Xvfb from Ubuntu packages into the tool folder without root, and patch its xkbcomp path to ./bin
+- 20261101-06 Opus-5.5 6fa20c67240a Let Xvfb listen only on the abstract socket, and select the first free display from :99
+- 20261101-07 Opus-5.5 6fa20c67240a Start no Xvfb with a config file and no PLAYWRIGHT_MCP_HEADLESS, or with --cdp-endpoint, --extension or --endpoint
+- 20261101-08 Nestor 6fa20c67240a Select the render mode with PLAYWRIGHT_RENDER_MODE = DEFAULT, HEADED_INVISIBLE, HEADED or HEADLESS; --headless and PLAYWRIGHT_MCP_HEADLESS have no effect and give no error
+- 20261101-09 Nestor 6fa20c67240a Resolve DEFAULT to HEADED_INVISIBLE on WSL and on Linux without a display, else to HEADED; resolve HEADED without a display to HEADED_INVISIBLE; never fall back to HEADLESS; stop with an error when Xvfb is necessary and not available
+- 20261101-10 Nestor 6fa20c67240a Apply the render mode also with a config file of Playwright MCP
+- 20261101-11 Nestor 6fa20c67240a Stop Xvfb with the parent-death signal of setpriv; record each Xvfb in .local_assets/xvfb/ and kill the Xvfb of each facade that does not run at each facade start; do not reuse Xvfb

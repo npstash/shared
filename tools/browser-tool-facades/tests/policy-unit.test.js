@@ -88,8 +88,17 @@ describe('host patterns', () => {
   });
 });
 
-describe('hosts.ini', () => {
-  test('a missing file gets "[allow] *"', () => {
+describe('host-policy.ini', () => {
+  test('a missing file is a copy of the template', () => {
+    const template = tmpFile('hosts/template.ini', '# my template\n[deny]\na.evil\n[allow]\n*\n');
+    const file = tmpFile('hosts/from-template.ini');
+    const hosts = new HostsFile(file, template);
+    hosts.load();
+    assert.deepEqual(hosts.deny, ['a.evil']);
+    assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(template, 'utf8'));
+  });
+
+  test('a missing file without a template gets "[allow] *"', () => {
     const file = tmpFile('hosts/missing.ini');
     const hosts = new HostsFile(file);
     hosts.load();

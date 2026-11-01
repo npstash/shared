@@ -11,13 +11,15 @@ const require = createRequire(import.meta.url);
 export const VERSION = require('../package.json').version;
 
 // The shared config of the facades. Tests point the env variables to copies.
-//   config           facade.ini (fill provider order, host recording), hosts.ini (host list)
+//   config           facade.ini (fill provider order, host recording), host-policy.template.ini
+//   local            host-policy.ini (host list of this clone; the facade writes it); gitignored
 //   providers        the code of the form-fill providers
 //   providersConfig  the config.ini of each form-fill provider
 export function sharedConfigDirs(env = process.env) {
   const providers = path.join(TOOL_DIR, 'providers-form-fill');
   return {
     config: env.BROWSER_FACADES_CONFIG_DIR || path.join(TOOL_DIR, 'config'),
+    local: env.BROWSER_FACADES_LOCAL_CONFIG_DIR || path.join(ASSETS_DIR, 'config'),
     providers,
     providersConfig: env.BROWSER_FACADES_PROVIDERS_CONFIG_DIR || providers,
   };

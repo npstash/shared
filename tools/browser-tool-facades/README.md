@@ -16,7 +16,7 @@ Documents (SDD): [PRD](sdd/PRD.md), [SRS](sdd/SRS.md), [QAS](sdd/QAS.md), [DESIG
 ```
 run.sh run.bat                launcher of all facades; one runtime for all
 package.json                  Node.js packages of all facades
-config/                       shared config: facade.ini, hosts.ini
+config/                       shared config: facade.ini, host-policy.template.ini
 providers-form-fill/<name>/   form-fill providers: index.js, config.ini
 src/                          shared code: INI files, logger, tool switches, host lists, placeholders
 tests/                        tests of the shared code
@@ -25,7 +25,7 @@ sdd/                          documents of the tool
 ```
 
 - Shared by all facades: the form-fill providers, `config/facade.ini` (provider order, host
-  recording) and `config/hosts.ini` (one host list for all browsers).
+  recording) and the host list (one for all browsers).
 - Each facade has its own tool switches (`<facade>/config/tools.ini`), because each browser tool
   has its own tools.
 
@@ -67,8 +67,12 @@ If no provider has a value, the call fails. Nothing goes to the browser. To add 
 
 ## Host lists
 
-[config/hosts.ini](config/hosts.ini) has two sections: `[deny]` and `[allow]`, one host pattern
+`.local_assets/config/host-policy.ini` has two sections: `[deny]` and `[allow]`, one host pattern
 on each line. Deny wins. Move a line between the sections to change the list. All facades use it.
+
+- The file is local to the clone and gitignored. When it is missing, the facade copies the template
+  [config/host-policy.template.ini](config/host-policy.template.ini). Later template changes do
+  not change an existing file.
 
 - Patterns: `*` (each host), `*.example.com` (subdomains), `example.com` (exact), `192.168.1.*`
   (IPv4). A pattern has no scheme, port or path.
@@ -95,5 +99,5 @@ on each line. Deny wins. Move a line between the sections to change the list. Al
 1. Make `<facade>/src/server.js` (an MCP server on stdio), `<facade>/config/tools.ini`,
    `<facade>/tests/` and `<facade>/README.md`.
 2. Use the shared code of [src/](src/): `ToolsConfig` with the dangerous tools of the browser tool,
-   `FillRegistry` with the arguments that hold placeholders, `HostPolicy` with `config/hosts.ini`.
+   `FillRegistry` with the arguments that hold placeholders, `HostPolicy` with `host-policy.ini`.
 3. Add the steps for its browser to `run.sh` and `run.bat`, and a row to the table at the top.

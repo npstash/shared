@@ -3,7 +3,7 @@
 //   MCP client (Claude Code) <-> facade server | facade client <-> Playwright MCP (child process)
 //
 // Each tool call goes through these steps (see callTool()):
-//   tool switch (playwright/config/tools.ini) → host check (config/hosts.ini)
+//   tool switch (playwright/config/tools.ini) → host check (.local_assets/config/host-policy.ini)
 //   → placeholders (providers-form-fill/)
 //   → Playwright MCP → scrub of filled values → host check of the opened page → log
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -30,7 +30,8 @@ import { summarizeResult } from '../../src/logger.js';
 import { VERSION, sharedConfigDirs } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
 import { CHROMIUM_BROWSERS, writeChromePrefs } from './chrome-prefs.js';
-import { DEFAULT_BROWSER, UPSTREAM_CLI, argValue, facadeConfigDir, tmpDirInTool, upstreamEnv } from './config.js';
+import { DEFAULT_BROWSER, TMP_DIR, UPSTREAM_CLI, argValue, connectsToBrowser, facadeConfigDir, renderMode, tmpDirForChromium, upstreamEnv, withoutHeadless } from './config.js';
+import { cleanStaleXvfb, startXvfb } from './xvfb.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
 const TOOL_TIMEOUT = 10 * 60 * 1000;
@@ -81,7 +82,7 @@ const FILL_ARGUMENTS = {
 
 const FILL_TOOLS = new Set(Object.keys(FILL_ARGUMENTS));
 
-export async function startFacade({ args, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
+export async function startFacade({ args: givenArgs, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
   let markDownstreamReady;
   const downstreamReady = new Promise((resolve) => { markDownstreamReady = resolve; });
   let server;
@@ -90,7 +91,7 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
   const dirs = sharedConfigDirs(env);
   const facadeIni = readIni(path.join(dirs.config, 'facade.ini'));
   const toolsConfig = new ToolsConfig(path.join(facadeConfigDir(env), 'tools.ini'), logger, DANGEROUS_TOOLS);
-  const hostsFile = new HostsFile(path.join(dirs.config, 'hosts.ini'));
+  const hostsFile = new HostsFile(path.join(dirs.local, 'host-policy.ini'), path.join(dirs.config, 'host-policy.template.ini'));
   const record = sectionValues(facadeIni, 'hosts').record !== 'false';
   const hostPolicy = new HostPolicy({ hostsFile, allowProvider: new FileAllowProvider({ hostsFile, record, logger }) });
   const fill = await FillRegistry.load({
@@ -101,10 +102,26 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
     fillArguments: FILL_ARGUMENTS,
   });
 
-  // 2. Start Playwright MCP and connect to it.
-  const tmpDir = await tmpDirInTool();
-  if (!tmpDir) logger.info('tmp_dir_fallback', { reason: 'no Unix sockets in the tool folder; the OS temp folder stays' });
+  // 2. Select the render mode. PLAYWRIGHT_RENDER_MODE replaces --headless and PLAYWRIGHT_MCP_HEADLESS:
+  //    the facade ignores them, without an error.
+  const args = withoutHeadless(givenArgs);
+  if (args.length !== givenArgs.length) logger.info('ignored', { control: '--headless', reason: 'PLAYWRIGHT_RENDER_MODE selects the render mode' });
+  if (env.PLAYWRIGHT_MCP_HEADLESS !== undefined) logger.info('ignored', { control: 'PLAYWRIGHT_MCP_HEADLESS', reason: 'PLAYWRIGHT_RENDER_MODE selects the render mode' });
+  const mode = connectsToBrowser(args) ? undefined : renderMode(env);
+  cleanStaleXvfb(logger);
+
+  // 3. Start Playwright MCP and connect to it.
+  const tmpDir = await tmpDirForChromium();
+  if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
   const childEnv = upstreamEnv(args, env, cwd, tmpDir);
+  delete childEnv.PLAYWRIGHT_MCP_HEADLESS;
+  if (mode) childEnv.PLAYWRIGHT_MCP_HEADLESS = mode === 'HEADLESS' ? 'true' : 'false';
+  const xvfb = mode === 'HEADED_INVISIBLE' ? await startXvfb({ logger }) : undefined;
+  if (xvfb) {
+    childEnv.DISPLAY = xvfb.display;
+    delete childEnv.WAYLAND_DISPLAY;
+  }
+  logger.info('render_mode', { mode: mode ?? 'none: upstream connects to a running browser', display: childEnv.DISPLAY });
   const outputDir = argValue(args, '--output-dir') ?? childEnv.PLAYWRIGHT_MCP_OUTPUT_DIR;
   // The persistent profile of a Chromium browser gets CHROME_PREFS. An isolated profile has no folder.
   const browser = argValue(args, '--browser') ?? childEnv.PLAYWRIGHT_MCP_BROWSER ?? DEFAULT_BROWSER;
@@ -140,7 +157,12 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
   client.fallbackNotificationHandler = async (notification) => logger.debug('upstream_notification', { notification });
 
   logger.info('upstream_start', { args });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    xvfb?.stop();
+    throw error;
+  }
   const upstreamInfo = client.getServerVersion();
   const upstreamCapabilities = client.getServerCapabilities() ?? {};
   logger.info('upstream_ready', { pid: transport.pid, server: upstreamInfo, capabilities: upstreamCapabilities });
@@ -148,7 +170,7 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
   // Each tool of the facade has a line in playwright/config/tools.ini. Add the missing ones.
   toolsConfig.addMissing([...(await allTools(client)).map((tool) => tool.name), ...FACADE_TOOLS.map((tool) => tool.name)]);
 
-  // 3. Make the server for the downstream client. It has the tools capability of upstream.
+  // 4. Make the server for the downstream client. It has the tools capability of upstream.
   server = new Server(
     { name: 'playwright-facade', version: VERSION },
     {
@@ -168,7 +190,7 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
   server.setRequestHandler(ListToolsRequestSchema, async (request) => listTools(session, request));
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => callTool(session, request, extra));
 
-  // 4. Close the two sides together.
+  // 5. Close the two sides together.
   let closed = false;
   async function close(reason) {
     if (closed) return;
@@ -181,6 +203,7 @@ export async function startFacade({ args, logger, serverTransport, cwd = process
         .catch((error) => logger.error('browser_close_failed', { message: error.message }));
     }
     await Promise.allSettled([client.close(), server.close(), fill.dispose()]);
+    xvfb?.stop();
     onClose?.(reason);
   }
   client.onclose = () => close('upstream closed');

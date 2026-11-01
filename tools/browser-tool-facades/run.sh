@@ -63,9 +63,10 @@ if [[ ! -f "$stamp" ]]; then
 fi
 
 # 4. Playwright facade, Linux: the libraries and fonts that Chromium needs and the host does not
-#    have. No root.
+#    have, and Xvfb. No root. Change SYSLIBS_SET when syslibs.js downloads other packages.
+SYSLIBS_SET="xvfb1"
 if [[ "$(uname -s)" == "Linux" ]]; then
-    syslibs_stamp="$assets/syslibs/$platform/.ready-$pw_version"
+    syslibs_stamp="$assets/syslibs/$platform/.ready-$pw_version-$SYSLIBS_SET"
     if [[ ! -f "$syslibs_stamp" ]]; then
         node "$dir/playwright/src/setup/syslibs.js" >&2
         mkdir -p "$(dirname "$syslibs_stamp")"

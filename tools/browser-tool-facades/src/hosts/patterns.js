@@ -1,4 +1,4 @@
-// Host patterns of the deny-list and the allow-list (config/hosts.ini) and of the ini provider.
+// Host patterns of the deny-list and the allow-list (host-policy.ini) and of the ini provider.
 //   *              each host
 //   *.example.com  the subdomains of example.com, not example.com itself
 //   example.com    only this host

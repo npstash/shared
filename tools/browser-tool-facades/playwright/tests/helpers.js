@@ -78,27 +78,30 @@ export function makeConfig(name, { facade, hosts, tools, ini, ask, vault } = {})
     fs.writeFileSync(file, text);
   };
   write(path.join(root, 'config', 'facade.ini'), facade ?? '[fill]\nproviders = vault, ini, ask\n\n[hosts]\nrecord = true\n');
-  write(path.join(root, 'config', 'hosts.ini'), hosts ?? '[deny]\n\n[allow]\n*\n');
+  write(path.join(root, 'local', 'host-policy.ini'), hosts ?? '[deny]\n\n[allow]\n*\n');
   write(path.join(root, 'playwright', 'tools.ini'), tools ?? '[tools]\nbrowser_evaluate = enabled\n');
   write(path.join(root, 'providers', 'ini', 'config.ini'), ini ?? '[all]\n');
   write(path.join(root, 'providers', 'ask', 'config.ini'), ask ?? '[ask]\nfields = phone\n');
   write(path.join(root, 'providers', 'vault', 'config.ini'), vault ?? `[vault]\ntool = ${path.join(FAKE_VAULT, 'run.sh')}\nvault_home = ${FAKE_VAULT}\n`);
   return {
-    // Shared config (facade.ini, hosts.ini), config of the Playwright facade (tools.ini).
+    // Shared config (facade.ini), local config (host-policy.ini), config of the Playwright facade (tools.ini).
     sharedConfigDir: path.join(root, 'config'),
+    localConfigDir: path.join(root, 'local'),
     facadeConfigDir: path.join(root, 'playwright'),
     providersConfigDir: path.join(root, 'providers'),
     env: {
       BROWSER_FACADES_CONFIG_DIR: path.join(root, 'config'),
+      BROWSER_FACADES_LOCAL_CONFIG_DIR: path.join(root, 'local'),
       BROWSER_FACADES_PROVIDERS_CONFIG_DIR: path.join(root, 'providers'),
       PLAYWRIGHT_FACADE_CONFIG_DIR: path.join(root, 'playwright'),
     },
   };
 }
 
-// Start the facade as a child process and connect an MCP client to it.
+// Start the facade as a child process and connect an MCP client to it. The browser is headless,
+// except when env gives an other PLAYWRIGHT_RENDER_MODE.
 // onElicit: answers the dialogs of the ask provider; without it, the client cannot show dialogs.
-export async function startFacadeClient({ name, args = ['--headless', '--isolated'], env = {}, config = {}, onElicit }) {
+export async function startFacadeClient({ name, args = ['--isolated'], env = {}, config = {}, onElicit }) {
   fs.mkdirSync(TEST_LOG_DIR, { recursive: true });
   const logFile = path.join(TEST_LOG_DIR, `${name}.log`);
   fs.rmSync(logFile, { force: true });
@@ -106,7 +109,7 @@ export async function startFacadeClient({ name, args = ['--headless', '--isolate
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(TOOL_DIR, 'playwright', 'src', 'server.js'), ...args],
-    env: { ...process.env, PLAYWRIGHT_FACADE_LOG_FILE: logFile, ...testConfig.env, ...env },
+    env: { ...process.env, PLAYWRIGHT_RENDER_MODE: 'HEADLESS', PLAYWRIGHT_FACADE_LOG_FILE: logFile, ...testConfig.env, ...env },
     cwd: TOOL_DIR,
     stderr: 'inherit',
   });

@@ -137,7 +137,7 @@ for await (const message of query({
 
 - Use `--isolated` if the wrapper runs more than one session at the same time. Each session then
   has its own profile in memory.
-- The facade runs headless by default. `PLAYWRIGHT_MCP_HEADLESS=false` in `env` gives a window.
+- `PLAYWRIGHT_RENDER_MODE` in `env` selects the render mode. The facade never runs headless by default. See [Render mode](../README.md#render-mode).
 - An `env` entry goes to the facade and to Playwright MCP, e.g. `PLAYWRIGHT_FACADE_LOG_LEVEL`.
 - On Windows, use `"command": "cmd"` and `"args": ["/c", "<TOOL>\\run.bat", "playwright", ...]`.
 
@@ -210,4 +210,4 @@ entries are optional. Add them to enforce the facade.
 | The server does not start, or it fails at the first start | The install takes too long. Run `run.sh install` or `run.bat install` first. |
 | `error while loading shared libraries` in the log | Linux: a library has no package. See [README.md](../README.md#linux-libraries-and-fonts). |
 | `Browser is already in use` | An other session uses the persistent profile. Add `--isolated`, or close the other session. |
-| No window opens | The facade runs headless by default. Set `PLAYWRIGHT_MCP_HEADLESS=false` for a window. |
+| No window opens | On WSL and without a display, the default is `HEADED_INVISIBLE`. Set `PLAYWRIGHT_RENDER_MODE=HEADED` for a window. See [Render mode](../README.md#render-mode). |

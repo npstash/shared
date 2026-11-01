@@ -1,4 +1,4 @@
-// Unit tests: redaction, result summary and the upstream environment.
+// Unit tests: redaction, result summary, the upstream environment and the render mode.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,7 +7,8 @@ import { ASSETS_DIR } from '../../src/paths.js';
 import { redact, summarizeResult } from '../../src/logger.js';
 import { packageCandidates, parseLdd } from '../src/setup/syslibs.js';
 import { CHROME_PREFS, writeChromePrefs } from '../src/chrome-prefs.js';
-import { upstreamEnv } from '../src/config.js';
+import { TMP_DIR, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutHeadless } from '../src/config.js';
+import { patchXkbBinDir } from '../src/xvfb.js';
 
 describe('redact', () => {
   test('replaces typed text and form values', () => {
@@ -49,7 +50,6 @@ describe('upstreamEnv', () => {
   test('sets the defaults in the tool folder', () => {
     const env = upstreamEnv([], {}, cwd);
     assert.equal(env.PLAYWRIGHT_MCP_BROWSER, 'chromium');
-    assert.equal(env.PLAYWRIGHT_MCP_HEADLESS, 'true');
     assert.equal(env.PLAYWRIGHT_MCP_OUTPUT_DIR, path.join(ASSETS_DIR, 'output'));
     assert.ok(env.PLAYWRIGHT_MCP_USER_DATA_DIR.startsWith(path.join(ASSETS_DIR, 'profiles')));
     assert.match(env.PLAYWRIGHT_MCP_USER_DATA_DIR, /-chromium-[0-9a-f]{8}$/);
@@ -75,9 +75,8 @@ describe('upstreamEnv', () => {
   });
 
   test('keeps the values of the user', () => {
-    const env = upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox', PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine', PLAYWRIGHT_MCP_HEADLESS: 'false' }, cwd);
+    const env = upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox', PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine' }, cwd);
     assert.equal(env.PLAYWRIGHT_MCP_BROWSER, 'firefox');
-    assert.equal(env.PLAYWRIGHT_MCP_HEADLESS, 'false');
     assert.equal(env.PLAYWRIGHT_MCP_USER_DATA_DIR, '/mine');
   });
 
@@ -89,6 +88,75 @@ describe('upstreamEnv', () => {
   test('sets the temp folder only when it is given', () => {
     assert.equal(upstreamEnv([], {}, cwd).TMPDIR, undefined);
     assert.equal(upstreamEnv([], {}, cwd, '/t').TMPDIR, '/t');
+  });
+});
+
+describe('renderMode', () => {
+  const mode = (value, { platform = 'linux', wsl = false, ...env } = {}) => renderMode({ PLAYWRIGHT_RENDER_MODE: value, ...env }, platform, wsl);
+  const display = { DISPLAY: ':0' };
+
+  test('gives HEADLESS only from the setting', () => {
+    for (const platform of ['linux', 'win32', 'darwin']) assert.equal(mode('HEADLESS', { platform }), 'HEADLESS');
+    for (const value of [undefined, 'DEFAULT', 'HEADED', 'HEADED_INVISIBLE']) assert.notEqual(mode(value, display), 'HEADLESS');
+  });
+
+  test('gives HEADED_INVISIBLE by default on WSL and on Linux without a display', () => {
+    assert.equal(mode(undefined, { ...display, wsl: true }), 'HEADED_INVISIBLE');
+    assert.equal(mode('DEFAULT'), 'HEADED_INVISIBLE');
+    assert.equal(mode('DEFAULT', display), 'HEADED');
+    assert.equal(mode('DEFAULT', { WAYLAND_DISPLAY: 'wayland-0' }), 'HEADED');
+  });
+
+  test('gives HEADED by default on Windows and macOS', () => {
+    assert.equal(mode(undefined, { platform: 'win32' }), 'HEADED');
+    assert.equal(mode('DEFAULT', { platform: 'darwin' }), 'HEADED');
+  });
+
+  test('gives HEADED with a display, also on WSL, else HEADED_INVISIBLE', () => {
+    assert.equal(mode('HEADED', { ...display, wsl: true }), 'HEADED');
+    assert.equal(mode('HEADED', { platform: 'win32' }), 'HEADED');
+    assert.equal(mode('HEADED'), 'HEADED_INVISIBLE');
+  });
+
+  test('gives HEADED_INVISIBLE on Linux, else stops', () => {
+    assert.equal(mode('HEADED_INVISIBLE', display), 'HEADED_INVISIBLE');
+    assert.throws(() => mode('HEADED_INVISIBLE', { platform: 'win32' }), /needs Xvfb/);
+    assert.throws(() => mode('HEADED_INVISIBLE', { platform: 'darwin' }), /needs Xvfb/);
+  });
+
+  test('stops with an unknown value', () => {
+    assert.throws(() => mode('headless', display), /not known/);
+  });
+});
+
+describe('render mode arguments', () => {
+  test('removes --headless', () => {
+    assert.deepEqual(withoutHeadless(['--headless', '--isolated', '--headless=true']), ['--isolated']);
+  });
+
+  test('finds a browser that runs already', () => {
+    assert.ok(connectsToBrowser(['--cdp-endpoint=http://x']));
+    assert.ok(connectsToBrowser(['--extension']));
+    assert.ok(!connectsToBrowser(['--isolated']));
+  });
+});
+
+describe('patchXkbBinDir', () => {
+  const binary = (...parts) => Buffer.from(parts.join('\0'));
+
+  test('sets ./bin for the path of xkbcomp', () => {
+    const patched = patchXkbBinDir(binary('a', '/usr/bin', '%s%sxkbcomp', ''));
+    assert.deepEqual(patched, binary('a', './bin', '', '', '', '%s%sxkbcomp', ''));
+  });
+
+  test('keeps a patched binary', () => {
+    const patched = patchXkbBinDir(binary('a', '/usr/bin', 'b'));
+    assert.deepEqual(patchXkbBinDir(patched), patched);
+  });
+
+  test('stops when the path is not there exactly one time', () => {
+    assert.throws(() => patchXkbBinDir(binary('a', 'b')), /0 times/);
+    assert.throws(() => patchXkbBinDir(binary('a', '/usr/bin', '/usr/bin', 'b')), /2 times/);
   });
 });
 
@@ -118,6 +186,20 @@ describe('writeChromePrefs', () => {
     fs.writeFileSync(file, '{not json');
     writeChromePrefs(dir);
     assert.deepEqual(read(), CHROME_PREFS);
+  });
+});
+
+describe('tmpDirForChromium', () => {
+  test('skips a folder with a socket path that is too long', { skip: process.platform === 'win32' }, async () => {
+    const long = path.join(ASSETS_DIR, 'test-unit', 'x'.repeat(120));
+    const short = path.join(ASSETS_DIR, 'test-unit', 'short');
+    const expected = short.length + 45 <= 107 ? short : undefined;
+    assert.equal(await tmpDirForChromium([long, short]), expected);
+    assert.equal(await tmpDirForChromium([long]), undefined);
+  });
+
+  test('gives the tool folder first if it can hold the socket', { skip: process.platform === 'win32' || TMP_DIR.length + 45 > 107 }, async () => {
+    assert.equal(await tmpDirForChromium(), TMP_DIR);
   });
 });
 

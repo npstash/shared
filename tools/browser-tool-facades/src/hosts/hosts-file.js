@@ -1,4 +1,5 @@
-// config/hosts.ini: the deny-list and the allow-list in one file.
+// .local_assets/config/host-policy.ini: the deny-list and the allow-list in one file.
+// A missing file is a copy of the template config/host-policy.template.ini.
 //   [deny]   hosts that the facade blocks; deny wins over allow
 //   [allow]  hosts that the facade allows; the default allow provider adds each opened host
 // Each section has one pattern on each line (see patterns.js). After each write, the lines of
@@ -13,16 +14,21 @@ const HEADER = [
 ];
 
 export class HostsFile {
-  constructor(file) {
+  constructor(file, template) {
     this.file = file;
+    this.template = template;
     this.mtime = null;
     this.deny = [];
     this.allow = [];
   }
 
-  // Read the file again if it changed. A missing file is created with "[allow] *".
+  // Read the file again if it changed. A missing file is a copy of the template.
+  // Without a template, the file gets "[allow] *".
   load() {
-    if (!fs.existsSync(this.file)) this.write([], ['*']);
+    if (!fs.existsSync(this.file)) {
+      if (this.template && fs.existsSync(this.template)) writeFileAtomic(this.file, fs.readFileSync(this.template, 'utf8'));
+      else this.write([], ['*']);
+    }
     const mtime = fs.statSync(this.file).mtimeMs;
     if (mtime === this.mtime) return;
     const ini = readIni(this.file);

@@ -109,7 +109,7 @@ describe('persistent profile', () => {
     let prefs;
     try {
       for (const session of [1, 2]) {
-        const facade = await startFacadeClient({ name: 'profile', args: ['--headless', '--user-data-dir', profile] });
+        const facade = await startFacadeClient({ name: 'profile', args: ['--user-data-dir', profile] });
         try {
           await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
           if (session === 1) await evaluate(facade.client, `() => { localStorage.setItem('key', 'kept'); return true; }`);

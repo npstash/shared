@@ -76,5 +76,6 @@ See [SRS.md](SRS.md).
 | 2 | As a user, I run the facade on Ubuntu without root and without OS installs. | REQ-010–REQ-015 | v2 | done | MISSING: issue |
 | 3 | As a user, I disable dangerous tools, and the agent sees why a call fails. | REQ-020, REQ-021 | v2 | done | MISSING: issue |
 | 4 | As a user, I give form values from the vault, a file or a dialog; the agent writes only placeholders. | REQ-030–REQ-036 | v2 | done | MISSING: issue |
-| 5 | As a user, I block hosts and keep a list of the opened hosts. | REQ-040–REQ-042 | v2 | done | MISSING: issue |
+| 5 | As a user, I block hosts and keep a list of the opened hosts. | REQ-040–REQ-043 | v2 | done | MISSING: issue |
 | 6 | As a user, I read a log of each call without secrets. | REQ-050, REQ-051 | v1 | done | MISSING: issue |
+| 7 | As a user, I run a headed browser on a server without a display, and sites that block a headless browser accept it. | REQ-015, REQ-017, REQ-018 | v2 | done | MISSING: issue |

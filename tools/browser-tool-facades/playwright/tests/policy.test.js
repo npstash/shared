@@ -79,19 +79,19 @@ describe('host lists', () => {
       await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
       const blocked = await callText(facade.client, 'browser_navigate', { url: `${site.otherUrl}/` });
       assert.match(blocked.text, /the host localhost is not in \[allow\]/);
-      const text = fs.readFileSync(path.join(facade.config.sharedConfigDir, 'hosts.ini'), 'utf8');
+      const text = fs.readFileSync(path.join(facade.config.localConfigDir, 'host-policy.ini'), 'utf8');
       assert.equal(text, '# keep me\n\n[deny]\n\n[allow]\n127.0.0.*\n127.0.0.1\nzz.example\n');
     } finally {
       await facade.close();
     }
   });
 
-  test('record = false leaves hosts.ini unchanged', async () => {
+  test('record = false leaves host-policy.ini unchanged', async () => {
     const hosts = '[deny]\n\n[allow]\n*\n';
     const facade = await startFacadeClient({ name: 'policy-norecord', config: { hosts, facade: '[fill]\nproviders = ini\n[hosts]\nrecord = false\n' } });
     try {
       await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
-      assert.equal(fs.readFileSync(path.join(facade.config.sharedConfigDir, 'hosts.ini'), 'utf8'), hosts);
+      assert.equal(fs.readFileSync(path.join(facade.config.localConfigDir, 'host-policy.ini'), 'utf8'), hosts);
     } finally {
       await facade.close();
     }

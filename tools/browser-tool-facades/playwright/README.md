@@ -42,7 +42,7 @@ The facade sets these defaults. An argument or an env variable of the user overr
 | Value | Default of the facade | Default of Playwright MCP |
 | --- | --- | --- |
 | Browser (`PLAYWRIGHT_MCP_BROWSER`) | `chromium`, installed by the launcher | `chrome` (Google Chrome of the system) |
-| Headless (`PLAYWRIGHT_MCP_HEADLESS`) | `true`: no window. Set `false` for a window. | a window if the host has a display (also WSLg) |
+| Render mode (`PLAYWRIGHT_RENDER_MODE`) | `DEFAULT`: never headless. See "Render mode". | a window if the host has a display (also WSLg) |
 | Browser files (`PLAYWRIGHT_BROWSERS_PATH`) | `.local_assets/browsers/<platform>/` | cache folder of the user |
 | Profile (`PLAYWRIGHT_MCP_USER_DATA_DIR`) | `.local_assets/profiles/<platform>-<browser>-<workspace hash>/` | cache folder of the user |
 | Output files (`PLAYWRIGHT_MCP_OUTPUT_DIR`) | `.local_assets/output/` | in the workspace |
@@ -56,12 +56,38 @@ The paths are in the tool folder.
 - With `--config <file>` or `PLAYWRIGHT_MCP_CONFIG`, the facade sets no `PLAYWRIGHT_MCP_*` default.
 - The persistent profile keeps logins. Two sessions in the same workspace cannot use it at the same
   time. For parallel sessions, use `--isolated`.
-- Chromium makes a Unix socket in the temp folder. Some file systems cannot hold one, e.g. a Windows
-  drive in WSL (`/mnt/c`). Then the facade keeps the temp folder of the OS and logs `tmp_dir_fallback`.
+- Chromium makes a Unix socket in the temp folder. The socket path has a maximum length (107
+  characters on Linux), and some file systems cannot hold a socket, e.g. a Windows drive in WSL
+  (`/mnt/c`). If the tool folder fails, the facade uses `.local_assets/tmp/` in the root of the
+  repository. If that fails too, it keeps the temp folder of the OS. In both cases it logs
+  `tmp_dir_fallback`.
 - Playwright writes a registry of the open browsers (small JSON files) into the cache folder of the
   user. On Windows (`%LOCALAPPDATA%\ms-playwright\b\`) and macOS
   (`~/Library/Caches/ms-playwright/b/`), the facade cannot move it.
 
+
+## Render mode
+
+Some sites block a headless browser. Thus the facade never runs headless by default.
+`PLAYWRIGHT_RENDER_MODE` selects the mode:
+
+| Value | Host with a display | WSL | Linux without a display |
+| --- | --- | --- | --- |
+| `DEFAULT` (not set) | `HEADED` | `HEADED_INVISIBLE` | `HEADED_INVISIBLE` |
+| `HEADED` | a window | a window (WSLg) | `HEADED_INVISIBLE` |
+| `HEADED_INVISIBLE` | Xvfb on Linux; else an error | Xvfb | Xvfb |
+| `HEADLESS` | no window | no window | no window |
+
+- `HEADED_INVISIBLE` runs a headed browser on Xvfb, a virtual display. Nobody sees the window.
+- Only `HEADLESS` gives a headless browser. If a mode is not possible, the facade stops with an error.
+- The facade ignores `--headless` and `PLAYWRIGHT_MCP_HEADLESS`. The render mode also applies with `--config`.
+- `run.sh install` unpacks Xvfb into the tool folder on Linux. No root.
+- The facade starts Xvfb on the first free display from `:99`. Xvfb listens only on the abstract
+  socket of Linux, thus other X programs stay on their display.
+- The facade stops Xvfb at the end. After a SIGKILL of the facade, the kernel stops Xvfb
+  (`setpriv --pdeathsig`). The next facade start also kills a leftover Xvfb.
+- To solve a challenge of a site, use `HEADED` on a host with a display. The persistent profile
+  keeps the result.
 ## Tool switches
 
 [config/tools.ini](config/tools.ini) has one line for each tool of this facade: `<tool> = enabled`

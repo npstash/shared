@@ -1,4 +1,4 @@
-// The default allow provider: the [allow] section of config/hosts.ini.
+// The default allow provider: the [allow] section of host-policy.ini.
 // It adds the exact host of each opened page to [allow], also if a wildcard covers the host.
 // "[hosts] record = false" in config/facade.ini stops this, e.g. for a shared host list.
 import { AllowProvider } from './allow-provider.js';

@@ -1,4 +1,4 @@
-// Give Chromium the libraries and fonts that the host does not have. Linux only.
+// Give Chromium the libraries and fonts that the host does not have, and Xvfb. Linux only.
 // It downloads Ubuntu packages and unpacks them into the tool folder. No root, no OS install.
 // Usage: node playwright/src/setup/syslibs.js            (run.sh calls it after the browser install)
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SYSLIBS_DIR, syslibPaths } from '../config.js';
+import { XVFB_PACKAGES, patchXkbBinDir, xvfbPaths } from '../xvfb.js';
 
 // Maximum number of download rounds. Each round fetches the packages of the missing libraries.
 const SYSLIBS_ROUNDS = 10;
@@ -29,6 +30,7 @@ const EXCEPTIONS = {
   'libz.so.1': 'zlib1g',
   'libxml2.so.2': 'libxml2',
   'libhogweed.so.6': 'libnettle8',
+  'libXfont2.so.2': 'libxfont2',
 };
 
 const FONT_PACKAGES = ['fonts-liberation', 'fonts-dejavu-core', 'fonts-noto-color-emoji'];
@@ -172,6 +174,14 @@ export function provideSystemLibraries({ browsersPath, forceFonts = false, priva
   const apt = new Apt(SYSLIBS_DIR, privateLists);
   const extracted = new Set();
   const files = browserFiles(browsersPath);
+
+  // Xvfb for a headed browser without a display. The ldd rounds also give its libraries.
+  log(`download ${XVFB_PACKAGES.join(' ')}`);
+  apt.download(XVFB_PACKAGES.map((pkg) => apt.pick([pkg]) ?? pkg), debDir);
+  extractAll(debDir, root, extracted);
+  const xvfb = xvfbPaths();
+  fs.writeFileSync(xvfb.binary, patchXkbBinDir(fs.readFileSync(xvfb.binary)));
+  files.push(xvfb.binary, xvfb.xkbcomp);
 
   for (let round = 1; ; round++) {
     const missing = missingLibraries(files, libraryPath);
