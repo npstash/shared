@@ -154,3 +154,6 @@
 - 20261101-31 Opus-5.5 2c0de445e142 A found vault is a submodule vault-* or a section [vault-*] of dependencies.txt with a folder that exists
 - 20261101-32 Nestor 2424c2e08958 list-systems prints the names of all systems; it runs only in a terminal and needs the passphrase
 - 20261101-33 Nestor 2424c2e08958 Remove migrate-vault after the migration of each vault
+- 20261101-34 Nestor 912e5b60b971 push-enrol commits and pushes the untracked and changed files in recipients/ of each vault-* submodule of the repositories from the working folder upwards, and the submodule pointers in each repository on the walk; it runs only in a terminal
+- 20261101-35 Nestor 912e5b60b971 push-enrol commits only its own paths; it stops on a detached HEAD, a branch without upstream, or a repository behind its upstream with other changes; it rebases its commit on a newer upstream
+- 20261101-36 Nestor 912e5b60b971 The walk of push-enrol stops at a repository that does not hold the previous one as a submodule; push-enrol ignores deleted recipient files

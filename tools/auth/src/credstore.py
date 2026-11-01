@@ -1353,6 +1353,124 @@ class Store:
         self._save()
 
 
+# -- push-enrol: commit and push the recipient files and the submodule pointers above them ------
+
+RECIPIENT_FILE = re.compile(r"^(.+)\.(pub|inf|master\.enc)$")
+
+
+@dataclass
+class PushStep:
+    """One commit and push of push-enrol."""
+    repo: Path
+    branch: str
+    upstream: str
+    paths: list[str]
+    message: str
+
+
+def _run_git(cwd: Path, *args: str) -> str:
+    """The output of a git command; CredentialError if it fails."""
+    done = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    if done.returncode != 0:
+        raise CredentialError(f"git {' '.join(args)} in {cwd}: {(done.stderr or done.stdout).strip()}")
+    return done.stdout
+
+
+def _status(repo: Path, *args: str) -> list[tuple[str, str]]:
+    """(XY, path) of each entry of `git status --porcelain -z`."""
+    tokens = _run_git(repo, "status", "--porcelain", "-z", *args).split("\0")
+    entries, i = [], 0
+    while i < len(tokens):
+        if tokens[i]:
+            entries.append((tokens[i][:2], tokens[i][3:]))
+            if tokens[i][0] in "RC":
+                i += 1      # the next token is the old path of a rename or copy
+        i += 1
+    return entries
+
+
+def _walk_roots(start: Path) -> list[Path]:
+    """The git repositories from `start` upwards. The walk stops at a repository that does not
+    hold the one before it as a submodule."""
+    dependencies = _dependencies()
+    found: list[Path] = []
+    for root in dependencies.roots(start):
+        if not (root / ".git").exists():
+            break
+        if found and found[-1].relative_to(root).as_posix() not in dependencies.submodules(root).values():
+            break
+        found.append(root)
+    return found
+
+
+def _new_recipient_files(vault: Path) -> list[str]:
+    """The untracked and changed files in recipients/ of the vault; no deleted files."""
+    return sorted(path for xy, path in _status(vault, "--untracked-files=all", "--", "recipients")
+                  if "D" not in xy and RECIPIENT_FILE.match(Path(path).name))
+
+
+def _behind(repo: Path) -> int:
+    return int(_run_git(repo, "rev-list", "--count", "HEAD..@{u}").strip())
+
+
+def push_enrol_plan(start: Path | str | None = None) -> list[PushStep]:
+    """The commits of push-enrol, innermost repository first.
+
+    Each vault-* submodule of the repositories from `start` (default: the working folder)
+    upwards gives a commit of its new recipient files. Each repository on the walk gives a
+    commit of the pointers of the submodules that get a commit. Nothing is changed.
+    """
+    dependencies = _dependencies()
+    roots = _walk_roots(Path(start) if start is not None else Path.cwd())
+    commits: dict[Path, tuple[list[str], str]] = {}
+    names: dict[Path, list[str]] = {}
+    for root in roots:
+        for name, rel in dependencies.submodules(root).items():
+            vault = (root / rel).resolve()
+            if name.startswith("vault-") and vault not in commits and (vault / ".git").exists():
+                files = _new_recipient_files(vault)
+                if files:
+                    names[vault] = sorted({RECIPIENT_FILE.match(Path(f).name)[1] for f in files})
+                    commits[vault] = (files, "Enrol " + ", ".join(names[vault]))
+    for root in roots:
+        moved = [(name, rel, (root / rel).resolve()) for name, rel in dependencies.submodules(root).items()]
+        moved = [(name, rel, path) for name, rel, path in moved if path in commits and path != root]
+        if moved and root not in commits:
+            names[root] = sorted({n for _, _, path in moved for n in names[path]})
+            commits[root] = ([rel for _, rel, _ in moved],
+                             f"Point {', '.join(name for name, _, _ in moved)} to the enrolment of "
+                             + ", ".join(names[root]))
+    steps = []
+    for repo, (paths, message) in commits.items():
+        branch = _git(repo, "symbolic-ref", "-q", "--short", "HEAD")
+        if not branch:
+            raise CredentialError(f"{repo} has a detached HEAD: check out a branch first")
+        upstream = _git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        if not upstream:
+            raise CredentialError(f"the branch {branch} in {repo} has no upstream branch")
+        _run_git(repo, "fetch", "-q")
+        others = [path for _, path in _status(repo, "--untracked-files=no") if path not in paths]
+        if _behind(repo) and others:
+            raise CredentialError(f"{repo} is behind {upstream} and has other changes: pull first")
+        steps.append(PushStep(repo, branch, upstream, paths, message))
+    return steps
+
+
+def push_enrol(steps: list[PushStep]) -> None:
+    """Commit and push each step. Only the paths of a step go into its commit."""
+    for s in steps:
+        _run_git(s.repo, "add", "--", *s.paths)
+        _run_git(s.repo, "commit", "-q", "-m", s.message, "--", *s.paths)
+        if _behind(s.repo):
+            try:
+                _run_git(s.repo, "pull", "-q", "--rebase")
+            except CredentialError as exc:
+                _git(s.repo, "rebase", "--abort")
+                raise CredentialError(f"{exc}\nthe commit in {s.repo} is not pushed: "
+                                      f"rebase it on {s.upstream}, then run push-enrol again") from None
+        _run_git(s.repo, "push", "-q")
+
+
 # -- API and CLI -----------------------------------------------------------------------
 
 def _tty() -> bool:
@@ -1378,6 +1496,25 @@ def _yes(question: str, default: bool) -> bool:
 def get_credential(system: str, vault_home: Path | str,
                    passphrase: str | None = None) -> Credential:
     return Store(vault_home, passphrase).get_credential(system)
+
+
+def _push_enrol_cli() -> None:
+    if not (_tty() and sys.stdout.isatty()):
+        raise CredentialError("push-enrol runs only in a terminal")
+    steps = push_enrol_plan()
+    if not steps:
+        print("no new recipient files in the vaults of the repositories from here upwards")
+        return
+    for s in steps:
+        print(f"{s.repo}\t{s.branch} -> {s.upstream}\n  {s.message}")
+        for path in s.paths:
+            print(f"    {path}")
+    if not _yes("Commit and push these changes?", False):
+        print("nothing changed")
+        return
+    push_enrol(steps)
+    for s in steps:
+        print(f"pushed {s.repo}")
 
 
 def _enrol_cli(store: Store, name: str | None) -> None:
@@ -1430,6 +1567,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("delete-keyring-secret", help="delete key passphrases, and the key files they open")
     p.add_argument("names", nargs="+", metavar="NAME", help="recipient name")
     sub.add_parser("delete-all-keyring-secrets", help="delete each key passphrase, and the key files they open")
+    sub.add_parser("push-enrol", help="commit and push the new recipient files of each vault, and the submodule "
+                                      "pointers above them; only in a terminal")
     sub.add_parser("list-systems", help="print the names of all systems; only in a terminal, needs the passphrase")
     p = sub.add_parser("edit", help="write an edit file for each system; secret values empty")
     p.add_argument("systems", nargs="+", metavar="SYSTEM")
@@ -1462,6 +1601,9 @@ def main(argv: list[str] | None = None) -> int:
             for path in store.create_vault():
                 print(f"wrote {path}")
             print(f"next: enrol this clone, add systems with edit and sync, then run setup.sh in {store.home}")
+            return 0
+        if a.cmd == "push-enrol":
+            _push_enrol_cli()
             return 0
         store = Store(vault_home(a.vault, a.vault_home), interactive=_tty())
         if a.cmd == "enrol":

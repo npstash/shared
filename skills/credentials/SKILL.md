@@ -27,7 +27,7 @@ give the passphrase. Do not ask for it.
 
 | You run these | The user runs these in a terminal |
 | --- | --- |
-| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`, `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `list-systems`, `create-vault`, `enrol` with the passphrase (self-enrolment), `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
+| `enrol` (it writes a request), `approve-enrol`, `unenrol`, `delete-private-clone-key`, `edit`, `sync`, `get-system`, `set-system`, `delete-system`, `rename-system`, `rename-secret`, `list-keyring-secrets`, `delete-keyring-secret`, `delete-all-keyring-secrets` | `list-systems`, `create-vault`, `enrol` with the passphrase (self-enrolment), `push-enrol`, `rotate-master-key`, `unenrol-and-rotate-master-key`, `change-passphrase` |
 
 For a command in the right column, give the user the full command, e.g.
 `shared/tools/auth/run.sh unenrol-and-rotate-master-key old-laptop`. Then wait.

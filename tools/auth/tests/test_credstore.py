@@ -1027,3 +1027,83 @@ def test_cli_caller_from_the_parent_process(monkeypatch, cmdline, caller):
     monkeypatch.setattr(Path, "read_bytes", lambda self: "\0".join(cmdline).encode() + b"\0"
                         if str(self) == "/proc/4242/cmdline" else real(self))
     assert cs._caller() == caller
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    """A repository `top` with the vault submodule vaults/vault-x; each has a bare remote."""
+    for key in ("AUTHOR", "COMMITTER"):
+        monkeypatch.setenv(f"GIT_{key}_NAME", "t")
+        monkeypatch.setenv(f"GIT_{key}_EMAIL", "t@t")
+    vault_remote, top_remote, top = tmp_path / "vault-x.git", tmp_path / "top.git", tmp_path / "top"
+    seed = tmp_path / "seed"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(vault_remote))
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(top_remote))
+    git(tmp_path, "clone", "-q", str(vault_remote), str(seed))
+    (seed / "recipients").mkdir()
+    (seed / "recipients" / "old.pub").write_text("old\n")
+    git(seed, "add", ".")
+    git(seed, "commit", "-q", "-m", "x")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    git(tmp_path, "clone", "-q", str(top_remote), str(top))
+    git(top, "submodule", "add", "-q", str(vault_remote), "vaults/vault-x")
+    git(top, "commit", "-q", "-m", "x")
+    git(top, "push", "-q", "-u", "origin", "HEAD:main")
+    vault = top / "vaults" / "vault-x"
+    git(vault, "checkout", "-q", "main")
+    return top, vault, seed
+
+
+def subject(repo):
+    return subprocess.run(["git", "-C", str(repo), "log", "-1", "--format=%s", "main"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_push_enrol_commits_the_vault_and_the_pointer(workspace):
+    top, vault, seed = workspace
+    (vault / "recipients" / "c.pub").write_text("c\n")
+    (vault / "recipients" / "c.inf").write_text("c\n")
+    (top / "other.txt").write_text("x\n")
+    git(top, "add", "other.txt")                                     # an unrelated staged change
+    (seed / "recipients" / "d.pub").write_text("d\n")
+    git(seed, "add", ".")
+    git(seed, "commit", "-q", "-m", "Enrol d")
+    git(seed, "push", "-q", "origin", "HEAD:main")                   # the vault remote is ahead
+    steps = cs.push_enrol_plan(vault / "recipients")
+    assert [(s.repo, s.paths, s.message) for s in steps] == [
+        (vault, ["recipients/c.inf", "recipients/c.pub"], "Enrol c"),
+        (top, ["vaults/vault-x"], "Point vault-x to the enrolment of c")]
+    cs.push_enrol(steps)
+    assert subject(top.parent / "vault-x.git") == "Enrol c"
+    assert subject(top.parent / "top.git") == "Point vault-x to the enrolment of c"
+    assert (vault / "recipients" / "d.pub").is_file()
+    assert cs._status(top) == [("A ", "other.txt")]
+
+
+def test_push_enrol_has_nothing_without_new_recipient_files(workspace):
+    top, vault, _ = workspace
+    (vault / "recipients" / "old.pub").unlink()                     # a deletion is not an enrolment
+    assert cs.push_enrol_plan(top) == []
+
+
+def test_push_enrol_refuses_other_changes_behind_the_remote(workspace):
+    _, vault, seed = workspace
+    (vault / "recipients" / "c.pub").write_text("c\n")
+    (vault / "recipients" / "old.pub").unlink()
+    git(seed, "commit", "-q", "--allow-empty", "-m", "x")
+    git(seed, "push", "-q", "origin", "HEAD:main")
+    with pytest.raises(cs.CredentialError, match="behind origin/main and has other changes"):
+        cs.push_enrol_plan(vault)
+
+
+def test_push_enrol_refuses_a_detached_head(workspace):
+    _, vault, _ = workspace
+    git(vault, "checkout", "-q", "--detach")
+    (vault / "recipients" / "c.pub").write_text("c\n")
+    with pytest.raises(cs.CredentialError, match="detached HEAD"):
+        cs.push_enrol_plan(vault)
+
+
+def test_push_enrol_runs_only_in_a_terminal(capsys):
+    assert cs.main(["push-enrol"]) == 1
+    assert "only in a terminal" in capsys.readouterr().err

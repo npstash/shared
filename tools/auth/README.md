@@ -114,6 +114,7 @@ run.sh change-passphrase                 # new passphrase, same keys; needs the 
 run.sh list-keyring-secrets              # key passphrases of this tool in the OS keyring
 run.sh delete-keyring-secret NAME ...    # delete them, and the key files they open
 run.sh delete-all-keyring-secrets        # delete all of them, and the key files they open
+run.sh push-enrol                        # commit and push new recipient files; see "Push"
 run.sh list-systems                      # names of all systems; only in a terminal, needs the passphrase
 run.sh edit SYSTEM ...                   # write edit files; see "Edit"
 run.sh sync                              # apply the edit files
@@ -127,12 +128,12 @@ run.sh --vault-home DIR ...
 run.sh --vault NAME ...
 ```
 
-`NAME` of `unenrol` and `delete-private-clone-key` is optional. Without it, the command uses
+`push-enrol` needs no vault option. `NAME` of `unenrol` and `delete-private-clone-key` is optional. Without it, the command uses
 the recipient of this clone: the one `clone.<name>.key` in the vault home.
 
 After `enrol`, `approve-enrol`, `unenrol`, `unenrol-and-rotate-master-key`,
 `rotate-master-key`, `sync`, `set-system`, `delete-system` and `rename-*`, commit and push the
-vault home.
+vault home. `push-enrol` does this for `enrol` and `approve-enrol`.
 
 The Python API has the same names, e.g. `Store.approve_enrol()` and `Store.unenrol()`.
 
@@ -151,13 +152,31 @@ Each clone gets its own key pair. Do not copy keys between clones.
   if the keyring was used: `encrypted, key passphrase in <provider>`, or
   `plain, not encrypted: no keyring was used`.
 - **Clone information:** each `enrol` writes `recipients/<name>.inf` beside the `.pub`.
-- **Approval of a request:** push `recipients/<name>.pub` and `recipients/<name>.inf`. In a
-  trusted clone, pull and run `run.sh approve-enrol <name>`. It shows the `.inf`. Compare the
-  fingerprint with the one from `enrol`. Push. Pull in the new clone.
+- **Approval of a request:** push `recipients/<name>.pub` and `recipients/<name>.inf`, e.g. with
+  `run.sh push-enrol`. In a trusted clone, pull and run `run.sh approve-enrol <name>`. It shows the
+  `.inf`. Compare the fingerprint with the one from `enrol`. Push. Pull in the new clone.
 
 The tool sets mode 600 on each key file. If WSL ignores file modes on `/mnt/<drive>`, the tool
 shows the fix: `options = "metadata"` under `[automount]` in `/etc/wsl.conf`, then
 `wsl --shutdown`.
+
+## Push
+
+`run.sh push-enrol` commits and pushes the enrolments. It runs only in a terminal.
+
+1. It walks up from the working folder through each git repository. It stops at a repository
+   that does not hold the previous one as a submodule.
+2. In each `vault-*` submodule of these repositories, it finds the untracked and changed files
+   in `recipients/`. It ignores deleted files.
+3. It plans one commit for each vault with such files. It plans one commit for each repository
+   on the walk with a submodule that gets a commit: the submodule pointers.
+4. It stops on a detached HEAD or a branch without upstream. It stops if a repository is behind
+   its upstream and has other changes.
+5. It shows the plan and asks for confirmation.
+6. It commits only the planned paths, innermost repository first. Other changes stay as they are.
+   If the upstream is ahead, it rebases the commit on it. Then it pushes.
+
+If a rebase fails, the tool aborts it and stops. The commit stays local.
 
 ## Unenrolment
 

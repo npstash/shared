@@ -148,6 +148,7 @@ clone, use a separate vault, e.g. `vaults/vault-<project>`.
 | `list-keyring-secrets` | nothing | Lists the key passphrases of this tool in each available provider: provider and name. |
 | `delete-keyring-secret NAME ...` | nothing | Deletes these key passphrases from the providers, and the key files of this clone that they open. |
 | `delete-all-keyring-secrets` | nothing | Deletes each key passphrase of this tool from the providers, and the key files of this clone that they open. |
+| `push-enrol` | TTY, no vault option | Commits and pushes the new recipient files of each vault, and the submodule pointers above them. See the [README](../README.md#push). |
 | `list-systems` | passphrase (TTY) | Prints the names of all systems. |
 | `edit SYSTEM ...`, `sync` | clone key | See the [README](../README.md#edit). |
 | `set-system`, `delete-system`, `rename-system`, `rename-secret` | clone key | Change one system. |
@@ -197,7 +198,8 @@ If `clone.<name>.key` exists in the vault home, `enrol` uses it and makes no new
 
 ### Approval of a request
 
-1. The new clone commits and pushes `recipients/<name>.pub` and `recipients/<name>.inf`.
+1. The new clone commits and pushes `recipients/<name>.pub` and `recipients/<name>.inf`, e.g.
+   with `push-enrol`.
 2. A trusted clone pulls, then runs `approve-enrol <name>`. It prints the `.inf` and the
    fingerprint. Compare the fingerprint with the fingerprint from `enrol`.
 3. The trusted clone commits and pushes `recipients/<name>.master.enc`.
