@@ -116,13 +116,16 @@ async function listFields(page) {
           const tag = el.tagName.toLowerCase();
           const type = (el.getAttribute('type') ?? '').toLowerCase();
           const autocomplete = (el.getAttribute('autocomplete') ?? '').trim();
+          const ariaLabel = (el.getAttribute('aria-label') || '').trim();
+          const placeholder = (el.getAttribute('placeholder') || '').trim();
           const candidates = [];
           if (autocomplete && !['on', 'off'].includes(autocomplete.toLowerCase())) candidates.push(`${tag}[autocomplete=${JSON.stringify(autocomplete)}]`);
           if (el.name) candidates.push(`${tag}[name=${JSON.stringify(el.name)}]`);
           if (el.id && !generated(el.id)) candidates.push(`#${CSS.escape(el.id)}`);
           if (type === 'password' || type === 'email') candidates.push(`input[type="${type}"]`);
-          const label = (el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '')
-            .trim().replace(/\s+/g, ' ').slice(0, 80);
+          if (ariaLabel) candidates.push(`${tag}[aria-label="${ariaLabel.replace(/"/g, '&quot;')}"]`);
+          if (placeholder && placeholder !== ariaLabel) candidates.push(`${tag}[placeholder=${JSON.stringify(placeholder)}]`);
+          const label = (el.labels?.[0]?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 80);
           return { tag, type, autocomplete, name: el.name ?? '', label, selector: candidates.find(unique) };
         });
     }).catch(() => []);
@@ -145,6 +148,15 @@ export async function autofill(session, url, ctx) {
       fillState.waitedUrl = undefined;
       break;
     }
+    
+    // Log: site is already in fields.ini
+    logger.info('fields_configured', { 
+      url: current, 
+      pattern: match.key,
+      css_selectors: match.fields.map(f => f.selector),
+      found_fields: match.fields.map(f => f.name)
+    });
+    
     // Wait for the fields only once for each URL, and after each submit.
     const wait = submitted || fillState.waitedUrl !== current ? FILL_WAIT : 0;
     fillState.waitedUrl = current;
@@ -167,16 +179,33 @@ export async function autofill(session, url, ctx) {
     fillState.attempts.add(attempt);
 
     const values = [];
+    const filledByProvider = [];
+    
     try {
       for (const field of match.fields.filter(({ name }) => found.includes(name))) {
         const value = await fill.resolve(field.name, ctx(current));
-        if (value !== undefined) values.push({ selector: field.selector, value });
+        if (value !== undefined) {
+          values.push({ selector: field.selector, value });
+          const providerName = fill.lastProvider?.name || 'unknown';
+          filledByProvider.push({ field: field.name, provider: providerName, has_value: true });
+        }
       }
     } catch (error) {
       if (!(error instanceof FillError)) throw error;
       logger.error('fill_error', { url: current, step: 'value', message: error.message });
       break;
     }
+    
+    // Log: what was asked to providers and what was filled
+    logger.info('field_fill_result', { 
+      url: current, 
+      form: match.key,
+      fields_requested: found,
+      fields_filled: values.length > 0 ? values.map(v => v.selector) : [],
+      filled_by_provider: filledByProvider,
+      submit_button: match.submit || 'auto'
+    });
+    
     if (!values.length) {
       logger.info('fill_no_value', { url: current, form: match.key, fields: found });
       break;
@@ -190,7 +219,16 @@ export async function autofill(session, url, ctx) {
     }
     if (!outcome?.submitted) break;
     submitted = true;
-    logger.info('fill_submitted', { url: current, form: match.key, fields: found, how: outcome.how });
+    
+    // Log: submit happened
+    logger.info('fill_submitted', { 
+      url: current, 
+      form: match.key,
+      fields: found, 
+      how: outcome.how,
+      submit_button_used: match.submit || 'auto (requestSubmit or Enter)'
+    });
+    
     current = await runCode(client, (page) => page.url(), null).catch(() => current);
   }
   if (!submitted) return undefined;
@@ -201,6 +239,8 @@ export async function autofill(session, url, ctx) {
 // URL pattern. A later visit of the same pattern replaces its section.
 export async function discover(session, url) {
   const { client, logger } = session;
+  
+  // Get input fields
   let items;
   try {
     items = await runCode(client, listFields, null);
@@ -210,8 +250,28 @@ export async function discover(session, url) {
   }
   if (!items?.length) return;
   const pattern = urlPattern(url);
+  
+  // Get submit buttons
+  let submitButtons;
+  try {
+    submitButtons = await runCode(client, listSubmitButtons, null);
+  } catch (error) {
+    logger.debug('discover_submit_buttons_error', { url, message: error.message });
+    submitButtons = [];
+  }
+  
   const used = new Map();
   const lines = [];
+  
+  // Log discovery
+  logger.info('fields_discovery_start', { 
+    url,
+    pattern,
+    field_count: items.length,
+    submit_button_count: submitButtons?.length ?? 0,
+    file: DISCOVERED_FILE
+  });
+  
   for (const item of items) {
     const info = [item.tag, item.type && `type=${item.type}`, item.autocomplete && `autocomplete=${item.autocomplete}`,
       item.name && `name=${item.name}`, item.label && `label="${item.label}"`, item.frame && `frame=${item.frame}`].filter(Boolean).join(' ');
@@ -225,8 +285,30 @@ export async function discover(session, url) {
     used.set(base, count);
     lines.push(`${count > 1 ? `${base}_${count}` : base} = ${item.selector}`);
   }
+  
+  // Add discovered submit buttons
+  if (submitButtons && submitButtons.length > 0) {
+    const uniqueSelectors = new Set();
+    for (const btn of submitButtons) {
+      if (btn.selector && !uniqueSelectors.has(btn.selector)) {
+        uniqueSelectors.add(btn.selector);
+        lines.push(`; submit button: ${btn.tag}${btn.id ? `#${btn.id}` : ''} type=${btn.type}`);
+        if (btn.text) {
+          lines.push(`;   text: "${btn.text}"`);
+        }
+        lines.push(`submit = ${btn.selector}`);
+      }
+    }
+  }
+  
   writeSection(DISCOVERED_FILE, pattern, lines);
-  logger.info('fields_discovered', { url, pattern, count: items.length, file: DISCOVERED_FILE });
+  logger.info('fields_discovery_complete', { 
+    url,
+    pattern,
+    field_count: items.length,
+    submit_button_count: submitButtons?.length ?? 0,
+    file: DISCOVERED_FILE
+  });
 }
 
 // A proposed field name: username, password, email, otp, else the name attribute.
@@ -237,6 +319,57 @@ function fieldName({ type, autocomplete, name }) {
   if (tokens.includes('one-time-code')) return 'otp';
   if (type === 'email' || tokens.includes('email')) return 'email';
   return name.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'field';
+}
+
+// Page code: find submit buttons on the page
+async function listSubmitButtons(page) {
+  const buttons = await page.evaluate(() => {
+    const allElements = document.querySelectorAll('button, input[type="submit"], input[type="image"]');
+    return [...allElements].map((el) => ({
+      tag: el.tagName.toLowerCase(),
+      type: (el.getAttribute('type') ?? '').toLowerCase(),
+      name: el.name || '',
+      id: el.id || '',
+      text: (el.innerText || el.value || '').trim().replace(/\s+/g, ' ').slice(0, 80),
+      selector: null
+    }));
+  }).catch(() => []);
+  
+  // Find unique selectors for each button
+  const result = [];
+  for (const btn of buttons) {
+    const candidates = [];
+    if (btn.text && !btn.type) {
+      candidates.push(`button:contains("${btn.text}")`);
+    }
+    if (btn.id) {
+      candidates.push(`#${CSS.escape(btn.id)}`);
+    }
+    if (btn.name && btn.tag === 'input') {
+      candidates.push(`input[name=${JSON.stringify(btn.name)}]`);
+    }
+    if (btn.type === 'submit' || btn.type === 'image') {
+      const typeSelector = btn.type === 'image' ? 'input[type="image"]' : 'button';
+      candidates.push(`${typeSelector}${btn.id ? '' : ''}`);
+    }
+    
+    // Use the first candidate that is unique
+    let selector = null;
+    for (const cand of candidates) {
+      try {
+        if (document.querySelectorAll(cand).length === 1) {
+          selector = cand;
+          break;
+        }
+      } catch {
+        continue;
+      }
+    }
+    
+    result.push({ ...btn, selector });
+  }
+  
+  return result;
 }
 
 const DISCOVERED_HEADER = [
