@@ -97,15 +97,17 @@ export async function startFacade({ args: givenArgs, configDir, logger, serverTr
   const args = withoutHeadless(givenArgs);
   if (args.length !== givenArgs.length) logger.info('ignored', { control: '--headless', reason: 'RENDER_MODE selects the render mode' });
   if (env.PLAYWRIGHT_MCP_HEADLESS !== undefined) logger.info('ignored', { control: 'PLAYWRIGHT_MCP_HEADLESS', reason: 'RENDER_MODE selects the render mode' });
-  const mode = connectsToBrowser(args) ? undefined : renderMode(env);
-  cleanStaleXvfb(logger);
+   const mode = connectsToBrowser(args) ? undefined : renderMode(env);
+   cleanStaleXvfb(logger);
 
-  // 3. Start Playwright MCP and connect to it.
-  const tmpDir = await tmpDirForChromium();
-  if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
-  const childEnv = upstreamEnv(args, env, cwd, tmpDir);
-  delete childEnv.PLAYWRIGHT_MCP_HEADLESS;
-  if (mode) childEnv.PLAYWRIGHT_MCP_HEADLESS = mode === 'HEADLESS' ? 'true' : 'false';
+   // 3. Start Playwright MCP and connect to it.
+   const tmpDir = await tmpDirForChromium();
+   if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
+   const childEnv = upstreamEnv(args, env, cwd, tmpDir);
+   // Set PLAYWRIGHT_MCP_HEADLESS based on RENDER_MODE. Don't override if already set by Kilo.
+   if (mode && !childEnv.PLAYWRIGHT_MCP_HEADLESS) {
+     childEnv.PLAYWRIGHT_MCP_HEADLESS = mode === 'HEADLESS' ? 'true' : 'false';
+   }
   const xvfb = mode === 'HEADED_INVISIBLE' ? await startXvfb({ logger }) : undefined;
   if (xvfb) {
     childEnv.DISPLAY = xvfb.display;
