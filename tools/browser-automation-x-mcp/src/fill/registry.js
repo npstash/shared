@@ -37,17 +37,13 @@ export class FillRegistry {
 
   // The value for a field name, or undefined if no provider has it.
   async resolve(name, ctx) {
-    let lastProvider = null;
     for (const provider of this.providers) {
       const value = await provider.resolve(name, ctx);
       if (value === undefined) continue;
       this.logger.info('fill_value', { field: name, provider: provider.name, host: ctx.host });
       if (value && this.masked.has(provider.name)) this.secrets.add(value);
-      lastProvider = provider;
       return value;
     }
-    // Expose the last provider that was attempted
-    this.lastProvider = lastProvider;
     return undefined;
   }
 

@@ -4,8 +4,9 @@
 //
 // Each tool call goes through these steps (see callTool()):
 //   tool switch (tools.ini) → host check (host-policy.ini); both in the config folder
-//   → Playwright MCP → host check of the opened page → discovery (optional)
-//   → form fill and submit (fields.ini, providers-form-fill/; see autofill.js)
+//   → Playwright MCP → host check of the opened page → recorder and discovery (optional; discover.js)
+//   → form fill and submit (fields.ini, providers-form-fill/; see autofill.js), with a host check
+//     of each page after a submit
 //   → scrub of masked values → log
 // Texts for the client do not name upstream, Playwright or the form fill.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -31,7 +32,8 @@ import { listValue, readIni, sectionValues } from '../../src/ini.js';
 import { summarizeResult } from '../../src/logger.js';
 import { PROVIDERS_DIR, VERSION, configFile } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
-import { autofill, discover } from './autofill.js';
+import { autofill } from './autofill.js';
+import { DISCOVER_WAIT, discover, syncRecorder } from './discover.js';
 import { writeChromePrefs } from './chrome-prefs.js';
 import { TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, UPSTREAM_CLI, argValue, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutBrowser, withoutHeadless } from './config.js';
 import { cleanStaleXvfb, startXvfb } from './xvfb.js';
@@ -170,7 +172,14 @@ export async function startServer({ args: givenArgs, configDir, logger, serverTr
       instructions: [client.getInstructions() && neutral(client.getInstructions()), INSTRUCTIONS].filter(Boolean).join('\n\n'),
     },
   );
+  // The log files open in the folder of the client name. A client can send its first notification
+  // before the server has the name: then the first request opens them.
+  const openLog = () => {
+    const name = server.getClientVersion()?.name;
+    if (!logger.files && name) logger.open(name);
+  };
   server.oninitialized = () => {
+    openLog();
     logger.info('client_ready', { client: server.getClientVersion(), capabilities: server.getClientCapabilities() });
     markDownstreamReady();
   };
@@ -182,16 +191,27 @@ export async function startServer({ args: givenArgs, configDir, logger, serverTr
     client, server, logger, toolsConfig, hostPolicy, fill, fields, discovery, cwd,
     outputDir: outputDir && path.resolve(cwd, outputDir), profileDir, browserOpen: false, pageUrl: undefined,
     fillState: { attempts: new Set(), failed: new Set(), waitedUrl: undefined },
+    // The time of the recent agent calls: the recorder gives their events to the agent.
+    agentCalls: [],
   };
-  server.setRequestHandler(ListToolsRequestSchema, async (request) => listTools(session, request));
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => callTool(session, request, extra));
+  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    openLog();
+    return listTools(session, request);
+  });
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    openLog();
+    return callTool(session, request, extra);
+  });
 
   // 5. Close the two sides together.
   let closed = false;
   async function close(reason) {
     if (closed) return;
     closed = true;
+    logger.open();
     logger.info('shutdown', { reason });
+    // The fills and submits of the user since the last call.
+    if (session.discovery && session.browserOpen && reason !== 'upstream closed') await syncRecorder(session);
     // Without browser_close, Chromium does not save a persistent profile (cookies, localStorage).
     // Upstream does not do this when its client goes away.
     if (session.browserOpen && reason !== 'upstream closed') {
@@ -319,6 +339,8 @@ async function runSteps(session, request, extra) {
 
   const progressToken = request.params._meta?.progressToken;
   const started = Date.now();
+  session.agentCalls.push({ start: started });
+  if (session.agentCalls.length > 20) session.agentCalls.shift();
   let raw = await client.callTool(request.params, undefined, {
     signal: extra.signal,
     timeout: TOOL_TIMEOUT,
@@ -330,21 +352,36 @@ async function runSteps(session, request, extra) {
   });
   session.browserOpen = name !== 'browser_close';
 
+  // The recorder: the fills and submits in the browser since the last call (discovery mode).
+  const call = session.agentCalls.at(-1);
+  if (call) call.end = Date.now();
+  const userSubmitted = session.discovery && session.browserOpen ? await syncRecorder(session) : false;
+
   // A click, a redirect or a script can open a page of a blocked host. Close it.
-  // After a submit of the form fill, the new page gets the same steps.
-  let opened = pageUrlOf(raw);
-  for (let step = 0; opened; step++) {
-    session.pageUrl = opened;
-    const check = await hostPolicy.check(opened, { tool: name });
+  // Each page after a submit of the form fill gets the same check (see autofill.js).
+  const checkPage = async (url) => {
+    session.pageUrl = url;
+    const check = await hostPolicy.check(url, { tool: name });
+    if (check.allowed) await hostPolicy.opened(url, { tool: name });
+    return check;
+  };
+  const opened = pageUrlOf(raw);
+  if (opened) {
+    const previous = session.pageUrl;
+    const check = await checkPage(opened);
     if (!check.allowed) return blockedResult(session, name, opened, check, true);
-    await hostPolicy.opened(opened, { tool: name });
-    if (step === 0) logger.info('page_opened', { url: logUrl(opened), source: 'tool' });
-    if (step > 0) break;
-    if (session.discovery) await discover(session, opened);
-    const filled = await autofill(session, opened, (url) => fillContext(session, url));
-    if (!filled) break;
-    raw = filled;
-    opened = pageUrlOf(raw);
+    if (opened !== previous) logger.info('page_opened', { url: opened, via: userSubmitted ? 'user_submit' : 'tool' });
+    if (session.discovery) await discover(session, opened, { wait: userSubmitted ? DISCOVER_WAIT : 0 });
+    const outcome = await autofill(session, opened, (url) => fillContext(session, url), checkPage);
+    if (outcome.blocked) return blockedResult(session, name, outcome.blocked.url, outcome.blocked.check, true);
+    if (outcome.submitted) {
+      raw = await client.callTool({ name: 'browser_snapshot', arguments: {} }, undefined, { timeout: TOOL_TIMEOUT });
+      const last = pageUrlOf(raw);
+      if (last && last !== session.pageUrl) {
+        const lastCheck = await checkPage(last);
+        if (!lastCheck.allowed) return blockedResult(session, name, last, lastCheck, true);
+      }
+    }
   }
   fill.scrubFiles(writtenFiles(session, raw, started));
   return forClient(fill.scrub(raw));
@@ -362,15 +399,6 @@ async function blockedResult(session, tool, url, check, closePage) {
 
 function capitalize(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-function logUrl(url) {
-  try {
-    const parsed = new URL(url);
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return url;
-  }
 }
 
 async function callTool(session, request, extra) {

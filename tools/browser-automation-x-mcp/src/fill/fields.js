@@ -1,7 +1,8 @@
 // The form fields of fields.ini in the config folder: which field gets which value on which page.
 //   [<URL pattern>]
 //   <value name> = <CSS selector>
-//   submit = <CSS selector>          optional: the element that the server clicks to submit
+//   submit = <selector>              optional, also more than one: the server clicks the first
+//                                    visible one, in file order
 // A URL pattern is "host/path". The host part is a host pattern (see src/hosts/patterns.js).
 // In the path, "*" is each sequence of characters, also "/". A pattern without a path matches each
 // path. Scheme, port, query and fragment have no effect.
@@ -46,8 +47,9 @@ export class FieldsConfig {
     }));
   }
 
-  // The fields for a URL, or undefined: { key, fields: [{ name, selector }], submit }.
+  // The fields for a URL, or undefined: { key, fields: [{ name, selector }], submits: [selector] }.
   // All matching sections apply. For a name in more sections, the longer pattern wins.
+  // submits: the submit lines of the longest pattern first, each section in file order.
   // key: the matching patterns; it identifies the form for the loop guard of the server.
   match(url) {
     const matching = this.sections.filter(({ pattern }) => urlMatches(pattern, url))
@@ -55,15 +57,17 @@ export class FieldsConfig {
     if (!matching.length) return undefined;
     const values = new Map();
     for (const { lines } of matching) {
-      for (const { key, value } of lines) values.set(key.toLowerCase(), value);
+      for (const { key, value } of lines) {
+        if (key.toLowerCase() !== SUBMIT_KEY) values.set(key.toLowerCase(), value);
+      }
     }
-    const submit = values.get(SUBMIT_KEY);
-    values.delete(SUBMIT_KEY);
     if (!values.size) return undefined;
+    const submits = [...matching].reverse()
+      .flatMap(({ lines }) => lines.filter(({ key }) => key.toLowerCase() === SUBMIT_KEY).map(({ value }) => value));
     return {
       key: matching.map(({ pattern }) => pattern).join(' '),
       fields: [...values].map(([name, selector]) => ({ name, selector })),
-      submit,
+      submits: [...new Set(submits)],
     };
   }
 }

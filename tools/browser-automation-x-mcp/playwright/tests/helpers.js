@@ -102,14 +102,13 @@ export function makeConfig(name, { server, hosts, tools, fields, ini, ask, vault
 // except when env gives an other RENDER_MODE.
 // onElicit: answers the dialogs of the ask provider; without it, the client cannot show dialogs.
 export async function startServerClient({ name, args = ['--isolated'], env = {}, config = {}, onElicit }) {
-  fs.mkdirSync(TEST_LOG_DIR, { recursive: true });
-  const logFile = path.join(TEST_LOG_DIR, `${name}.log`);
-  fs.rmSync(logFile, { force: true });
+  const logDir = path.join(TEST_LOG_DIR, name);
+  fs.rmSync(logDir, { recursive: true, force: true });
   const testConfig = makeConfig(name, config);
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(TOOL_DIR, 'playwright', 'src', 'server.js'), '--config-dir', testConfig.configDir, ...args],
-    env: { ...process.env, RENDER_MODE: 'HEADLESS', BROWSER_AUTOMATION_X_MCP_LOG_FILE: logFile, ...testConfig.env, ...env },
+    env: { ...process.env, RENDER_MODE: 'HEADLESS', BROWSER_AUTOMATION_X_MCP_LOG_DIR: logDir, ...testConfig.env, ...env },
     cwd: TOOL_DIR,
     stderr: 'inherit',
   });
@@ -117,7 +116,26 @@ export async function startServerClient({ name, args = ['--isolated'], env = {},
   const client = new Client({ name: `test-${name}`, version: '0' }, { capabilities });
   if (onElicit) client.setRequestHandler(ElicitRequestSchema, async (request) => onElicit(request.params));
   await client.connect(transport);
-  return { client, logFile, config: testConfig, close: () => client.close() };
+  // The server opens its log files after initialize, in <logDir>/<client name>/.
+  return {
+    client,
+    logDir,
+    get logFile() { return findLog(logDir, '.log.json'); },
+    get textLogFile() { return findLog(logDir, '.log'); },
+    config: testConfig,
+    close: () => client.close(),
+  };
+}
+
+// The newest log file with the suffix in the folders of logDir.
+export function findLog(logDir, suffix) {
+  const files = [];
+  for (const folder of fs.existsSync(logDir) ? fs.readdirSync(logDir) : []) {
+    for (const name of fs.readdirSync(path.join(logDir, folder))) {
+      if (name.endsWith(suffix) && !(suffix === '.log' && name.endsWith('.log.json'))) files.push(path.join(logDir, folder, name));
+    }
+  }
+  return files.sort().at(-1);
 }
 
 // Call a tool. Fail when the tool reports an error. Give the text of the result.

@@ -110,6 +110,18 @@ describe('tools', () => {
     assert.equal(result.isError, false);
     assert.equal(typeof result.ms, 'number');
   });
+
+  test('writes a human log beside the JSON log: short lines without level and session', async () => {
+    assert.ok(mcp.logFile.includes(`${path.sep}test-tools${path.sep}`));
+    assert.equal(mcp.textLogFile, mcp.logFile.replace(/\.json$/, ''));
+    const lines = fs.readFileSync(mcp.textLogFile, 'utf8').trim().split('\n');
+    assert.ok(lines.some((line) => /^\d\d:\d\d:\d\d tool_call id=\d+ tool=browser_navigate args=url:127\.0\.0\.1:\d+\/$/.test(line)), lines.join('\n'));
+    for (const line of lines) {
+      assert.match(line, /^\d\d:\d\d:\d\d [a-z_-]+/);
+      assert.ok(line.length <= 160, line);
+      assert.doesNotMatch(line, /"level"|session=/);
+    }
+  });
 });
 
 describe('persistent profile', () => {

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { readIni } from '../../src/ini.js';
 import { ASSETS_DIR } from '../../src/paths.js';
-import { DISCOVERED_FILE } from '../src/autofill.js';
+import { DISCOVERED_FILE } from '../src/discover.js';
 import { DANGEROUS_TOOLS } from '../src/mcp-server.js';
 import { call, callText, evaluate, ref, startServerClient, startSite } from './helpers.js';
 
@@ -226,7 +226,98 @@ describe('discovery', () => {
       assert.equal(password.password, 'input[autocomplete="current-password"]');
       assert.equal(password.submit, 'button[type="submit"]');
       assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'page_opened'
-        && entry.source === 'form_submit' && entry.url === `${site.url}/password.html`));
+        && entry.via === 'auto_submit' && entry.url === `${site.url}/password.html`));
+      // The next call gets the events of the form fill: the used fields get a mark.
+      await call(mcp.client, 'browser_snapshot');
+      assert.match(discoveredSection('127.0.0.1/redirect-step.html'), /; used: filled by auto-fill\nusername = #username|; used: filled by auto-fill\nusername = input/);
+    } finally {
+      await mcp.close();
+    }
+  });
+});
+
+// The lines of one section of DISCOVERED_FILE, as text.
+function discoveredSection(pattern) {
+  const text = fs.readFileSync(DISCOVERED_FILE, 'utf8');
+  const start = text.indexOf(`[${pattern}]`);
+  assert.ok(start >= 0, `no section ${pattern}`);
+  const end = text.indexOf('\n[', start + 1);
+  return text.slice(start, end < 0 ? undefined : end);
+}
+
+describe('discovery: merge and used marks', () => {
+  test('a second visit adds no line; the fills and clicks of the user and the agent get marks', async () => {
+    fs.rmSync(DISCOVERED_FILE, { force: true });
+    const mcp = await startServerClient({ name: 'policy-discover-used', env: { BROWSER_AUTOMATION_X_MCP_DISCOVER: '1' } });
+    try {
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html` });
+      const first = discoveredSection('127.0.0.1/user-step.html');
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html` });
+      assert.equal(discoveredSection('127.0.0.1/user-step.html'), first);
+      assert.match(first, /username = input\[autocomplete="username"\]\n/);
+      assert.match(first, /submit = #send/);
+
+      // The agent types into the note field.
+      const snapshot = await call(mcp.client, 'browser_snapshot');
+      await call(mcp.client, 'browser_type', { target: ref(snapshot, 'textbox', 'Note'), element: 'Note', text: 'hello' });
+
+      // The page acts as the user 1.5 s after the load: it fills the username and presses Send.
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html?user=1` });
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await call(mcp.client, 'browser_snapshot');
+
+      const section = discoveredSection('127.0.0.1/user-step.html');
+      assert.match(section, /; used: filled by agent\nnote = input\[name="note"\]/);
+      assert.match(section, /; used: filled by user\nusername = input\[autocomplete="username"\]/);
+      assert.match(section, /; used: pressed by user\nsubmit = #send/);
+      const events = readLog(mcp.logFile).map((entry) => entry.event);
+      for (const event of ['agent_filled', 'user_filled', 'user_pressed']) assert.ok(events.includes(event), event);
+      assert.doesNotMatch(fs.readFileSync(mcp.logFile, 'utf8'), /someone|hello/);
+    } finally {
+      await mcp.close();
+    }
+  });
+});
+
+describe('label locators and submits', () => {
+  test('discovery gives a label locator; the server fills with it and clicks the first visible submit', async () => {
+    fs.rmSync(DISCOVERED_FILE, { force: true });
+    const fields = '[127.0.0.1/label.html]\nnickname = internal:label="Nickname"s\nsubmit = #missing\nsubmit = #go\n';
+    const mcp = await startServerClient({
+      name: 'policy-label',
+      env: { BROWSER_AUTOMATION_X_MCP_DISCOVER: '1' },
+      config: { fields, ini: '[values]\nnickname = Nick\n' },
+    });
+    try {
+      const count = site.submissions.length;
+      const text = await call(mcp.client, 'browser_navigate', { url: `${site.url}/label.html` });
+      assert.match(text, /Page Title: Submitted/);
+      assert.equal(site.submissions.length, count + 1);
+      assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'fill_submitted' && entry.how === '#go'));
+      const section = discoveredSection('127.0.0.1/label.html');
+      assert.match(section, /field = internal:label="Nickname"s/);
+      assert.match(section, /submit = #go/);
+    } finally {
+      await mcp.close();
+    }
+  });
+});
+
+describe('host check after an auto-submit', () => {
+  test('a redirect to a denied host after a submit stops the chain before the next fill', async () => {
+    const fields = '[127.0.0.1/hop.html]\nusername = #username\n[localhost/password.html]\npassword = #password\n';
+    const mcp = await startServerClient({
+      name: 'policy-hop',
+      config: { fields, hosts: '[deny]\nlocalhost\n[allow]\n*\n' },
+    });
+    try {
+      const count = site.submissions.length;
+      const result = await callText(mcp.client, 'browser_navigate', { url: `${site.url}/hop.html` });
+      assert.ok(result.isError);
+      assert.match(result.text, /Navigation blocked: http:\/\/localhost:\d+\/password\.html is not allowed/);
+      assert.equal(site.submissions.length, count);
+      assert.equal(readLog(mcp.logFile).filter((entry) => entry.event === 'fill_submitted').length, 1);
+      assert.equal(await evaluate(mcp.client, '() => location.href'), 'about:blank');
     } finally {
       await mcp.close();
     }

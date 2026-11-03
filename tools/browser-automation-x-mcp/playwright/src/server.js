@@ -10,11 +10,12 @@ import { createLogger } from '../../src/logger.js';
 const logger = createLogger(loggerOptions());
 
 process.on('uncaughtException', (error) => {
-  logger.error('uncaught_exception', { message: error.message, stack: error.stack });
+  logger.open();
+  logger.error('uncaught_error', { message: error.message, stack: error.stack });
   process.exit(1);
 });
 process.on('unhandledRejection', (error) => {
-  logger.error('unhandled_rejection', { message: String(error?.message ?? error), stack: error?.stack });
+  logger.error('rejection_error', { message: String(error?.message ?? error), stack: error?.stack });
 });
 
 try {
@@ -32,6 +33,7 @@ try {
   process.on('SIGINT', () => mcp.close('SIGINT'));
   process.on('SIGTERM', () => mcp.close('SIGTERM'));
 } catch (error) {
+  logger.open();
   logger.error('start_failed', { message: error.message, stack: error.stack });
   process.stderr.write(`browser-automation-x-mcp: ${error.message}\n`);
   process.exit(1);

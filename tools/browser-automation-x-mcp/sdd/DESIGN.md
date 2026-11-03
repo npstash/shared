@@ -85,7 +85,8 @@ flowchart TD
 - **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). It holds
   `server.ini`, `fields.ini`, `host-policy.ini`, `tools.ini` and `provider-<name>.ini`. A missing file is a copy of its template in the tool folder. The server
   adds tool lines and records hosts.
-- **Log:** `LOG_FILE`, gitignored.
+- **Log:** two files for each server start in LOG_DIR/`<client>`/: `.log` for a person and
+  `.log.json` with all fields (REQ-050 of SRS); gitignored.
 - **Runtime files:** Node.js, browsers, libraries, profiles, temp files, DISCOVERED_FILE;
   gitignored.
 - **Output files:** OUTPUT_DIR in the working folder: snapshots and screenshots for the agent.
@@ -104,6 +105,9 @@ flowchart TD
         AF --> FC[Fields<br/><i>src/fill/fields.js</i>]
         AF --> R[Fill registry<br/><i>src/fill/registry.js</i>]
         AF --> CL
+        P --> DS[Discovery and recorder<br/><i>playwright/src/discover.js, page-lib.js</i>]
+        AF --> DS
+        DS --> CL
         R --> PV[Vault provider]
         R --> PI[INI provider]
         R --> PA[Ask provider]
@@ -121,9 +125,9 @@ flowchart TD
 - **MCP server / MCP client:** the SDK objects for the two connections. The server forwards
   roots, progress, cancellation and tool-list changes between them.
 - **Call pipeline:** the steps of one call, in this order: tool switch → host check of the target
-  URL → upstream → host check of the opened page and record → discovery (DISCOVER) → form fill →
-  discovery of each page after a submit → host check of the page after the submit → scrub →
-  removal of the code sections → log.
+  URL → upstream → records of the recorder (DISCOVER) → host check of the opened page and record →
+  discovery (DISCOVER) → form fill, with a host check and a discovery of each page after a submit →
+  scrub → removal of the code sections → log.
 - **Tool switches:** `src/tools-config.js` with `tools.ini` and the dangerous
   tools of Playwright MCP; adds missing tools; gives the error of a disabled tool.
 - **Host policy:** `[deny]` first, then the allow provider. Patterns: `src/hosts/patterns.js`.
@@ -131,7 +135,16 @@ flowchart TD
 - **Form fill:** `playwright/src/autofill.js`. It runs page code through `browser_run_code_unsafe`
   of upstream: find the fields, fill them, submit, wait (REQ-030, REQ-038 of SRS). The tool switch
   of the agent does not apply to these calls. Their results never go to the agent. It keeps the
-  loop guard of the session. In the discovery mode, it writes DISCOVERED_FILE (REQ-039).
+  loop guard of the session. It marks the elements that it touches with `__baxAuto` for the
+  recorder. A blocked page after a submit stops the fill (REQ-030).
+- **Discovery and recorder:** `playwright/src/discover.js` (REQ-039, REQ-039a of SRS). The page
+  code of `playwright/src/page-lib.js` makes the selectors in the browser, the same for discovery
+  and for the recorder. Discovery adds new selectors to DISCOVERED_FILE. The recorder is a page
+  script and a binding of the browser context: the events stay on the context object until the
+  next call takes them. `syncRecorder()` gives each event to the auto-fill, the agent (by the time
+  of its calls) or the user, logs it and writes the `; used:` mark.
+- **Page code:** `playwright/src/run-code.js` runs a function in the page through
+  `browser_run_code_unsafe`.
 - **Fields:** `src/fill/fields.js` reads `fields.ini`, matches URL patterns and makes the pattern of
   a page (REQ-037).
 - **Fill registry:** loads the providers in the order of `server.ini`, gives the value of a field
@@ -145,7 +158,8 @@ flowchart TD
   `DISPLAY` to upstream. At each start, it kills the Xvfb of servers that do not run (REQ-018).
 - **Chrome settings:** `playwright/src/chrome-prefs.js` writes `CHROME_PREFS` into the persistent
   profile before the browser starts: at the first call, and after `browser_close`.
-- **Logger:** JSON Lines; redacts the secret arguments.
+- **Logger:** `src/logger.js`. It keeps the events in a buffer until `initialize` gives the client
+  name, then writes `.log.json` and the short lines of `.log`. It redacts the secret arguments.
 
 ### 5.2 Launcher
 
@@ -166,7 +180,7 @@ flowchart TD
 | Server process | MCP `tools/call` | The call pipeline (5.1). Error results: UI-02 of SRS. |
 | Server process | MCP `elicitation/create` (to the client) | The dialog of the ask provider (UI-01). |
 | Server process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument goes to Playwright MCP, e.g. `--isolated`. The server removes `--headless` and `--browser`. |
-| Server process | environment | `RENDER_MODE` (REQ-015 of SRS; the server ignores `PLAYWRIGHT_MCP_HEADLESS` and `PLAYWRIGHT_MCP_BROWSER`); `BROWSER_AUTOMATION_X_MCP_LOG_FILE`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). |
+| Server process | environment | `RENDER_MODE` (REQ-015 of SRS; the server ignores `PLAYWRIGHT_MCP_HEADLESS` and `PLAYWRIGHT_MCP_BROWSER`); `BROWSER_AUTOMATION_X_MCP_LOG_DIR`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). |
 | Playwright MCP (used) | `browser_run_code_unsafe`, `browser_snapshot` | Page code of the form fill; the snapshot after the submit. |
 | Launcher | `run.sh [install|test|args]` | Makes the runtime; `install` stops after it; `test` runs the tests. |
 | Vault tool (used) | `run.sh --vault NAME get-system SYSTEM` / `get-secret SYSTEM KEY` | The secret names of one system; one secret on stdout. |
@@ -243,7 +257,9 @@ sequenceDiagram
 | `<config>/provider-ini.ini` | yes | `[values]` with `<field name> = <value>` | user |
 | `<config>/provider-ask.ini` | yes | `[ask]` `fields = a, b, c` | user |
 | `config/*.template.ini`, `playwright/config/tools.template.ini`, `providers-form-fill/<name>/config.template.ini` | yes | the first content of each file above | user; server copies a template to a missing file |
-| `LOG_FILE` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
+| `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log.json` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
+| `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log` | no | `HH:MM:SS <event> <url> <key>=<value> ...`, a maximum of LOG_LINE_MAX characters | server |
+| DISCOVERED_FILE | no | sections as in `fields.ini`; a comment line describes each entry; `; used: <filled or pressed> by <who>` marks a used entry | server |
 | `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of the server and Xvfb), profiles, tmp, `discovered-fields.ini` | launcher, Playwright, server |
 | OUTPUT_DIR | no | snapshots, screenshots, console logs of upstream | Playwright; server scrubs |
 | `<repo>/.local_assets/tmp/` | no | temp files of Chromium when the tool folder cannot hold its socket | Playwright |

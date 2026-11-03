@@ -105,3 +105,12 @@ The log of the decisions that change the design. Format and rules:
 - 20261103-02 Nestor 6035b08cc87f run.sh / run.bat start the server without an argument that selects a browser tool
 - 20261103-03 Nestor 6035b08cc87f Always use Chromium; ignore --browser and PLAYWRIGHT_MCP_BROWSER without an error and log them; give PLAYWRIGHT_MCP_BROWSER=chromium to upstream also with --config
 - 20261103-04 Nestor 6035b08cc87f The tool, its config and its documents describe it only as an MCP server for browser automation; Playwright is an implementation detail
+- 20261103-05 Nestor e78edede6674 Discovery runs on each visit and adds the new fields and buttons to the section of the page; it never removes a line
+- 20261103-06 Nestor e78edede6674 Discovery writes only discovered-fields.ini; a "; used:" comment marks each field and button that the user, the agent or the auto-fill used
+- 20261103-07 Nestor e78edede6674 In the discovery mode, the server records the fills, the button clicks and the submits in the browser, without values, and gets the records after each agent call and at shutdown
+- 20261103-08 Nestor e78edede6674 A fields.ini section can have more submit lines; the server clicks the first visible one
+- 20261103-09 Nestor e78edede6674 The last selector of a field is a label locator of Playwright, and of a button a role locator
+- 20261103-10 Nestor e78edede6674 The server checks and records the host of each page after an auto-submit before the next fill or discovery
+- 20261103-11 Nestor e78edede6674 Discovery waits DISCOVER_WAIT for a field or a button only after an auto-submit or a submit of the user
+- 20261103-12 Nestor e78edede6674 Each server start writes a .log file with lines of at most LOG_LINE_MAX characters for a person, and a .log.json file with all fields
+- 20261103-13 Nestor e78edede6674 The log files are in LOG_DIR/<client name of initialize>/mm-dd_hhmmss_<pid>; the newest LOG_KEEP pairs stay

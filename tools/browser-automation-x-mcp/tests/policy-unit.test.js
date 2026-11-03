@@ -13,7 +13,7 @@ import { HostPolicy } from '../src/hosts/host-policy.js';
 import { HostsFile } from '../src/hosts/hosts-file.js';
 import { bySpecificity, hostMatches, hostOfUrl } from '../src/hosts/patterns.js';
 import { formatIni, parseIni, readIni } from '../src/ini.js';
-import { createLogger, redact } from '../src/logger.js';
+import { LOG_LINE_MAX, compactUrl, createLogger, folderName, formatLine, redact } from '../src/logger.js';
 import { ToolsConfig } from '../src/tools-config.js';
 import AskProvider from '../providers-form-fill/ask/index.js';
 import IniProvider from '../providers-form-fill/ini/index.js';
@@ -25,7 +25,7 @@ const FAKE_VAULT = path.join(TOOL_DIR, 'tests', 'fixtures', 'fake-vault');
 const DANGEROUS = { browser_evaluate: 'it runs JavaScript in the web page and can read all data of the page' };
 
 const TMP = path.join(ASSETS_DIR, 'test-unit');
-const logger = createLogger({ file: path.join(ASSETS_DIR, 'test-logs', 'unit.log'), level: 'error' });
+const logger = createLogger({ dir: path.join(ASSETS_DIR, 'test-logs', 'unit'), level: 'error' });
 
 function tmpFile(name, text) {
   const file = path.join(TMP, name);
@@ -207,13 +207,13 @@ describe('form fields', () => {
     assert.equal(urlPattern('https://a.example/'), 'a.example/');
   });
 
-  test('all matching sections apply; the longer pattern wins; submit is separate', () => {
-    const fields = new FieldsConfig(tmpFile('fields/fields.ini', '[example.com]\nusername = #user\npassword = #pass\n'
-      + '[example.com/admin/*]\npassword = input[name="admin-pass"]\nsubmit = button[type=submit]\n[other.example]\n; comment\n'));
+  test('all matching sections apply; the longer pattern wins; submits keep their order', () => {
+    const fields = new FieldsConfig(tmpFile('fields/fields.ini', '[example.com]\nusername = #user\npassword = #pass\nsubmit = #generic\n'
+      + '[example.com/admin/*]\npassword = input[name="admin-pass"]\nsubmit = #next\nsubmit = button[type=submit]\n[other.example]\n; comment\n'));
     assert.deepEqual(fields.match('https://example.com/admin/login'), {
       key: 'example.com example.com/admin/*',
       fields: [{ name: 'username', selector: '#user' }, { name: 'password', selector: 'input[name="admin-pass"]' }],
-      submit: 'button[type=submit]',
+      submits: ['#next', 'button[type=submit]', '#generic'],
     });
     assert.deepEqual(fields.match('https://example.com/').fields.map(({ name }) => name), ['username', 'password']);
     assert.equal(fields.match('https://other.example/'), undefined);
@@ -390,5 +390,48 @@ describe('logger', () => {
   test('redacts typed text and form values', () => {
     assert.deepEqual(redact({ text: 'secret', element: 'Name', fields: [{ name: 'A', value: 'x {{a}}' }] }),
       { text: '<redacted 6 chars>', element: 'Name', fields: [{ name: 'A', value: '<redacted 7 chars>' }] });
+  });
+
+  test('a short URL cuts long path segments and query values', () => {
+    assert.equal(compactUrl('https://www.amazon.pl/ax/claim?arb=7a415ec9-1e5a&openid.mode=checkid_setup#top'),
+      'www.amazon.pl/ax/claim?arb=7a41…&openid.mode=chec…');
+    assert.equal(compactUrl('http://127.0.0.1:8080/a/abcdefghijklmnopqrstuvwxyz0123/b'), '127.0.0.1:8080/a/abcdefghijklmnopqrstuvwx…/b');
+    assert.equal(compactUrl('about:blank'), 'about:blank');
+  });
+
+  test('a line of the human log has the time, the event and the fields, without level and session', () => {
+    const ts = new Date(2026, 10, 3, 20, 18, 8, 16).toISOString();
+    const line = formatLine({ ts, level: 'info', session: '42', event: 'page_opened', url: 'https://a.example/x?q=123456', via: 'tool' });
+    assert.equal(line, '20:18:08 page_opened a.example/x?q=1234… via=tool');
+    const long = formatLine({ ts, level: 'info', session: '42', event: 'fields_discovered', new: Array(40).fill('username=input[name="u"]'), stack: 'x' });
+    assert.equal(long.length, LOG_LINE_MAX);
+    assert.ok(long.endsWith('…'));
+    assert.doesNotMatch(long, /stack/);
+  });
+
+  test('two files for each start in the folder of the client; the newest pairs stay', () => {
+    const dir = path.join(ASSETS_DIR, 'test-unit', 'logs');
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.equal(folderName('Claude Code'), 'claude-code');
+    assert.equal(folderName(undefined), 'unknown');
+    const folder = path.join(dir, 'kilo');
+    fs.mkdirSync(folder, { recursive: true });
+    for (let i = 0; i < 6; i++) {
+      for (const suffix of ['.log', '.log.json']) {
+        const file = path.join(folder, `01-0${i}_000000_1${suffix}`);
+        fs.writeFileSync(file, '');
+        fs.utimesSync(file, i + 1, i + 1);
+      }
+    }
+    const logger = createLogger({ dir, session: '7' });
+    logger.info('early', { a: 1 });
+    const files = logger.open('KILO');
+    logger.info('late', { url: 'https://a.example/' });
+    assert.match(path.basename(files.text), /^\d\d-\d\d_\d{6}_7\.log$/);
+    assert.equal(fs.readdirSync(folder).length, 10);
+    assert.ok(!fs.existsSync(path.join(folder, '01-00_000000_1.log')));
+    const json = fs.readFileSync(files.json, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(json.map((entry) => entry.event), ['early', 'late']);
+    assert.match(fs.readFileSync(files.text, 'utf8'), /^\d\d:\d\d:\d\d early a=1\n\d\d:\d\d:\d\d late a\.example\/\n$/);
   });
 });

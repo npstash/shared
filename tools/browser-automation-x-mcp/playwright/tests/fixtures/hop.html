@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Hop</title></head>
+<body>
+  <h1>Sign in</h1>
+  <form method="post">
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username">
+    <button type="submit">Next</button>
+  </form>
+  <script>
+    // The submit goes through a redirect to the other host of the test site (localhost).
+    document.forms[0].action = '/redirect?to=' + encodeURIComponent(`http://localhost:${location.port}/password.html`);
+  </script>
+</body>
+</html>

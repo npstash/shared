@@ -46,7 +46,7 @@ export function syslibPaths() {
 
 export function loggerOptions(env = process.env) {
   return {
-    file: env.BROWSER_AUTOMATION_X_MCP_LOG_FILE || path.join(ASSETS_DIR, 'logs', 'browser-automation-x-mcp.log'),
+    dir: env.BROWSER_AUTOMATION_X_MCP_LOG_DIR || path.join(ASSETS_DIR, 'logs'),
     level: env.BROWSER_AUTOMATION_X_MCP_LOG_LEVEL || 'info',
     secrets: env.BROWSER_AUTOMATION_X_MCP_LOG_SECRETS === '1',
   };

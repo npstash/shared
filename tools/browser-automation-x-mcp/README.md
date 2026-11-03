@@ -163,18 +163,22 @@ password = input[name="passwd"]
 - **URL pattern:** `host/path`. The host part is a host pattern (see [Host lists](#host-lists)). In
   the path, `*` matches each sequence of characters, also `/`. A pattern without a path matches
   each path. Scheme, port, query and fragment have no effect.
-- **Lines:** `<field name> = <CSS selector>`. The server looks for the selector in each frame of the
-  page. If more sections match, all apply. For a field name in more sections, the longer pattern
+- **Lines:** `<field name> = <selector>`. A selector is CSS, or a label or role locator of
+  Playwright, e.g. `internal:label="Password"s`. The server looks for the selector in each frame of
+  the page. If more sections match, all apply. For a field name in more sections, the longer pattern
   wins.
 - **Wait:** the server waits a maximum of 10 s for a visible field. It waits only one time for each
   URL, and after each submit.
 - **Values:** for each visible field, the server asks the providers of `[fill] providers` in
   `server.ini`, in that order. The first value goes to the field. A field without a value stays
   empty. If no field has a value, the server does nothing.
-- **Submit:** the server clicks the `submit` selector if it is visible. Else it calls
-  `requestSubmit()` of the form, else it presses Enter in the last field. Then it waits a maximum
-  of 10 s for the page. A second step on the same URL, e.g. the password after the username, gets
-  a fill in the same call. Maximum 3 rounds.
+- **Submit:** a section can have more `submit` lines. The server clicks the first visible one: the
+  lines of the longer pattern first, each section in file order. Else it calls `requestSubmit()`
+  of the form, else it presses Enter in the last field. Then it waits a maximum of 10 s for the
+  page. A second step, e.g. the password after the username, gets a fill in the same call.
+  Maximum 3 rounds.
+- **Host check:** each page after a submit gets the host check before the next fill (see
+  [Host lists](#host-lists)).
 - **Loop guard:** the server fills each set of visible fields of a form one time. If the same fields
   come back, e.g. after a wrong password, it does not fill them again. The log gets `fill_failed`.
   The guard is reset when a page does not match `fields.ini`.
@@ -194,22 +198,46 @@ To add a provider, see [src/fill/provider.js](src/fill/provider.js).
 
 ### Find the fields of a page (discovery)
 
-1. Start the server with `BROWSER_AUTOMATION_X_MCP_DISCOVER=1`, e.g. in the `env` of `.mcp.json`.
-2. Open each login page in a session. On a page with more steps, do the steps: the server records
-   each step.
-3. The server writes `.local_assets/discovered-fields.ini` of this folder. Each section is the URL
-   pattern of a page. Path segments that look like an ID are `*`. Each field has a comment line
-   with its type, name, label and frame, and a proposed line `<field name> = <selector>`. It also
-   writes proposed `submit` selectors for visible submit buttons.
-4. Copy the lines of the username and password fields into `fields.ini`. Check that the section
-   pattern covers each URL of the login.
-5. Give the vault system of the host the secrets with these field names, e.g. `username` and
-   `password`. Add the host to `[systems]` of `provider-vault.ini`.
-6. Remove `BROWSER_AUTOMATION_X_MCP_DISCOVER`.
+Start the server with `BROWSER_AUTOMATION_X_MCP_DISCOVER=1`, e.g. in the `env` of `.mcp.json`.
 
-An agent can do steps 2–4 in a test run. Remove the deny rules for that session. Tell the agent to
-open the login pages, to read `discovered-fields.ini`, and to propose only the username and
-password lines with their sections. Confirm the lines before the agent writes them into
+- After each call, the server writes the visible fields and buttons of the page into
+  `.local_assets/discovered-fields.ini` of this folder. Each section is the URL pattern of a page.
+  Path segments that look like an ID are `*`.
+- Each field or button has a comment line with its type, name, label or text and frame, and a line
+  `<field name> = <selector>` or `submit = <selector>`.
+- Discovery runs on each visit. It adds only new selectors to a section, and never removes a line.
+  A second step on the same URL adds its lines. To start a page again, delete its section.
+- The server records the fills and the button clicks in the browser: of the agent, of the auto-fill,
+  and of the user in a headed browser. It records no values. It gets the records after each call
+  of the agent, and at shutdown. A comment line marks each used entry, e.g.
+  `; used: filled by user` or `; used: pressed by agent`. The log gets `user_filled`,
+  `user_pressed`, `user_submitted` and the same for `agent`.
+- After an auto-submit or a submit of the user, discovery waits a maximum of 5 s for a field or a
+  button of the new page.
+- Selector of a field: autocomplete, name, an id that does not look generated, the type, aria-label,
+  placeholder; else `internal:label="<label>"s`. Selector of a button: id, name, type; else
+  `internal:role=button[name="<text>"s]`. A selector must find one element.
+
+```ini
+[login.example.com/u/*/login]
+; input autocomplete=username name=username label="Email"
+; used: filled by user
+username = input[autocomplete="username"]
+; button "Next" button type=submit
+; used: pressed by user
+submit = internal:role=button[name="Next"s]
+```
+
+1. Open each login page in a session, and do each step of the login in the browser.
+2. Copy the lines with a `; used:` mark into `fields.ini`. Check that the section pattern covers
+   each URL of the login.
+3. Give the vault system of the host the secrets with these field names, e.g. `username` and
+   `password`. Add the host to `[systems]` of `provider-vault.ini`.
+4. Remove `BROWSER_AUTOMATION_X_MCP_DISCOVER`.
+
+An agent can do step 1 in a test run. Remove the deny rules for that session. Tell the agent to
+open the login pages, to read `discovered-fields.ini`, and to propose only the username, password
+and submit lines with their sections. Confirm the lines before the agent writes them into
 `fields.ini`.
 
 ## Host lists
@@ -303,27 +331,41 @@ list, run `./run.sh --config-dir <DIR> --help`.
 
 ## Logs
 
-The log is `.local_assets/logs/browser-automation-x-mcp.log` of this folder. It has one JSON object
-on each line. Above 10 MB, the server moves the file to `.log.1` at start.
+Each server start writes two files into `.local_assets/logs/<client>/` of this folder. `<client>` is
+the client name from MCP `initialize`, e.g. `claude-code`. The file name is the start time and the
+process ID: `mm-dd_hhmmss_<pid>`. The last 5 pairs of each client stay.
+
+- `<name>.log`: one line for each event, a maximum of 160 characters. The line has the time, the
+  event and its fields. URLs have no scheme. Long path segments and query values are cut.
+- `<name>.log.json`: one JSON object for each event, with all fields, the level and the `session`
+  (the process ID).
+
+```
+20:18:08 page_opened www.amazon.pl/ax/claim?arb=7a41…&openid.mode=chec… via=auto_submit
+20:18:09 fields_discovered www.amazon.pl/ax/claim pattern=www.amazon.pl/ax/claim new=password=#ap_password
+```
 
 | Env variable | Default | Effect |
 | --- | --- | --- |
-| `BROWSER_AUTOMATION_X_MCP_LOG_FILE` | `.local_assets/logs/browser-automation-x-mcp.log` | Path of the log file. |
-| `BROWSER_AUTOMATION_X_MCP_LOG_LEVEL` | `info` | `error`, `info` or `debug`. `debug` adds the text of each result. |
+| `BROWSER_AUTOMATION_X_MCP_LOG_DIR` | `.local_assets/logs` | Folder of the log folders. |
+| `BROWSER_AUTOMATION_X_MCP_LOG_LEVEL` | `info` | `error`, `info` or `debug`. `debug` adds the text of each result, only in `.log.json`. |
 | `BROWSER_AUTOMATION_X_MCP_LOG_SECRETS` | unset | `1` logs the values of `text`, `value`, `values` and `password`. |
 
 Events of the form fill: `fill_providers`, `fill_value` (field and provider, no value),
-`fill_submitted`, `fill_failed`, `fill_no_value`, `fill_error`, `fields_discovered`, `scrub_file`.
-Other events: `upstream_start`, `upstream_ready`, `client_ready`, `list_tools`, `tool_call`,
-`tool_result`, `tool_error`, `host_blocked`, `host_recorded`, `tools_config_added`,
-`upstream_stderr`, `tools_changed`, `shutdown`. Each entry has the `session` field (the process ID).
+`fill_submitted`, `fill_failed`, `fill_no_value`, `fill_error`, `scrub_file`. Events of the
+discovery: `fields_discovered`, `user_filled`, `user_pressed`, `user_submitted`, `agent_filled`,
+`agent_pressed`, `agent_submitted`, `discover_error`, `record_error`. Other events:
+`upstream_start`, `upstream_ready`, `client_ready`, `list_tools`, `tool_call`, `tool_result`,
+`tool_error`, `page_opened` (`via`: `tool`, `auto_submit` or `user_submit`), `host_blocked`,
+`host_recorded`, `tools_config_added`, `upstream_stderr`, `tools_changed`, `shutdown`. The name of
+an error event ends in `_error` or `_failed`.
 
 - By default, the log has no typed text and no form values: `"<redacted 8 chars>"`. The log never
   has a value that a provider gave.
 - At level `debug`, the result text can contain values that are not masked.
 
 ```bash
-tail -f .local_assets/logs/browser-automation-x-mcp.log | jq -c '{ts, event, tool, ms, args}'
+tail -f "$(ls -t .local_assets/logs/*/*.log | head -1)"
 ```
 
 ## Tests
@@ -335,7 +377,8 @@ tail -f .local_assets/logs/browser-automation-x-mcp.log | jq -c '{ts, event, too
   switches, URL patterns, the fill registry and the three providers (the vault through the test
   double in [tests/fixtures/fake-vault/](tests/fixtures/fake-vault/)).
 - [playwright/tests/policy.test.js](playwright/tests/policy.test.js): tool switches, host lists,
-  form fill (fill, submit, mask, loop guard, two steps), discovery.
+  form fill (fill, submit, mask, loop guard, two steps, label locators, several submits, host
+  check after a submit), discovery (merge, used marks of the user and the agent).
 - [playwright/tests/tools.test.js](playwright/tests/tools.test.js): the same tools as upstream,
   the texts for the client, navigation, errors, screenshots, the log and the persistent profile.
 - [playwright/tests/forms.test.js](playwright/tests/forms.test.js): form tools of the agent on local

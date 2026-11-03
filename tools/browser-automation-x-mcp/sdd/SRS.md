@@ -224,14 +224,17 @@ The agent does not fill credentials or personal data. The server fills the field
      in each frame of the page.
   2. It shall get the value of each visible field from the providers (REQ-031).
   3. It shall fill the fields that have a value, and submit the form (REQ-038).
-  4. It shall repeat steps 1–3 on the new page, a maximum of FILL_ROUNDS (3) rounds.
-  5. It shall give the client a snapshot of the page after the last submit, in place of the
+  4. It shall check the host of the page after the submit (REQ-041) before each other step.
+  5. It shall repeat steps 1–4 on the new page, a maximum of FILL_ROUNDS (3) rounds.
+  6. It shall give the client a snapshot of the page after the last submit, in place of the
      result of upstream.
 - **Alternative Flow:**
   - The server waited for this URL before, and the page did not change by a submit → it does not
     wait. It checks the fields one time.
   - No field is visible, or no provider has a value → the server does nothing. The client gets the
     result of upstream.
+  - The host of the page after a submit is blocked → the server stops the fill. It opens
+    `about:blank` and gives the error of REQ-041.
 - **Exception Flow:** A provider or the page code fails → the server logs the error and does
   nothing. The client gets the result of upstream. The error is not visible to the client.
 
@@ -292,8 +295,8 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-037 — Fields of a page
 
 - **Basic Flow:** The server shall read `fields.ini` of the config folder. Each section is a URL
-  pattern. Each line is `<field name> = <CSS selector>`. The line `submit = <CSS selector>` is
-  optional.
+  pattern. Each line is `<field name> = <selector>`. Lines `submit = <selector>` are optional; a
+  section can have more of them. A selector is CSS, or a label or role locator of Playwright.
   1. A URL pattern is `host/path`. The host part is a host pattern (REQ-040).
   2. In the path, `*` matches each sequence of characters, also `/`.
   3. A pattern without a path matches each path. Scheme, port, query and fragment have no effect.
@@ -303,8 +306,9 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-038 — Submit and loop guard
 
 - **Basic Flow:**
-  1. The server shall click the element of `submit` if it is visible. Else it shall call
-     `requestSubmit()` of the form of the last filled field. Else it shall press Enter in it.
+  1. The server shall click the first visible element of the `submit` lines: the lines of the
+     longer pattern first, each section in file order. Else it shall call `requestSubmit()` of the
+     form of the last filled field. Else it shall press Enter in it.
   2. It shall wait a maximum of SUBMIT_WAIT (10000 ms) for the load of the page, then for the
      end of the network requests.
   3. It shall fill each set of visible fields of a form one time only.
@@ -315,17 +319,41 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-039 — Discovery mode
 
 - **Pre-condition:** DISCOVER is `1`.
-- **Trigger:** A result of upstream shows a page URL.
+- **Trigger:** A result of upstream shows a page URL, or the form fill submitted a page.
 - **Basic Flow:**
-  1. The server shall find the visible input fields of each frame of the page.
+  1. The server shall find the visible input fields and the buttons that can submit, in each frame
+     of the page. A button can submit if it is a submit button, an image input, a button without a
+     type in a form, or an other button whose parent (up to 4 levels) holds a visible field.
   2. For each field, it shall make a selector that is unique in its frame: `autocomplete`, then
-     `name`, then an `id` that does not look generated, then the type.
-  3. It shall propose a field name: `username`, `password`, `email`, `otp`, else the `name`.
-  4. It shall write the fields into DISCOVERED_FILE, in the format of `fields.ini`. The section is
-     the URL pattern of the page. A path segment that looks like an ID becomes `*`.
-- **Alternative Flow:** The file has a section for the pattern → the server replaces it.
+     `name`, then an `id` that does not look generated, then the type, `aria-label`, `placeholder`.
+     Else a label locator of Playwright. For each button: an `id` that does not look generated,
+     then `name`, then the type. Else a role locator of Playwright with the name of the button.
+     A locator of Playwright must find one element.
+  3. It shall propose a field name: `username`, `password`, `email`, `otp`, else the `name`. A
+     button gets `submit`.
+  4. It shall add each field and button whose selector is not in the section to DISCOVERED_FILE,
+     in the format of `fields.ini`. The section is the URL pattern of the page. A path segment that
+     looks like an ID becomes `*`. It shall not remove a line.
+- **Alternative Flow:**
+  - The page was submitted by the form fill or by the user → the server waits a maximum of
+    DISCOVER_WAIT (5000 ms) for a field or a button.
+  - The page has no field and no button → the server writes nothing.
 - **Note:** An ID segment has only digits, is a UUID, or has more than 16 characters of hex or
   base64url with a digit and a letter.
+
+#### REQ-039a — Record of the used fields and buttons
+
+- **Pre-condition:** DISCOVER is `1`.
+- **Basic Flow:**
+  1. The server shall record each fill of a field, each click of a button and each submit without a
+     button in the browser. It shall record the selector of REQ-039 and not the value.
+  2. It shall get the records after each call of the agent and at shutdown.
+  3. It shall give each record to the auto-fill (an element that the form fill touched), to the
+     agent (in the time of its call), else to the user.
+  4. It shall log the records of the user and of the agent: `<who>_filled`, `<who>_pressed`,
+     `<who>_submitted`.
+  5. It shall write `; used: filled by <who>` or `; used: pressed by <who>` above the entry in
+     DISCOVERED_FILE, one time for each text. A missing entry is added first.
 
 ## 5. Host lists
 
@@ -364,13 +392,25 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 #### REQ-050 — Log of each call
 
-- **Basic Flow:** The server shall write one JSON line for each event to LOG_FILE: start, client,
-  tool call, result (duration, error flag, size of the content), filled field, submit, failed fill,
-  discovered fields, blocked host, upstream stderr, shutdown.
+- **Basic Flow:** The server shall write each event into two files in LOG_DIR/`<client>`/:
+  start, client, tool call, result (duration, error flag, size of the content), opened page,
+  filled field, submit, failed fill, discovered fields, records of REQ-039a, blocked host, upstream
+  stderr, shutdown. `<client>` is the client name of MCP `initialize`, in lowercase with only
+  `a-z`, `0-9` and `-`.
+  1. The file name is the start time and the process ID: `mm-dd_hhmmss_<pid>`.
+  2. `<name>.log.json` gets one JSON line for each event, with all fields.
+  3. `<name>.log` gets one line for each event: `HH:MM:SS <event> <url> <key>=<value> ...`, a
+     maximum of LOG_LINE_MAX (160) characters. It has no level and no process ID. A URL has no
+     scheme and no fragment. A path segment of more than 24 characters and a query value of more
+     than 4 characters are cut.
+  4. At the open of the files, the server keeps the newest LOG_KEEP (5) pairs of the folder,
+     with the new pair.
 - **Alternative Flow:**
-  - The file is larger than LOG_MAX_SIZE (10 MiB) at start → the server renames it to `.1`.
-  - LOG_LEVEL is `debug` → the server also writes the result text, a maximum of
+  - Events come before `initialize` → the server keeps them, and writes them when it opens the
+    files. The server stops before `initialize` → the folder is `unknown`.
+  - LOG_LEVEL is `debug` → the server also writes the result text into `.log.json`, a maximum of
     DEBUG_TEXT_MAX (20000) characters.
+- **Note:** The name of an error event ends in `_error` or `_failed`.
 
 #### REQ-051 — No secrets in the log
 
@@ -425,7 +465,9 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | XVFB_START_TIMEOUT | 10000 | ms | — | Maximum time until Xvfb is ready |
 | FONT_PACKAGES | fonts-liberation, fonts-dejavu-core, fonts-noto-color-emoji | — | — | Fonts for a host without fonts |
 | DANGEROUS_TOOLS | browser_run_code_unsafe, browser_evaluate, browser_file_upload, browser_drop | — | — | Tools that are disabled by default |
-| LOG_FILE | `.local_assets/logs/browser-automation-x-mcp.log` | — | `BROWSER_AUTOMATION_X_MCP_LOG_FILE` | Log file |
+| LOG_DIR | `.local_assets/logs/` | — | `BROWSER_AUTOMATION_X_MCP_LOG_DIR` | Folder of the log folders of the clients |
+| LOG_LINE_MAX | 160 | characters | — | Maximum length of a line in the `.log` file |
+| LOG_KEEP | 5 | file pairs | — | Log file pairs that stay for each client |
 | LOG_LEVEL | info | — | `BROWSER_AUTOMATION_X_MCP_LOG_LEVEL` | `error`, `info` or `debug` |
 | LOG_SECRETS | unset | — | `BROWSER_AUTOMATION_X_MCP_LOG_SECRETS` | `1` logs the values of the secret arguments |
 | SERVER_NAME | browser-automation-x-mcp | — | — | Server name for the client |
@@ -435,6 +477,6 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | FILL_ROUNDS | 3 | rounds | — | Maximum fill and submit rounds in one call |
 | MASK | `***` | — | — | Replacement of a masked value |
 | DISCOVER | unset | — | `BROWSER_AUTOMATION_X_MCP_DISCOVER` | `1` turns on the discovery mode |
-| DISCOVERED_FILE | `.local_assets/discovered-fields.ini` | — | — | Fields that the discovery mode found |
-| LOG_MAX_SIZE | 10 | MiB | — | Size of the log file that causes a rotation |
+| DISCOVERED_FILE | `.local_assets/discovered-fields.ini` | — | — | Fields and buttons that the discovery mode found |
+| DISCOVER_WAIT | 5000 | ms | — | Maximum wait for a field or a button after a submit |
 | DEBUG_TEXT_MAX | 20000 | characters | — | Result text in a debug entry |
