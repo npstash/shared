@@ -1,6 +1,6 @@
 // API of a fill provider. A provider gives the values for the field names of fields.ini, e.g. "password".
 // To add a provider: make providers-form-fill/<name>/index.js (default export: a FillProvider subclass)
-// and providers-form-fill/<name>/config.template.ini, then add <name> to "[fill] providers" in facade.ini.
+// and providers-form-fill/<name>/config.template.ini, then add <name> to "[fill] providers" in server.ini.
 // The config of the provider is provider-<name>.ini in the config folder (see src/paths.js).
 //
 // ctx = { host, url, elicit }

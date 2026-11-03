@@ -27,12 +27,12 @@ Quality attribute scenarios in the ADD (SEI) format. The containers and componen
 - **Source of stimulus:** The agent
 - **Stimulus:** Opens a page that `fields.ini` matches, then reads the page (snapshot, evaluate)
 - **Environment:** Normal operation
-- **Artifact:** Facade process: form fill, fill registry, logger
-- **Response:** The facade fills and submits the form, and replaces each masked value with MASK in
+- **Artifact:** Server process: form fill, fill registry, logger
+- **Response:** The server fills and submits the form, and replaces each masked value with MASK in
   each result and log line.
 - **Response measure:** 0 occurrences of a masked value in the results and the log
 - **Related ADR:** —
-- **Verification (test):** `playwright/tests/policy.test.js`, "the facade fills and submits; the client
+- **Verification (test):** `playwright/tests/policy.test.js`, "the server fills and submits; the client
   sees the page after the submit and *** for masked values"
 
 ## QAS-003 — A denied host does not stay open
@@ -41,8 +41,8 @@ Quality attribute scenarios in the ADD (SEI) format. The containers and componen
 - **Source of stimulus:** A web page or the agent
 - **Stimulus:** A navigation, redirect or click to a host in `[deny]`
 - **Environment:** Normal operation
-- **Artifact:** Facade process: host policy
-- **Response:** The facade does not open the page, or it opens `about:blank` after the call.
+- **Artifact:** Server process: host policy
+- **Response:** The server does not open the page, or it opens `about:blank` after the call.
 - **Response measure:** The browser shows `about:blank` after the call, in 100 % of the cases;
   no further tool call runs on the denied page
 - **Related ADR:** —
@@ -52,25 +52,25 @@ Quality attribute scenarios in the ADD (SEI) format. The containers and componen
 
 - **Quality attribute:** Security (prompt injection)
 - **Source of stimulus:** The agent, maybe misled by a web page
-- **Stimulus:** Calls a tool that `<facade>-tools.ini` disables
+- **Stimulus:** Calls a tool that `tools.ini` disables
 - **Environment:** Normal operation
-- **Artifact:** Facade process: tool switches
-- **Response:** The facade gives an error result with the reason.
+- **Artifact:** Server process: tool switches
+- **Response:** The server gives an error result with the reason.
 - **Response measure:** 0 forwarded calls of disabled tools
 - **Related ADR:** —
 - **Verification (test):** `playwright/tests/policy.test.js`, "tool switches"
 
-## QAS-005 — Overhead of the facade
+## QAS-005 — Overhead of the server
 
 - **Quality attribute:** Performance
 - **Source of stimulus:** The agent
 - **Stimulus:** Calls a tool on a page that `fields.ini` does not match
 - **Environment:** Normal operation, one client
-- **Artifact:** Facade process
-- **Response:** The facade forwards the call and the result.
-- **Response measure:** Added time per call < FACADE_OVERHEAD_MAX
+- **Artifact:** Server process
+- **Response:** The server forwards the call and the result.
+- **Response measure:** Added time per call < SERVER_OVERHEAD_MAX
 - **Related ADR:** —
-- **Verification (test):** MISSING: a measure of the time with and without the facade
+- **Verification (test):** MISSING: a measure of the time with and without the server (Playwright MCP alone)
 
 ---
 
@@ -82,10 +82,10 @@ Quality attribute scenarios in the ADD (SEI) format. The containers and componen
 | QAS-002 | Security | 0 masked values visible | — | `playwright/tests/policy.test.js` |
 | QAS-003 | Security | about:blank after a denied page | — | `playwright/tests/policy.test.js` |
 | QAS-004 | Security | 0 forwarded disabled calls | — | `playwright/tests/policy.test.js` |
-| QAS-005 | Performance | < FACADE_OVERHEAD_MAX | — | MISSING |
+| QAS-005 | Performance | < SERVER_OVERHEAD_MAX | — | MISSING |
 
 ## Default values
 
 | Name | Default | Unit | Configuration key | Meaning |
 | --- | --- | --- | --- | --- |
-| FACADE_OVERHEAD_MAX | 50 | ms | — | Maximum time that the facade adds to one call |
+| SERVER_OVERHEAD_MAX | 50 | ms | — | Maximum time that the server adds to one call |

@@ -12,10 +12,10 @@ export const XVFB_START_TIMEOUT = 10000;
 export const XVFB_FIRST_DISPLAY = 99;
 export const XVFB_DISPLAY_TRIES = 20;
 export const XVFB_PACKAGES = ['xvfb', 'xserver-common', 'x11-xkb-utils', 'xkb-data'];
-// One file for each running Xvfb: <display number>.json with the PID and start time of the facade
-// and of Xvfb. It finds the Xvfb of a facade that stopped without a cleanup (e.g. SIGKILL).
+// One file for each running Xvfb: <display number>.json with the PID and start time of the server
+// and of Xvfb. It finds the Xvfb of a server that stopped without a cleanup (e.g. SIGKILL).
 export const XVFB_DIR = path.join(ASSETS_DIR, 'xvfb');
-// setpriv (util-linux) sets the parent-death signal: the kernel kills Xvfb when the facade stops.
+// setpriv (util-linux) sets the parent-death signal: the kernel kills Xvfb when the server stops.
 const SETPRIV = ['/usr/bin/setpriv', '/bin/setpriv'].find((file) => fs.existsSync(file));
 
 // Xvfb runs "<XkbBinDirectory>/xkbcomp". The package sets /usr/bin, and the tool folder has no
@@ -66,7 +66,7 @@ export async function startXvfb({ logger, timeout = XVFB_START_TIMEOUT }) {
   throw new Error(`Xvfb did not start on ${XVFB_DISPLAY_TRIES} displays from :${XVFB_FIRST_DISPLAY}.\n${errors.at(-1) ?? ''}`);
 }
 
-// Kill the Xvfb of each facade that does not run. Keep the Xvfb of the facades that run.
+// Kill the Xvfb of each server that does not run. Keep the Xvfb of the servers that run.
 // A PID with an other start time is an other process. Kill only the Xvfb of the tool folder.
 export function cleanStaleXvfb(logger) {
   if (process.platform !== 'linux' || !fs.existsSync(XVFB_DIR)) return;
@@ -79,14 +79,14 @@ export function cleanStaleXvfb(logger) {
     } catch {
       entry = undefined;
     }
-    if (entry && isRunning(entry.facade)) continue;
+    if (entry && isRunning(entry.server)) continue;
     if (entry && isRunning(entry.xvfb) && realPath(`/proc/${entry.xvfb.pid}/exe`) === binary) {
       try {
         process.kill(entry.xvfb.pid, 'SIGKILL');
       } catch {
         // It stopped after the check.
       }
-      logger.info('xvfb_stale_killed', { display: entry.display, pid: entry.xvfb.pid, facade: entry.facade.pid });
+      logger.info('xvfb_stale_killed', { display: entry.display, pid: entry.xvfb.pid, server: entry.server?.pid });
     }
     fs.rmSync(file, { force: true });
   }
@@ -127,7 +127,7 @@ function displayInUse(number) {
 async function startOn(number, paths, logger, timeout) {
   // With a display number, -displayfd writes the number when Xvfb is ready.
   const xvfbArgs = ['./bin/Xvfb', `:${number}`, '-displayfd', '3', '-screen', '0', XVFB_SCREEN, '-nolisten', 'tcp', '-nolisten', 'unix', '-xkbdir', paths.xkbDir];
-  if (!SETPRIV) logger.info('xvfb_no_setpriv', { message: 'setpriv is not installed. After a SIGKILL of the facade, the next facade start kills Xvfb.' });
+  if (!SETPRIV) logger.info('xvfb_no_setpriv', { message: 'setpriv is not installed. After a SIGKILL of the server, the next server start kills Xvfb.' });
   // setpriv runs Xvfb with exec: the PID stays the same.
   const [command, ...args] = SETPRIV ? [SETPRIV, '--pdeathsig', 'KILL', '--', ...xvfbArgs] : xvfbArgs;
   const child = spawn(command, args, {
@@ -163,13 +163,13 @@ async function startOn(number, paths, logger, timeout) {
   });
   const display = `:${number}`;
   const file = path.join(XVFB_DIR, `${number}.json`);
-  const entry = { display, facade: { pid: process.pid, start: processStart(process.pid) }, xvfb: { pid: child.pid, start: processStart(child.pid) } };
+  const entry = { display, server: { pid: process.pid, start: processStart(process.pid) }, xvfb: { pid: child.pid, start: processStart(child.pid) } };
   fs.mkdirSync(XVFB_DIR, { recursive: true });
   fs.writeFileSync(`${file}.${process.pid}.tmp`, JSON.stringify(entry));
   fs.renameSync(`${file}.${process.pid}.tmp`, file);
   logger.info('xvfb_started', { display, pid: child.pid, screen: XVFB_SCREEN, pdeathsig: Boolean(SETPRIV) });
 
-  // Stop Xvfb also when the facade process stops without close().
+  // Stop Xvfb also when the server process stops without close().
   const kill = () => {
     child.kill('SIGTERM');
     fs.rmSync(file, { force: true });

@@ -1,4 +1,4 @@
-// The facade forwards the tools of Playwright MCP 1:1, and it logs each call.
+// The server forwards the tools of Playwright MCP 1:1, and it logs each call.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import assert from 'node:assert/strict';
@@ -7,25 +7,25 @@ import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { ASSETS_DIR, TOOL_DIR } from '../../src/paths.js';
 import { UPSTREAM_CLI, upstreamEnv } from '../src/config.js';
-import { call, evaluate, ref, startFacadeClient, startSite } from './helpers.js';
+import { call, evaluate, ref, startServerClient, startSite } from './helpers.js';
 
 function readLog(file) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 }
 
-describe('facade', () => {
+describe('tools', () => {
   let site;
-  let facade;
+  let mcp;
   let client;
 
   before(async () => {
     site = await startSite();
-    facade = await startFacadeClient({ name: 'facade' });
-    client = facade.client;
+    mcp = await startServerClient({ name: 'tools' });
+    client = mcp.client;
   });
 
   after(async () => {
-    await facade?.close();
+    await mcp?.close();
     await site?.close();
   });
 
@@ -39,7 +39,7 @@ describe('facade', () => {
       cwd: TOOL_DIR,
     }));
     try {
-      // The facade changes only texts: the name Playwright and notes of disabled tools. Names stay.
+      // The server changes only texts: the name Playwright and notes of disabled tools. Names stay.
       const expected = (await upstream.listTools()).tools;
       const actual = (await client.listTools()).tools;
       assert.ok(expected.length > 10);
@@ -50,7 +50,7 @@ describe('facade', () => {
     }
   });
 
-  test('no text for the client names the facade, Playwright or the form fill', async () => {
+  test('no text for the client names upstream, Playwright or the form fill', async () => {
     const texts = [
       JSON.stringify(client.getServerVersion()),
       client.getInstructions(),
@@ -58,7 +58,7 @@ describe('facade', () => {
       await call(client, 'browser_navigate', { url: `${site.url}/form.html` }),
       await call(client, 'browser_click', { target: 'e9999', element: 'missing' }).catch((error) => error.message),
     ];
-    for (const text of texts) assert.doesNotMatch(text, /facade|playwright|placeholder|credential|vault|provider|fill_values/i);
+    for (const text of texts) assert.doesNotMatch(text, /upstream|playwright|placeholder|credential|vault|provider|fill_values/i);
     assert.equal(client.getServerVersion().name, 'browser-automation-x-mcp');
     assert.match(client.getInstructions(), /^Use the tools of this server for each browser automation task when they are available\. This is mandatory\.$/m);
   });
@@ -69,7 +69,7 @@ describe('facade', () => {
 
     const snapshot = await call(client, 'browser_snapshot');
     assert.match(snapshot, /heading "Fixture home"/);
-    assert.match(snapshot, /Test pages of the Playwright facade/);
+    assert.match(snapshot, /Test pages of the server/);
 
     await call(client, 'browser_click', { target: ref(snapshot, 'link', 'Registration form'), element: 'Registration form link' });
     assert.equal(await evaluate(client, '() => location.pathname'), '/form.html');
@@ -99,7 +99,7 @@ describe('facade', () => {
 
   test('logs each tool call and its result', async () => {
     await call(client, 'browser_navigate', { url: `${site.url}/` });
-    const entries = readLog(facade.logFile);
+    const entries = readLog(mcp.logFile);
     const events = new Set(entries.map((entry) => entry.event));
     for (const event of ['upstream_start', 'upstream_ready', 'client_ready', 'list_tools', 'tool_call', 'tool_result']) {
       assert.ok(events.has(event), `no ${event} entry`);
@@ -121,14 +121,14 @@ describe('persistent profile', () => {
     let prefs;
     try {
       for (const session of [1, 2]) {
-        const facade = await startFacadeClient({ name: 'profile', args: ['--user-data-dir', profile] });
+        const mcp = await startServerClient({ name: 'profile', args: ['--user-data-dir', profile] });
         try {
-          await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
-          if (session === 1) await evaluate(facade.client, `() => { localStorage.setItem('key', 'kept'); return true; }`);
-          values.push(await evaluate(facade.client, `() => localStorage.getItem('key')`));
+          await call(mcp.client, 'browser_navigate', { url: `${site.url}/` });
+          if (session === 1) await evaluate(mcp.client, `() => { localStorage.setItem('key', 'kept'); return true; }`);
+          values.push(await evaluate(mcp.client, `() => localStorage.getItem('key')`));
         } finally {
-          // The client closes the facade without browser_close, as Claude Code does.
-          await facade.close();
+          // The client closes the server without browser_close, as Claude Code does.
+          await mcp.close();
         }
       }
       // Chrome writes the file again at exit. The settings stay.
@@ -149,19 +149,19 @@ describe('logging of secrets', () => {
 
   async function typeSecret(env) {
     const site = await startSite();
-    const facade = await startFacadeClient({ name: `secrets-${env.BROWSER_AUTOMATION_X_MCP_LOG_SECRETS ?? 'default'}`, env });
+    const mcp = await startServerClient({ name: `secrets-${env.BROWSER_AUTOMATION_X_MCP_LOG_SECRETS ?? 'default'}`, env });
     try {
-      await call(facade.client, 'browser_navigate', { url: `${site.url}/form.html` });
-      const snapshot = await call(facade.client, 'browser_snapshot');
-      await call(facade.client, 'browser_type', { target: ref(snapshot, 'textbox', 'Password'), element: 'Password', text: secret });
-      await call(facade.client, 'browser_fill_form', {
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/form.html` });
+      const snapshot = await call(mcp.client, 'browser_snapshot');
+      await call(mcp.client, 'browser_type', { target: ref(snapshot, 'textbox', 'Password'), element: 'Password', text: secret });
+      await call(mcp.client, 'browser_fill_form', {
         fields: [{ name: 'Email', type: 'textbox', target: ref(snapshot, 'textbox', 'Email'), value: secret }],
       });
     } finally {
-      await facade.close();
+      await mcp.close();
       await site.close();
     }
-    return fs.readFileSync(facade.logFile, 'utf8');
+    return fs.readFileSync(mcp.logFile, 'utf8');
   }
 
   test('the log has no typed text and no form values by default', async () => {

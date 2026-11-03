@@ -1,9 +1,8 @@
 @echo off
-REM Launcher of the browser tool facades. Each facade is an MCP server on stdio.
-REM   run.bat <facade> [args]   start a facade, e.g. "run.bat playwright --isolated"
-REM   run.bat install           make the runtime and install the browsers, then stop
-REM   run.bat test              run the tests of the shared parts and of each facade
-REM A facade is a folder with src\server.js (e.g. playwright\).
+REM Launcher of the MCP server browser-automation-x-mcp on stdio.
+REM   run.bat [args]    start the server, e.g. "run.bat --config-dir DIR"
+REM   run.bat install   make the runtime and install the browser, then stop
+REM   run.bat test      run the tests
 REM stdout is the MCP channel. Send all setup output to stderr.
 setlocal EnableExtensions
 set "DIR=%~dp0"
@@ -28,39 +27,32 @@ set "npm_config_cache=%ASSETS%\npm-cache"
 if not defined PLAYWRIGHT_BROWSERS_PATH set "PLAYWRIGHT_BROWSERS_PATH=%ASSETS%\browsers\%PLATFORM%"
 
 REM 2. Node.js packages in node_modules\, again when package-lock.json changes.
-fc /b "%DIR%\package-lock.json" "%DIR%\node_modules\.facade-lock" >nul 2>&1
+fc /b "%DIR%\package-lock.json" "%DIR%\node_modules\.bax-lock" >nul 2>&1
 if errorlevel 1 call :install_packages || exit /b 1
 
-REM 3. Playwright facade: Chromium, again when the Playwright version changes.
+REM 3. Chromium, again when the Playwright version changes.
 for /f "usebackq delims=" %%v in (`node -p "require(process.argv[1]).version" "%DIR%\node_modules\playwright-core\package.json"`) do set "PW_VERSION=%%v"
-if not exist "%PLAYWRIGHT_BROWSERS_PATH%\.facade-chromium-%PW_VERSION%" call :install_browser || exit /b 1
+if not exist "%PLAYWRIGHT_BROWSERS_PATH%\.bax-chromium-%PW_VERSION%" call :install_browser || exit /b 1
 
 if /i "%~1"=="install" (
     echo run.bat: the runtime is ready 1>&2
     exit /b 0
 )
 if /i "%~1"=="test" goto :tests
-set "FACADE=%~1"
-if "%FACADE%"=="" goto :usage
-if not exist "%DIR%\%FACADE%\src\server.js" goto :usage
-REM Give each argument after the facade name to the facade.
+REM Give each argument to the server.
 set "ARGS="
 :collect
-shift
 if "%~1"=="" goto :start
 set ARGS=%ARGS% %1
+shift
 goto :collect
 :start
-node "%DIR%\%FACADE%\src\server.js" %ARGS%
+node "%DIR%\playwright\src\server.js" %ARGS%
 exit /b %errorlevel%
-
-:usage
-echo run.bat: give a facade, e.g. run.bat playwright 1>&2
-exit /b 2
 
 :tests
 pushd "%DIR%"
-node --test --test-concurrency=1 "tests/*.test.js" "*/tests/*.test.js"
+node --test --test-concurrency=1 "tests/*.test.js" "playwright/tests/*.test.js"
 set "RC=%errorlevel%"
 popd
 exit /b %RC%
@@ -89,11 +81,11 @@ call npm ci --no-audit --no-fund --loglevel=error 1>&2
 set "RC=%errorlevel%"
 popd
 if not "%RC%"=="0" exit /b %RC%
-copy /y "%DIR%\package-lock.json" "%DIR%\node_modules\.facade-lock" >nul
+copy /y "%DIR%\package-lock.json" "%DIR%\node_modules\.bax-lock" >nul
 exit /b 0
 
 :install_browser
 echo run.bat: install Chromium for Playwright %PW_VERSION% 1>&2
 node "%DIR%\node_modules\@playwright\mcp\cli.js" install-browser chromium 1>&2 || exit /b 1
-type nul > "%PLAYWRIGHT_BROWSERS_PATH%\.facade-chromium-%PW_VERSION%"
+type nul > "%PLAYWRIGHT_BROWSERS_PATH%\.bax-chromium-%PW_VERSION%"
 exit /b 0

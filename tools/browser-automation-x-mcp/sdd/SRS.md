@@ -1,6 +1,6 @@
 # Software Requirements Specification (SRS) — browser-automation-x-mcp
 
-The required behaviour of the system. The system is "the facade". "Upstream" is Playwright MCP.
+The required behaviour of the system. The system is "the server". "Upstream" is Playwright MCP.
 "The client" is the MCP client, e.g. Claude Code. The containers are in [DESIGN.md](DESIGN.md).
 
 **Requirement format:** Structured
@@ -12,48 +12,49 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 #### REQ-001 — Forward the tools of upstream
 
 - **Trigger:** The client sends `tools/list` or `tools/call`.
-- **Basic Flow:** The facade shall forward the request to upstream and give the answer of upstream
+- **Basic Flow:** The server shall forward the request to upstream and give the answer of upstream
   to the client. The names and input schemas of the tools shall stay the same.
 - **Alternative Flow:**
-  - `tools/list` → the facade adds notes for disabled tools (REQ-020) and changes the texts
+  - `tools/list` → the server adds notes for disabled tools (REQ-020) and changes the texts
     (REQ-005). It adds no tools.
-  - A step of sections 3–5 stops the call → the facade gives an error result (UI-02).
-- **Exception Flow:** Upstream gives an error → the facade gives the same error to the client.
+  - A step of sections 3–5 stops the call → the server gives an error result (UI-02).
+- **Exception Flow:** Upstream gives an error → the server gives the same error to the client.
 
 #### REQ-002 — Forward roots, progress and cancellation
 
 - **Basic Flow:**
-  1. The facade shall answer `roots/list` of upstream with the roots of the client.
-  2. The facade shall forward progress notifications of a call to the client.
-  3. The facade shall forward the cancellation of a call to upstream.
-  4. The facade shall forward `notifications/tools/list_changed` of upstream to the client.
-- **Alternative Flow:** The client has no roots capability → the facade gives an empty list.
+  1. The server shall answer `roots/list` of upstream with the roots of the client.
+  2. The server shall forward progress notifications of a call to the client.
+  3. The server shall forward the cancellation of a call to upstream.
+  4. The server shall forward `notifications/tools/list_changed` of upstream to the client.
+- **Alternative Flow:** The client has no roots capability → the server gives an empty list.
 
 #### REQ-003 — Close the browser at shutdown
 
 - **Pre-condition:** A tool call ran after the last `browser_close`.
-- **Trigger:** The client closes the connection, or the facade gets SIGINT or SIGTERM.
-- **Basic Flow:** The facade shall call `browser_close` of upstream, then stop upstream.
-- **Exception Flow:** `browser_close` takes longer than CLOSE_TIMEOUT (5000 ms) → the facade logs
+- **Trigger:** The client closes the connection, or the server gets SIGINT or SIGTERM.
+- **Basic Flow:** The server shall call `browser_close` of upstream, then stop upstream.
+- **Exception Flow:** `browser_close` takes longer than CLOSE_TIMEOUT (5000 ms) → the server logs
   the error and stops upstream.
 - **Post-condition:** A persistent profile keeps its cookies and localStorage.
 
 #### REQ-005 — Texts for the client
 
-- **Basic Flow:** The texts for the client shall not name the facade, Playwright, the form fill
+- **Basic Flow:** The texts for the client shall not name upstream, Playwright, the form fill
   or its providers.
   1. The server name shall be SERVER_NAME (browser-automation-x-mcp).
   2. The instructions shall be: "Use the tools of this server for each browser automation task
      when they are available. This is mandatory."
-  3. The facade shall remove the name Playwright from the tool descriptions and schemas.
-  4. The facade shall remove the section `### Ran Playwright code` from each result.
-  5. Error results shall not name the facade or a config file (UI-02).
+  3. The server shall remove the name Playwright from the tool descriptions and schemas.
+  4. The server shall remove the section `### Ran Playwright code` from each result.
+  5. Error results shall not name upstream or a config file (UI-02).
 
 #### REQ-004 — Run upstream as a child process
 
-- **Trigger:** The client starts the facade.
-- **Basic Flow:** The facade shall start upstream with each command-line argument of the facade.
-- **Exception Flow:** Upstream stops → the facade stops with exit code 1.
+- **Trigger:** The client starts the server.
+- **Basic Flow:** The server shall start upstream with each command-line argument of the server,
+  except `--config-dir`, `--browser` and `--headless`.
+- **Exception Flow:** Upstream stops → the server stops with exit code 1.
 
 ## 2. Runtime and portability
 
@@ -65,11 +66,17 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 - **Alternative Flow:** The runtime is in the tool folder → the launcher uses it.
 - **Exception Flow:** The checksum is wrong → the launcher deletes the file and stops with an error.
 
-#### REQ-011 — Chromium in the tool folder
+#### REQ-011 — Only Chromium, in the tool folder
 
-- **Basic Flow:** The launcher shall install DEFAULT_BROWSER (chromium) for the pinned Playwright
-  version into the tool folder.
-- **Alternative Flow:** The variable `CI` is `true` → the launcher also installs the OS packages.
+- **Basic Flow:**
+  1. The launcher shall install BROWSER (chromium) for the pinned Playwright version into the
+     tool folder.
+  2. The server shall always start BROWSER (chromium). It shall give
+     `PLAYWRIGHT_MCP_BROWSER=chromium` to upstream, also with `--config`.
+- **Alternative Flow:**
+  - The variable `CI` is `true` → the launcher also installs the OS packages.
+  - `--browser` or `PLAYWRIGHT_MCP_BROWSER` is given → the server ignores it, without an error.
+    It removes `--browser` and logs `ignored`.
 
 #### REQ-012 — Missing Linux libraries without root
 
@@ -80,7 +87,7 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
   2. It shall find the Ubuntu package of each library and download it with `apt-get download`.
   3. It shall unpack the packages into the tool folder.
   4. It shall repeat steps 1–3 a maximum of SYSLIBS_ROUNDS (10) times.
-  5. The facade shall give the folder of the libraries to Chromium.
+  5. The server shall give the folder of the libraries to Chromium.
 - **Alternative Flow:**
   - The host has all libraries → the launcher downloads nothing.
   - The host has no apt package lists → the launcher makes private lists in the tool folder, then
@@ -108,16 +115,16 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 
 #### REQ-014 — Files only in the tool folder
 
-- **Basic Flow:** The facade shall keep the browser profiles, temp files and the browser registry
+- **Basic Flow:** The server shall keep the browser profiles, temp files and the browser registry
   (Linux) in the tool folder. It shall keep the output files (snapshots, screenshots) in
   OUTPUT_DIR of the working folder: the agent reads them.
 - **Alternative Flow:**
-  - The user gives the value with an argument or a variable → the facade keeps it.
-  - The tool folder cannot hold Unix sockets → the facade keeps the temp folder of the OS.
+  - The user gives the value with an argument or a variable → the server keeps it.
+  - The tool folder cannot hold Unix sockets → the server keeps the temp folder of the OS.
 
 #### REQ-015 — Render mode of the browser
 
-- **Basic Flow:** The facade shall select the render mode with `RENDER_MODE`:
+- **Basic Flow:** The server shall select the render mode with `RENDER_MODE`:
   RENDER_MODE (DEFAULT).
   | Value | Host with a display | WSL | Linux without a display |
   | --- | --- | --- | --- |
@@ -126,14 +133,14 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
   | `HEADED_INVISIBLE` | Xvfb (REQ-018); not Linux: error | Xvfb | Xvfb |
   | `HEADLESS` | no window | no window | no window |
 - **Alternative Flow:**
-  - `--headless` or `PLAYWRIGHT_MCP_HEADLESS` is given → the facade ignores it, without an error.
+  - `--headless` or `PLAYWRIGHT_MCP_HEADLESS` is given → the server ignores it, without an error.
     It removes `--headless` and sets `PLAYWRIGHT_MCP_HEADLESS` for upstream.
   - The user gives `--config` → the render mode also applies. The variable overrides the file.
   - The user gives `--cdp-endpoint`, `--extension` or `--endpoint` → the render mode has no
     effect.
 - **Exception Flow:**
-  - The value is not known → the facade stops with an error.
-  - The mode needs Xvfb, and the OS is not Linux → the facade stops with an error. The facade
+  - The value is not known → the server stops with an error.
+  - The mode needs Xvfb, and the OS is not Linux → the server stops with an error. The server
     never selects `HEADLESS` in place of an other mode.
 - **Note:** WSL: `WSL_DISTRO_NAME` is set, or `/proc/version` contains `microsoft`. No display: Linux,
   and `DISPLAY` and `WAYLAND_DISPLAY` are not set.
@@ -142,70 +149,70 @@ The required behaviour of the system. The system is "the facade". "Upstream" is 
 
 - **Pre-condition:** The render mode is `HEADED_INVISIBLE` (REQ-015).
 - **Basic Flow:**
-  1. The facade shall start Xvfb on the first free display from XVFB_FIRST_DISPLAY (99), with
+  1. The server shall start Xvfb on the first free display from XVFB_FIRST_DISPLAY (99), with
      XVFB_SCREEN (1920x1080x24).
   2. Xvfb shall listen only on the abstract socket of Linux.
-  3. The facade shall give the display to upstream and `PLAYWRIGHT_MCP_HEADLESS=false`.
-  4. The facade shall record the PID and start time of itself and of Xvfb in XVFB_DIR.
-  5. The facade shall stop Xvfb and delete the record when it stops.
-  6. The kernel shall stop Xvfb when the facade process stops (parent-death signal of `setpriv`).
-  7. At each start, the facade shall kill each Xvfb of the tool folder whose facade does not run,
+  3. The server shall give the display to upstream and `PLAYWRIGHT_MCP_HEADLESS=false`.
+  4. The server shall record the PID and start time of itself and of Xvfb in XVFB_DIR.
+  5. The server shall stop Xvfb and delete the record when it stops.
+  6. The kernel shall stop Xvfb when the server process stops (parent-death signal of `setpriv`).
+  7. At each start, the server shall kill each Xvfb of the tool folder whose server does not run,
      and delete its record. It shall not reuse an Xvfb.
 - **Alternative Flow:**
-  - A display has a socket or a lock file, or Xvfb does not start on it → the facade tries the
+  - A display has a socket or a lock file, or Xvfb does not start on it → the server tries the
     next display, a maximum of XVFB_DISPLAY_TRIES (20) displays.
-  - `setpriv` is not installed → the facade starts Xvfb without the parent-death signal, and
+  - `setpriv` is not installed → the server starts Xvfb without the parent-death signal, and
     logs it. Step 7 stops a leftover Xvfb.
 - **Exception Flow:**
-  - Xvfb is not installed → the facade stops with an error that gives `run.sh install`.
-  - Xvfb is not ready in XVFB_START_TIMEOUT (10000 ms) → the facade tries the next display.
+  - Xvfb is not installed → the server stops with an error that gives `run.sh install`.
+  - Xvfb is not ready in XVFB_START_TIMEOUT (10000 ms) → the server tries the next display.
 
 #### REQ-016 — No bubbles of the browser
 
-- **Trigger:** The browser starts with a persistent profile of a Chromium browser.
-- **Basic Flow:** Before the start, the facade shall write settings into `Default/Preferences` of
+- **Trigger:** The browser starts with a persistent profile.
+- **Basic Flow:** Before the start, the server shall write settings into `Default/Preferences` of
   the profile. The settings stop the password manager, its leak check, the translate bar, the
   "restore pages" bubble, autofill prompts and permission prompts. Other settings stay.
 - **Alternative Flow:**
-  - `--isolated`, or a browser that is not Chromium → the facade writes no settings.
-  - The file is missing or damaged → the facade writes a file with only these settings.
+  - `--isolated` → the server writes no settings.
+  - The file is missing or damaged → the server writes a file with only these settings.
 - **Post-condition:** No bubble of the browser covers the page.
 
 ## 3. Tool switches
 
 #### REQ-019 — Config folder
 
-- **Trigger:** The facade starts.
-- **Basic Flow:** The facade shall read its config files from the folder that `--config-dir DIR`
-  gives. A relative path is relative to the working folder. The facade shall not give the
+- **Trigger:** The server starts.
+- **Basic Flow:** The server shall read its config files from the folder that `--config-dir DIR`
+  gives. A relative path is relative to the working folder. The server shall not give the
   argument to upstream. The files are in [DESIGN.md](DESIGN.md#data-model).
-- **Alternative Flow:** A config file is missing → the facade shall copy its template from the
+- **Alternative Flow:** A config file is missing → the server shall copy its template from the
   tool folder.
-- **Exception Flow:** `--config-dir` is missing → the facade does not start. It writes the error
+- **Exception Flow:** `--config-dir` is missing → the server does not start. It writes the error
   to stderr.
 
 #### REQ-020 — Tool list in the config
 
-- **Trigger:** The facade starts.
-- **Basic Flow:** The facade shall add a line `<tool> = enabled|disabled` to `playwright-tools.ini` for
+- **Trigger:** The server starts.
+- **Basic Flow:** The server shall add a line `<tool> = enabled|disabled` to `tools.ini` for
   each tool that the file does not list. The default is `disabled` for the tools in
   DANGEROUS_TOOLS and `enabled` for the others.
 - **Alternative Flow:**
-  - A value is not `enabled` or `disabled` → the facade treats the tool as disabled and logs it.
-  - The user changes the file → the facade uses the new values at the next call.
-- **Post-condition:** `playwright-tools.ini` lists each tool of the facade, sorted.
+  - A value is not `enabled` or `disabled` → the server treats the tool as disabled and logs it.
+  - The user changes the file → the server uses the new values at the next call.
+- **Post-condition:** `tools.ini` lists each tool of the server, sorted.
 
 #### REQ-021 — Call of a disabled tool
 
 - **Trigger:** The client calls a disabled tool.
-- **Basic Flow:** The facade shall not forward the call. It shall give an error result with the
+- **Basic Flow:** The server shall not forward the call. It shall give an error result with the
   reason (UI-02).
-- **Alternative Flow:** `tools/list` → the facade lists the tool. Its description starts with
+- **Alternative Flow:** `tools/list` → the server lists the tool. Its description starts with
   `DISABLED: this tool is turned off in the configuration.` and the reason.
 
 ## 4. Form fill
 
-The agent does not fill credentials or personal data. The facade fills the fields of
+The agent does not fill credentials or personal data. The server fills the fields of
 `fields.ini` and submits the form. The agent gets the page after the submit.
 
 #### REQ-030 — Fill after a call
@@ -213,7 +220,7 @@ The agent does not fill credentials or personal data. The facade fills the field
 - **Trigger:** A result of upstream shows a page URL, and the URL matches a section of
   `fields.ini` (REQ-037).
 - **Basic Flow:**
-  1. The facade shall wait a maximum of FILL_WAIT (10000 ms) for a visible field of the section,
+  1. The server shall wait a maximum of FILL_WAIT (10000 ms) for a visible field of the section,
      in each frame of the page.
   2. It shall get the value of each visible field from the providers (REQ-031).
   3. It shall fill the fields that have a value, and submit the form (REQ-038).
@@ -221,26 +228,26 @@ The agent does not fill credentials or personal data. The facade fills the field
   5. It shall give the client a snapshot of the page after the last submit, in place of the
      result of upstream.
 - **Alternative Flow:**
-  - The facade waited for this URL before, and the page did not change by a submit → it does not
+  - The server waited for this URL before, and the page did not change by a submit → it does not
     wait. It checks the fields one time.
-  - No field is visible, or no provider has a value → the facade does nothing. The client gets the
+  - No field is visible, or no provider has a value → the server does nothing. The client gets the
     result of upstream.
-- **Exception Flow:** A provider or the page code fails → the facade logs the error and does
+- **Exception Flow:** A provider or the page code fails → the server logs the error and does
   nothing. The client gets the result of upstream. The error is not visible to the client.
 
 #### REQ-031 — Provider order
 
-- **Basic Flow:** The facade shall ask the providers in the order of `[fill] providers` in
-  `facade.ini`. The first provider that has a value gives it.
-- **Alternative Flow:** A provider has no value → the facade asks the next provider.
+- **Basic Flow:** The server shall ask the providers in the order of `[fill] providers` in
+  `server.ini`. The first provider that has a value gives it.
+- **Alternative Flow:** A provider has no value → the server asks the next provider.
 
 #### REQ-032 — Mask of filled values
 
-- **Pre-condition:** The provider of the value is masked: `[mask] <provider>` in `facade.ini` is
+- **Pre-condition:** The provider of the value is masked: `[mask] <provider>` in `server.ini` is
   not `false`.
-- **Basic Flow:** The facade shall replace the value with MASK (`***`) in each later result, for
+- **Basic Flow:** The server shall replace the value with MASK (`***`) in each later result, for
   the time of the session.
-- **Alternative Flow:** Upstream writes a text file in a call → the facade shall replace the values
+- **Alternative Flow:** Upstream writes a text file in a call → the server shall replace the values
   in it too. These are the files that the result links, and the files of the output folder that
   changed in the call. Binary files, e.g. screenshots, stay unchanged.
 - **Post-condition:** The client, the log and the text files of upstream never get a masked value
@@ -279,12 +286,12 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Alternative Flow:** The user gave the value for this host and field name before in the
   session → the provider gives it without a dialog.
 - **Exception Flow:**
-  - The user declines or cancels → error; the facade does not fill the form.
-  - No answer in ASK_TIMEOUT (300000 ms) → error; the facade does not fill the form.
+  - The user declines or cancels → error; the server does not fill the form.
+  - No answer in ASK_TIMEOUT (300000 ms) → error; the server does not fill the form.
 
 #### REQ-037 — Fields of a page
 
-- **Basic Flow:** The facade shall read `fields.ini` of the config folder. Each section is a URL
+- **Basic Flow:** The server shall read `fields.ini` of the config folder. Each section is a URL
   pattern. Each line is `<field name> = <CSS selector>`. The line `submit = <CSS selector>` is
   optional.
   1. A URL pattern is `host/path`. The host part is a host pattern (REQ-040).
@@ -296,13 +303,13 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-038 — Submit and loop guard
 
 - **Basic Flow:**
-  1. The facade shall click the element of `submit` if it is visible. Else it shall call
+  1. The server shall click the element of `submit` if it is visible. Else it shall call
      `requestSubmit()` of the form of the last filled field. Else it shall press Enter in it.
   2. It shall wait a maximum of SUBMIT_WAIT (10000 ms) for the load of the page, then for the
      end of the network requests.
   3. It shall fill each set of visible fields of a form one time only.
 - **Alternative Flow:** The same fields of the same form are visible again, e.g. after a wrong
-  password → the facade does not fill them. It logs `fill_failed`.
+  password → the server does not fill them. It logs `fill_failed`.
 - **Post-condition:** The guard is reset when a page does not match `fields.ini`.
 
 #### REQ-039 — Discovery mode
@@ -310,13 +317,13 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Pre-condition:** DISCOVER is `1`.
 - **Trigger:** A result of upstream shows a page URL.
 - **Basic Flow:**
-  1. The facade shall find the visible input fields of each frame of the page.
+  1. The server shall find the visible input fields of each frame of the page.
   2. For each field, it shall make a selector that is unique in its frame: `autocomplete`, then
      `name`, then an `id` that does not look generated, then the type.
   3. It shall propose a field name: `username`, `password`, `email`, `otp`, else the `name`.
   4. It shall write the fields into DISCOVERED_FILE, in the format of `fields.ini`. The section is
      the URL pattern of the page. A path segment that looks like an ID becomes `*`.
-- **Alternative Flow:** The file has a section for the pattern → the facade replaces it.
+- **Alternative Flow:** The file has a section for the pattern → the server replaces it.
 - **Note:** An ID segment has only digits, is a UUID, or has more than 16 characters of hex or
   base64url with a digit and a letter.
 
@@ -325,22 +332,22 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-040 — Check before a page opens
 
 - **Trigger:** The client calls `browser_navigate`, or `browser_tabs` with `action = new` and a URL.
-- **Basic Flow:** The facade shall check the host of the URL: first `[deny]`, then the allow
+- **Basic Flow:** The server shall check the host of the URL: first `[deny]`, then the allow
   provider (default: `[allow]` of `host-policy.ini`).
-- **Alternative Flow:** The URL has no host (e.g. `about:blank`) → the facade allows it.
-- **Exception Flow:** The host is blocked → the facade forwards nothing. It gives an error result
+- **Alternative Flow:** The URL has no host (e.g. `about:blank`) → the server allows it.
+- **Exception Flow:** The host is blocked → the server forwards nothing. It gives an error result
   with the URL and the list (UI-02).
 
 #### REQ-041 — Check after each call
 
 - **Trigger:** A result of upstream shows a page URL.
-- **Basic Flow:** The facade shall check the host of the page as REQ-040 says.
-- **Exception Flow:** The host is blocked → the facade opens `about:blank`. It gives an error
+- **Basic Flow:** The server shall check the host of the page as REQ-040 says.
+- **Exception Flow:** The host is blocked → the server opens `about:blank`. It gives an error
   result with the closed URL and the reason.
 
 #### REQ-042 — Record the opened hosts
 
-- **Pre-condition:** `[hosts] record` in `facade.ini` is not `false`.
+- **Pre-condition:** `[hosts] record` in `server.ini` is not `false`.
 - **Trigger:** A page of an allowed host opened.
 - **Basic Flow:** The default allow provider shall add the exact host to `[allow]`, also if a
   pattern covers it. It shall keep each section of `host-policy.ini` sorted and unique, and keep the
@@ -349,27 +356,27 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 #### REQ-043 — Host list in the config folder
 
-- **Trigger:** The facade reads the host list, and `host-policy.ini` is missing in the config folder.
-- **Basic Flow:** The facade shall copy `config/host-policy.template.ini` to it (REQ-019).
-- **Alternative Flow:** The template is missing → the facade shall write `[deny]` empty and `[allow] *`.
+- **Trigger:** The server reads the host list, and `host-policy.ini` is missing in the config folder.
+- **Basic Flow:** The server shall copy `config/host-policy.template.ini` to it (REQ-019).
+- **Alternative Flow:** The template is missing → the server shall write `[deny]` empty and `[allow] *`.
 
 ## 6. Logging
 
 #### REQ-050 — Log of each call
 
-- **Basic Flow:** The facade shall write one JSON line for each event to LOG_FILE: start, client,
+- **Basic Flow:** The server shall write one JSON line for each event to LOG_FILE: start, client,
   tool call, result (duration, error flag, size of the content), filled field, submit, failed fill,
   discovered fields, blocked host, upstream stderr, shutdown.
 - **Alternative Flow:**
-  - The file is larger than LOG_MAX_SIZE (10 MiB) at start → the facade renames it to `.1`.
-  - LOG_LEVEL is `debug` → the facade also writes the result text, a maximum of
+  - The file is larger than LOG_MAX_SIZE (10 MiB) at start → the server renames it to `.1`.
+  - LOG_LEVEL is `debug` → the server also writes the result text, a maximum of
     DEBUG_TEXT_MAX (20000) characters.
 
 #### REQ-051 — No secrets in the log
 
-- **Basic Flow:** The facade shall replace the values of the arguments `text`, `value`, `values`
+- **Basic Flow:** The server shall replace the values of the arguments `text`, `value`, `values`
   and `password` with their length.
-- **Alternative Flow:** LOG_SECRETS is `1` → the facade logs the values of the arguments.
+- **Alternative Flow:** LOG_SECRETS is `1` → the server logs the values of the arguments.
 - **Post-condition:** The log never has a value of a provider.
 
 ---
@@ -381,8 +388,8 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Purpose:** The user gives a value that the agent must not know, e.g. a phone number.
 - **Shows:** The field name and the host of the page. The note that the agent does not see the
   value.
-- **Actions:** Enter the value and accept → the facade fills it (REQ-036). Decline or cancel → the
-  facade does not fill the form.
+- **Actions:** Enter the value and accept → the server fills it (REQ-036). Decline or cancel → the
+  server does not fill the form.
 - **Feedback:** The agent gets the page after the submit, with MASK in place of the value.
 - **Realization:** An MCP elicitation form of the client, e.g. a dialog of Claude Code.
 
@@ -393,7 +400,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   Examples: "The tool <name> did not run: this tool is turned off in the configuration.",
   "Navigation blocked: <url> is not allowed. The host <host> is on the deny list."
 - **Actions:** None.
-- **Feedback:** The text does not name the facade or a config file (REQ-005).
+- **Feedback:** The text does not name upstream or a config file (REQ-005).
 - **Realization:** A tool result with `isError: true`.
 
 ---
@@ -407,13 +414,13 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | TOOL_TIMEOUT | 600000 | ms | — | Maximum time of one call without progress |
 | NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` / `run.bat` | Pinned Node.js runtime |
 | RENDER_MODE | DEFAULT | — | `RENDER_MODE` | `DEFAULT`, `HEADED`, `HEADED_INVISIBLE` or `HEADLESS` (REQ-015) |
-| DEFAULT_BROWSER | chromium | — | `--browser`, `PLAYWRIGHT_MCP_BROWSER` | Browser of upstream |
+| BROWSER | chromium | — | — | The only browser of upstream |
 | SYSLIBS_ROUNDS | 10 | rounds | — | Maximum download rounds of the missing libraries |
 | SYSLIBS_SET | xvfb1 | — | `SYSLIBS_SET` in `run.sh` | Version of the package set of the launcher |
 | XVFB_PACKAGES | xvfb, xserver-common, x11-xkb-utils, xkb-data | — | — | Packages of Xvfb |
 | XVFB_SCREEN | 1920x1080x24 | width x height x depth | — | Screen of Xvfb |
 | XVFB_FIRST_DISPLAY | 99 | — | — | First display number of Xvfb |
-| XVFB_DISPLAY_TRIES | 20 | displays | — | Maximum displays that the facade tries |
+| XVFB_DISPLAY_TRIES | 20 | displays | — | Maximum displays that the server tries |
 | XVFB_DIR | `.local_assets/xvfb/` | — | — | Records of the running Xvfb processes |
 | XVFB_START_TIMEOUT | 10000 | ms | — | Maximum time until Xvfb is ready |
 | FONT_PACKAGES | fonts-liberation, fonts-dejavu-core, fonts-noto-color-emoji | — | — | Fonts for a host without fonts |

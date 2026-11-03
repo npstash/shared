@@ -2,7 +2,7 @@
 // Set BROWSER_AUTOMATION_X_MCP_OFFLINE=1 to skip all of them.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { call, evaluate, ref, startFacadeClient } from './helpers.js';
+import { call, evaluate, ref, startServerClient } from './helpers.js';
 
 const SITES = {
   example: 'https://example.com/',
@@ -26,16 +26,16 @@ const online = Object.fromEntries(await Promise.all(
 const skip = (name) => (online[name] ? false : `${SITES[name]} is not reachable`);
 
 describe('public pages', { skip: !Object.values(online).some(Boolean) && 'no site is reachable' }, () => {
-  let facade;
+  let mcp;
   let client;
 
   before(async () => {
-    facade = await startFacadeClient({ name: 'online' });
-    client = facade.client;
+    mcp = await startServerClient({ name: 'online' });
+    client = mcp.client;
   });
 
   after(async () => {
-    await facade?.close();
+    await mcp?.close();
   });
 
   test('example.com: reads the page and follows the link', { skip: skip('example') }, async () => {

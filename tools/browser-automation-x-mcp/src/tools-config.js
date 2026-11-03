@@ -1,5 +1,5 @@
-// Tool switches of a facade (<facade>-tools.ini in the config folder). They do not change the browser tool.
-// Each facade tool has one line: "name = enabled" or "name = disabled".
+// Tool switches of the server (tools.ini in the config folder). They do not change upstream.
+// Each tool of the server has one line: "name = enabled" or "name = disabled".
 // A disabled tool stays in the tool list, but a call to it fails with the reason.
 import fs from 'node:fs';
 import { formatIni, readIni, writeFileAtomic } from './ini.js';
@@ -7,8 +7,8 @@ import { formatIni, readIni, writeFileAtomic } from './ini.js';
 const SECTION = 'tools';
 
 const HEADER = [
-  '# Tool switches of the facade: "<tool> = enabled" or "<tool> = disabled".',
-  '# The facade adds a line with the default value for each new tool when it starts.',
+  '# Tool switches of the server: "<tool> = enabled" or "<tool> = disabled".',
+  '# The server adds a line with the default value for each new tool when it starts.',
   '# A disabled tool stays in the tool list. A call to it fails with the reason.',
 ];
 
@@ -62,7 +62,7 @@ export class ToolsConfig {
     return this.states.get(name) !== false;
   }
 
-  // The text for the client. It does not name the facade or the config file.
+  // The text for the client. It does not name upstream or the config file.
   reason(name) {
     const why = this.dangerous[name] ? ` Reason: ${this.dangerous[name]}.` : '';
     return `this tool is turned off in the configuration.${why}`;

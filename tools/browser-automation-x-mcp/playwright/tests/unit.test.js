@@ -7,7 +7,7 @@ import { ASSETS_DIR } from '../../src/paths.js';
 import { redact, summarizeResult } from '../../src/logger.js';
 import { packageCandidates, parseLdd } from '../src/setup/syslibs.js';
 import { CHROME_PREFS, writeChromePrefs } from '../src/chrome-prefs.js';
-import { TMP_DIR, connectsToBrowser, renderMode, takeConfigDir, tmpDirForChromium, upstreamEnv, withoutHeadless } from '../src/config.js';
+import { TMP_DIR, connectsToBrowser, renderMode, takeConfigDir, tmpDirForChromium, upstreamEnv, withoutBrowser, withoutHeadless } from '../src/config.js';
 import { patchXkbBinDir } from '../src/xvfb.js';
 
 describe('redact', () => {
@@ -57,14 +57,15 @@ describe('upstreamEnv', () => {
     if (process.platform === 'linux') assert.equal(env.XDG_CACHE_HOME, path.join(ASSETS_DIR, 'cache'));
   });
 
-  test('gives one profile for each browser and workspace', () => {
+  test('gives one profile for each workspace', () => {
     const a = upstreamEnv([], {}, '/a').PLAYWRIGHT_MCP_USER_DATA_DIR;
     const b = upstreamEnv([], {}, '/b').PLAYWRIGHT_MCP_USER_DATA_DIR;
-    const firefox = upstreamEnv(['--browser', 'firefox'], {}, '/a').PLAYWRIGHT_MCP_USER_DATA_DIR;
-    const firefoxEq = upstreamEnv(['--browser=firefox'], {}, '/a').PLAYWRIGHT_MCP_USER_DATA_DIR;
     assert.notEqual(a, b);
-    assert.match(firefox, /-firefox-/);
-    assert.equal(firefox, firefoxEq);
+  });
+
+  test('always selects Chromium', () => {
+    assert.equal(upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox' }, cwd).PLAYWRIGHT_MCP_BROWSER, 'chromium');
+    assert.equal(upstreamEnv(['--config', 'c.json'], { PLAYWRIGHT_MCP_BROWSER: 'firefox' }, cwd).PLAYWRIGHT_MCP_BROWSER, 'chromium');
   });
 
   test('sets no profile when the user selects the profile', () => {
@@ -75,14 +76,13 @@ describe('upstreamEnv', () => {
   });
 
   test('keeps the values of the user', () => {
-    const env = upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox', PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine' }, cwd);
-    assert.equal(env.PLAYWRIGHT_MCP_BROWSER, 'firefox');
+    const env = upstreamEnv([], { PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine' }, cwd);
     assert.equal(env.PLAYWRIGHT_MCP_USER_DATA_DIR, '/mine');
   });
 
-  test('sets no PLAYWRIGHT_MCP_* default with a config file', () => {
+  test('sets no PLAYWRIGHT_MCP_* default with a config file, except the browser', () => {
     const env = upstreamEnv(['--config', 'c.json'], {}, cwd);
-    assert.equal(Object.keys(env).filter((key) => key.startsWith('PLAYWRIGHT_MCP_')).length, 0);
+    assert.deepEqual(Object.keys(env).filter((key) => key.startsWith('PLAYWRIGHT_MCP_')), ['PLAYWRIGHT_MCP_BROWSER']);
   });
 
   test('sets the temp folder only when it is given', () => {
@@ -132,6 +132,10 @@ describe('renderMode', () => {
 describe('render mode arguments', () => {
   test('removes --headless', () => {
     assert.deepEqual(withoutHeadless(['--headless', '--isolated', '--headless=true']), ['--isolated']);
+  });
+
+  test('removes --browser', () => {
+    assert.deepEqual(withoutBrowser(['--browser', 'firefox', '--isolated', '--browser=chrome']), ['--isolated']);
   });
 
   test('finds a browser that runs already', () => {

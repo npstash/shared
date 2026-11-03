@@ -1,4 +1,4 @@
-// Read and write the INI files of the facade and its providers.
+// Read and write the INI files of the server and its providers.
 // Format: "[section]" lines, "key = value" lines or plain lines (e.g. host patterns),
 // and comment lines that start with "#" or ";". There are no comments at the end of a line.
 import fs from 'node:fs';

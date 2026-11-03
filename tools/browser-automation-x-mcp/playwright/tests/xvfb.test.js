@@ -7,7 +7,7 @@ import readline from 'node:readline';
 import { after, before, describe, test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 import { XVFB_DIR, XVFB_FIRST_DISPLAY, cleanStaleXvfb, startXvfb, xvfbPaths } from '../src/xvfb.js';
-import { call, evaluate, startFacadeClient, startSite } from './helpers.js';
+import { call, evaluate, startServerClient, startSite } from './helpers.js';
 
 const skip = process.platform !== 'linux' ? 'Linux only' : !fs.existsSync(xvfbPaths().binary) ? 'Xvfb is not installed: run.sh install' : false;
 const logger = { info() {}, debug() {}, error() {} };
@@ -41,7 +41,7 @@ describe('xvfb', { skip }, () => {
       assert.match(first.display, /^:\d+$/);
       assert.ok(Number(first.display.slice(1)) >= XVFB_FIRST_DISPLAY);
       assert.notEqual(first.display, second.display);
-      assert.equal(JSON.parse(fs.readFileSync(registryFile(first.display), 'utf8')).facade.pid, process.pid);
+      assert.equal(JSON.parse(fs.readFileSync(registryFile(first.display), 'utf8')).server.pid, process.pid);
     } finally {
       first.stop();
       second.stop();
@@ -49,13 +49,13 @@ describe('xvfb', { skip }, () => {
     assert.ok(!fs.existsSync(registryFile(first.display)));
   });
 
-  test('keeps the Xvfb of a facade that runs, and kills the Xvfb of a facade that stopped', async () => {
+  test('keeps the Xvfb of a server that runs, and kills the Xvfb of a server that stopped', async () => {
     const own = await startXvfb({ logger });
     const stale = await startXvfb({ logger });
     try {
       const file = registryFile(stale.display);
       const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
-      fs.writeFileSync(file, JSON.stringify({ ...entry, facade: { pid: entry.facade.pid, start: 'other' } }));
+      fs.writeFileSync(file, JSON.stringify({ ...entry, server: { pid: entry.server.pid, start: 'other' } }));
       cleanStaleXvfb(logger);
       assert.ok(await waitUntilStopped(entry.xvfb.pid));
       assert.ok(!fs.existsSync(file));
@@ -67,7 +67,7 @@ describe('xvfb', { skip }, () => {
     }
   });
 
-  test('stops Xvfb when its facade gets SIGKILL', async () => {
+  test('stops Xvfb when its server gets SIGKILL', async () => {
     const script = `const { startXvfb } = await import(${JSON.stringify(XVFB_MODULE)});
       const { display } = await startXvfb({ logger: { info() {}, debug() {}, error() {} } });
       console.log(display); setInterval(() => {}, 1000);`;
@@ -81,14 +81,14 @@ describe('xvfb', { skip }, () => {
     assert.ok(!fs.existsSync(registryFile(display)));
   });
 
-  describe('facade without a display', () => {
+  describe('server without a display', () => {
     let site;
-    let facade;
+    let mcp;
 
     before(async () => {
       site = await startSite();
       // The old controls ask for a headless browser. The render mode decides.
-      facade = await startFacadeClient({
+      mcp = await startServerClient({
         name: 'xvfb',
         args: ['--headless', '--isolated'],
         env: { RENDER_MODE: 'HEADED', PLAYWRIGHT_MCP_HEADLESS: 'true', DISPLAY: '', WAYLAND_DISPLAY: '' },
@@ -96,24 +96,24 @@ describe('xvfb', { skip }, () => {
     });
 
     after(async () => {
-      await facade?.close();
+      await mcp?.close();
       await site?.close();
     });
 
     test('runs a headed browser on Xvfb and ignores the old controls', async () => {
-      await call(facade.client, 'browser_navigate', { url: `${site.url}/` });
-      assert.doesNotMatch(await evaluate(facade.client, '() => navigator.userAgent'), /Headless/);
-      const log = readLog(facade.logFile);
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/` });
+      assert.doesNotMatch(await evaluate(mcp.client, '() => navigator.userAgent'), /Headless/);
+      const log = readLog(mcp.logFile);
       assert.equal(log.find((entry) => entry.event === 'render_mode').mode, 'HEADED_INVISIBLE');
       assert.deepEqual(log.filter((entry) => entry.event === 'ignored').map((entry) => entry.control), ['--headless', 'PLAYWRIGHT_MCP_HEADLESS']);
       assert.equal(log.find((entry) => entry.event === 'upstream_start').args.includes('--headless'), false);
     });
 
-    test('stops Xvfb with the facade', async () => {
-      const { pid } = readLog(facade.logFile).find((entry) => entry.event === 'xvfb_started');
+    test('stops Xvfb with the server', async () => {
+      const { pid } = readLog(mcp.logFile).find((entry) => entry.event === 'xvfb_started');
       assert.ok(running(pid));
-      await facade.close();
-      facade = undefined;
+      await mcp.close();
+      mcp = undefined;
       assert.ok(await waitUntilStopped(pid));
     });
   });

@@ -1,7 +1,7 @@
-// Values for form fields: the facade asks the providers in the order of "[fill] providers" in
-// facade.ini. The first provider that has a value gives it.
+// Values for form fields: the server asks the providers in the order of "[fill] providers" in
+// server.ini. The first provider that has a value gives it.
 // The client never sees a value of a masked provider ("[mask] <provider> = true", the default):
-// the facade replaces it with MASK in each result and in each file that upstream wrote (scrub).
+// the server replaces it with MASK in each result and in each file that upstream wrote (scrub).
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,7 +21,7 @@ export class FillRegistry {
   }
 
   // The config of a provider is provider-<name>.ini in configDir, first a copy of its template.
-  // mask: { <provider>: 'true' | 'false' } from [mask] of facade.ini. A missing entry is true.
+  // mask: { <provider>: 'true' | 'false' } from [mask] of server.ini. A missing entry is true.
   static async load({ names, providersDir, configDir, logger, mask = {} }) {
     const providers = [];
     for (const name of names) {

@@ -21,7 +21,7 @@ import VaultProvider from '../providers-form-fill/vault/index.js';
 
 const FAKE_VAULT = path.join(TOOL_DIR, 'tests', 'fixtures', 'fake-vault');
 
-// A facade gives this map. The tests use their own, in the form of the Playwright facade.
+// The server gives this map. The tests use their own, in the same form.
 const DANGEROUS = { browser_evaluate: 'it runs JavaScript in the web page and can read all data of the page' };
 
 const TMP = path.join(ASSETS_DIR, 'test-unit');
@@ -99,7 +99,7 @@ describe('host-policy.ini', () => {
     const hosts = new HostsFile(file);
     hosts.load();
     assert.deepEqual(hosts.allow, ['*']);
-    assert.match(fs.readFileSync(file, 'utf8'), /^# Hosts of the browser tool facades, for all facades/);
+    assert.match(fs.readFileSync(file, 'utf8'), /^# Hosts of browser-automation-x-mcp\. Deny wins over allow\./);
   });
 
   test('recording adds the exact host, keeps the sections sorted and the header', () => {
@@ -166,7 +166,7 @@ describe('tools.ini', () => {
     const result = tools.disabledResult('browser_evaluate');
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /^### Error\nThe tool browser_evaluate did not run: this tool is turned off in the configuration\./);
-    assert.doesNotMatch(result.content[0].text, /facade|\.ini/);
+    assert.doesNotMatch(result.content[0].text, /upstream|\.ini/);
   });
 });
 
@@ -270,11 +270,11 @@ describe('config folder', () => {
   test('a missing config file is a copy of its template; an existing file stays', () => {
     const dir = path.join(TMP, 'config-folder');
     fs.rmSync(dir, { recursive: true, force: true });
-    const file = configFile(dir, 'facade.ini');
-    assert.equal(file, path.join(dir, 'facade.ini'));
-    assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(CONFIG_TEMPLATES['facade.ini'], 'utf8'));
+    const file = configFile(dir, 'server.ini');
+    assert.equal(file, path.join(dir, 'server.ini'));
+    assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(CONFIG_TEMPLATES['server.ini'], 'utf8'));
     fs.writeFileSync(file, '[fill]\nproviders = ini\n');
-    assert.equal(fs.readFileSync(configFile(dir, 'facade.ini'), 'utf8'), '[fill]\nproviders = ini\n');
+    assert.equal(fs.readFileSync(configFile(dir, 'server.ini'), 'utf8'), '[fill]\nproviders = ini\n');
     assert.equal(fs.existsSync(configFile(dir, 'other.ini')), false);   // no template: no file
   });
 

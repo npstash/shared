@@ -1,4 +1,4 @@
-// The host check of the facade: the deny-list first, then the allow provider.
+// The host check of the server: the deny-list first, then the allow provider.
 import { firstMatch, hostOfUrl } from './patterns.js';
 
 export class HostPolicy {

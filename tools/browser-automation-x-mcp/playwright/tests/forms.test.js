@@ -1,21 +1,21 @@
-// Form filling through the facade, on the local fixture pages.
+// Form filling through the server, on the local fixture pages.
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
-import { call, evaluate, ref, startFacadeClient, startSite } from './helpers.js';
+import { call, evaluate, ref, startServerClient, startSite } from './helpers.js';
 
 describe('form filling', () => {
   let site;
-  let facade;
+  let mcp;
   let client;
 
   before(async () => {
     site = await startSite();
-    facade = await startFacadeClient({ name: 'forms' });
-    client = facade.client;
+    mcp = await startServerClient({ name: 'forms' });
+    client = mcp.client;
   });
 
   after(async () => {
-    await facade?.close();
+    await mcp?.close();
     await site?.close();
   });
 

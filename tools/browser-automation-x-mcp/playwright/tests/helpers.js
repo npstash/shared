@@ -1,5 +1,5 @@
 // Shared test code: a local web server with the fixture pages, a config copy for each test,
-// and an MCP client of the facade.
+// and an MCP client of the server.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -68,7 +68,7 @@ export async function startSite() {
     port,
     url: `http://127.0.0.1:${port}`,
     otherUrl: `http://localhost:${port}`,
-    // The form data that the server got, without the facade between: the real values.
+    // The form data that the server got, without the server between: the real values.
     submissions,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
@@ -80,15 +80,15 @@ function html(res, body) {
 
 // Make a config folder for one test (see src/paths.js). The config of the repository stays unchanged.
 // browser_evaluate is enabled because the tests read the page with it.
-export function makeConfig(name, { facade, hosts, tools, fields, ini, ask, vault } = {}) {
+export function makeConfig(name, { server, hosts, tools, fields, ini, ask, vault } = {}) {
   const root = path.join(TEST_CONFIG_DIR, name);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
   const write = (file, text) => fs.writeFileSync(path.join(root, file), text);
-  write('facade.ini', facade ?? '[fill]\nproviders = vault, ini, ask\n\n[mask]\nini = false\n\n[hosts]\nrecord = true\n');
+  write('server.ini', server ?? '[fill]\nproviders = vault, ini, ask\n\n[mask]\nini = false\n\n[hosts]\nrecord = true\n');
   write('fields.ini', fields ?? '');
   write('host-policy.ini', hosts ?? '[deny]\n\n[allow]\n*\n');
-  write('playwright-tools.ini', tools ?? '[tools]\nbrowser_evaluate = enabled\n');
+  write('tools.ini', tools ?? '[tools]\nbrowser_evaluate = enabled\n');
   write('provider-ini.ini', ini ?? '[values]\n');
   write('provider-ask.ini', ask ?? '[ask]\nfields = phone\n');
   write('provider-vault.ini', vault ?? '[vault]\nvault = vault-test\n\n[systems]\n127.0.0.1 = Fixture site\nlocalhost = Fixture other\n');
@@ -98,10 +98,10 @@ export function makeConfig(name, { facade, hosts, tools, fields, ini, ask, vault
   };
 }
 
-// Start the facade as a child process and connect an MCP client to it. The browser is headless,
+// Start the server as a child process and connect an MCP client to it. The browser is headless,
 // except when env gives an other RENDER_MODE.
 // onElicit: answers the dialogs of the ask provider; without it, the client cannot show dialogs.
-export async function startFacadeClient({ name, args = ['--isolated'], env = {}, config = {}, onElicit }) {
+export async function startServerClient({ name, args = ['--isolated'], env = {}, config = {}, onElicit }) {
   fs.mkdirSync(TEST_LOG_DIR, { recursive: true });
   const logFile = path.join(TEST_LOG_DIR, `${name}.log`);
   fs.rmSync(logFile, { force: true });

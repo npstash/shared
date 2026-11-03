@@ -1,7 +1,7 @@
 // The form fields of fields.ini in the config folder: which field gets which value on which page.
 //   [<URL pattern>]
 //   <value name> = <CSS selector>
-//   submit = <CSS selector>          optional: the element that the facade clicks to submit
+//   submit = <CSS selector>          optional: the element that the server clicks to submit
 // A URL pattern is "host/path". The host part is a host pattern (see src/hosts/patterns.js).
 // In the path, "*" is each sequence of characters, also "/". A pattern without a path matches each
 // path. Scheme, port, query and fragment have no effect.
@@ -48,7 +48,7 @@ export class FieldsConfig {
 
   // The fields for a URL, or undefined: { key, fields: [{ name, selector }], submit }.
   // All matching sections apply. For a name in more sections, the longer pattern wins.
-  // key: the matching patterns; it identifies the form for the loop guard of the facade.
+  // key: the matching patterns; it identifies the form for the loop guard of the server.
   match(url) {
     const matching = this.sections.filter(({ pattern }) => urlMatches(pattern, url))
       .sort((a, b) => a.pattern.length - b.pattern.length);

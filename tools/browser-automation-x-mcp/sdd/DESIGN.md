@@ -5,31 +5,31 @@ defined in [SRS.md](SRS.md#default-values) and [QAS.md](QAS.md#default-values).
 
 ## 1. Overview
 
-The tool holds facades for browser tools. Each facade has its own folder (`playwright/`). The
-facades share the launcher, the runtime, the code in `src/`, the form-fill providers
-(`providers-form-fill/`) and the config templates in `config/`. The config files are in a config
-folder of the repository that uses the tool, e.g. `local/configs/browser-automation-x-mcp`. A
-second facade is an open issue (section 11).
+The tool is an MCP server for browser automation. It runs on stdio between an MCP client (Claude
+Code, a wrapper with the Agent SDK) and Playwright MCP. It forwards the browser tools, and it adds
+tool switches, an automatic form fill and host lists. It runs without root and without OS installs.
+The browser is always Chromium.
 
-The Playwright facade is an MCP server on stdio between an MCP client (Claude Code, a wrapper with
-the Agent SDK) and Playwright MCP. It forwards the browser tools, and it adds tool switches, an
-automatic form fill and host lists. It runs without root and without OS installs.
+The server code is in `playwright/`. The code in `src/`, the form-fill providers
+(`providers-form-fill/`) and the config templates in `config/` are the parts that do not use
+Playwright. The config files are in a config folder of the repository that uses the tool, e.g.
+`local/configs/browser-automation-x-mcp`.
 
-The facade is opaque to the agent. The agent sees the server `browser-automation-x-mcp` with the
-browser tools. No text for the agent names the facade, Playwright, the form fill or its providers
+The internals are hidden from the agent. The agent sees the server `browser-automation-x-mcp` with
+the browser tools. No text for the agent names upstream, Playwright, the form fill or its providers
 (REQ-005 of SRS). Deny rules of the agent tools close the tool folder and the config folder to the
 agents (section 9).
 
 ## 2. Architectural drivers
 
 - Functional requirements: [SRS.md](SRS.md)
-- Quality attributes: [QAS-001](QAS.md#qas-001--portable-start-on-ubuntu) to [QAS-005](QAS.md#qas-005--overhead-of-the-facade)
+- Quality attributes: [QAS-001](QAS.md#qas-001--portable-start-on-ubuntu) to [QAS-005](QAS.md#qas-005--overhead-of-the-server)
 - Constraints:
   - The tool lives in the `shared` container. It writes files only into its folder (rules
     nothing-outside-repo, per-project-runtimes).
   - Secrets come only from the vault tool `shared/tools/auth` (rule credentials-from-vault).
   - No OS package installs, no root.
-  - The client starts the facade as a child process (stdio).
+  - The client starts the server as a child process (stdio).
 
 ## 3. System context (C4 level 1)
 
@@ -38,7 +38,7 @@ the vault home are near, but outside.
 
 ```mermaid
 flowchart TD
-    A[AI agent in an MCP client<br/><i>Claude Code, Agent SDK wrapper</i>] -->|MCP, stdio| S[Playwright facade<br/><i>this system</i>]
+    A[AI agent in an MCP client<br/><i>Claude Code, Agent SDK wrapper</i>] -->|MCP, stdio| S[browser-automation-x-mcp<br/><i>this system</i>]
     U[User<br/><i>person</i>] -->|answers dialogs, MCP elicitation via the client| S
     U -->|edits config files| S
     S -->|HTTP/HTTPS, browser| W[Web sites<br/><i>external systems</i>]
@@ -63,7 +63,7 @@ flowchart TD
 flowchart TD
     C[MCP client] -->|MCP, stdio| F
     subgraph S[browser-automation-x-mcp]
-        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.js</i>] -->|starts: run.sh playwright --config-dir DIR| F[Playwright facade process<br/><i>Node.js, MCP SDK</i>]
+        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.js</i>] -->|starts: run.sh --config-dir DIR| F[Server process<br/><i>Node.js, MCP SDK</i>]
         F -->|MCP, stdio| M[Playwright MCP<br/><i>Node.js child process</i>]
         M -->|CDP, pipe| B[Chromium<br/><i>downloaded browser</i>]
         F -->|appends| G[(Log<br/><i>JSON Lines</i>)]
@@ -73,19 +73,17 @@ flowchart TD
     F -->|reads, writes| K[(Config folder<br/><i>--config-dir</i>)]
 ```
 
-- **Launcher:** one for all facades. It makes and updates the shared runtime: Node.js, npm
-  packages, and for the Playwright facade Chromium and the missing Linux libraries and fonts.
-  Then it starts the facade that its first argument names. stdout stays free for MCP.
-- **Playwright facade process:** the MCP server for the client and the MCP client of Playwright
-  MCP. It runs the call pipeline (section 5.1). An other facade is an other process of the same
-  kind, with its own folder.
+- **Launcher:** makes and updates the runtime: Node.js, npm packages, Chromium and the missing
+  Linux libraries and fonts. Then it starts the server with its arguments. stdout stays free for
+  MCP.
+- **Server process:** the MCP server for the client and the MCP client of Playwright MCP. It runs
+  the call pipeline (section 5.1).
 - **Playwright MCP:** `@playwright/mcp`, unchanged. It runs the browser tools.
 - **Chromium:** the browser of Playwright, from the tool folder.
-- **Xvfb:** the virtual display of a headed browser on Linux without a display. The facade
+- **Xvfb:** the virtual display of a headed browser on Linux without a display. The server
   starts and stops it. Unpacked into the tool folder.
-- **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). Shared by
-  all facades: `facade.ini`, `fields.ini`, `host-policy.ini`, `provider-<name>.ini`. For one facade:
-  `<facade>-tools.ini`. A missing file is a copy of its template in the tool folder. The facade
+- **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). It holds
+  `server.ini`, `fields.ini`, `host-policy.ini`, `tools.ini` and `provider-<name>.ini`. A missing file is a copy of its template in the tool folder. The server
   adds tool lines and records hosts.
 - **Log:** `LOG_FILE`, gitignored.
 - **Runtime files:** Node.js, browsers, libraries, profiles, temp files, DISCOVERED_FILE;
@@ -94,15 +92,12 @@ flowchart TD
 
 ## 5. Components (C4 level 3)
 
-### 5.1 Playwright facade process
-
-The components with a path in `src/` and `providers-form-fill/` are shared: each facade process
-loads them. The components with a path in `playwright/` are for this facade only.
+### 5.1 Server process
 
 ```mermaid
 flowchart TD
-    subgraph F[Facade process]
-        SV[MCP server] --> P[Call pipeline<br/><i>playwright/src/facade.js</i>]
+    subgraph F[Server process]
+        SV[MCP server] --> P[Call pipeline<br/><i>playwright/src/mcp-server.js</i>]
         P --> T[Tool switches<br/><i>src/tools-config.js</i>]
         P --> H[Host policy<br/><i>src/hosts/</i>]
         P --> AF[Form fill<br/><i>playwright/src/autofill.js</i>]
@@ -123,12 +118,13 @@ flowchart TD
     PV -->|CLI| V[Vault tool]
 ```
 
-- **MCP server / MCP client:** the SDK objects for the two connections. The facade forwards
+- **MCP server / MCP client:** the SDK objects for the two connections. The server forwards
   roots, progress, cancellation and tool-list changes between them.
 - **Call pipeline:** the steps of one call, in this order: tool switch → host check of the target
   URL → upstream → host check of the opened page and record → discovery (DISCOVER) → form fill →
-  host check of the page after the submit → scrub → removal of the code sections → log.
-- **Tool switches:** `src/tools-config.js` with `playwright-tools.ini` and the dangerous
+  discovery of each page after a submit → host check of the page after the submit → scrub →
+  removal of the code sections → log.
+- **Tool switches:** `src/tools-config.js` with `tools.ini` and the dangerous
   tools of Playwright MCP; adds missing tools; gives the error of a disabled tool.
 - **Host policy:** `[deny]` first, then the allow provider. Patterns: `src/hosts/patterns.js`.
 - **Allow provider:** the default reads `[allow]` and records each opened host.
@@ -138,15 +134,15 @@ flowchart TD
   loop guard of the session. In the discovery mode, it writes DISCOVERED_FILE (REQ-039).
 - **Fields:** `src/fill/fields.js` reads `fields.ini`, matches URL patterns and makes the pattern of
   a page (REQ-037).
-- **Fill registry:** loads the providers in the order of `facade.ini`, gives the value of a field
+- **Fill registry:** loads the providers in the order of `server.ini`, gives the value of a field
   name, and scrubs the values of masked providers from the results and from the text files that
   upstream wrote in the call (REQ-032).
 - **Vault, INI, ask providers:** `providers-form-fill/<name>/index.js` with `provider-<name>.ini`.
   The vault provider uses only the systems that `[systems]` names (REQ-034 of SRS).
 - **Xvfb starter:** `playwright/src/xvfb.js`. `renderMode()` of `playwright/src/config.js`
-  resolves `RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the facade starts
+  resolves `RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the server starts
   Xvfb through `setpriv --pdeathsig KILL` before upstream, records it in XVFB_DIR and gives
-  `DISPLAY` to upstream. At each start, it kills the Xvfb of facades that do not run (REQ-018).
+  `DISPLAY` to upstream. At each start, it kills the Xvfb of servers that do not run (REQ-018).
 - **Chrome settings:** `playwright/src/chrome-prefs.js` writes `CHROME_PREFS` into the persistent
   profile before the browser starts: at the first call, and after `browser_close`.
 - **Logger:** JSON Lines; redacts the secret arguments.
@@ -165,12 +161,12 @@ flowchart TD
 
 | Container | Operation | Description |
 | --- | --- | --- |
-| Facade process | MCP `initialize` | Gives SERVER_NAME, the tools capability of upstream and the instructions of REQ-005. |
-| Facade process | MCP `tools/list` | The tools of upstream without the name Playwright; notes for disabled tools. |
-| Facade process | MCP `tools/call` | The call pipeline (5.1). Error results: UI-02 of SRS. |
-| Facade process | MCP `elicitation/create` (to the client) | The dialog of the ask provider (UI-01). |
-| Facade process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument goes to Playwright MCP, e.g. `--isolated`. The facade removes `--headless`. |
-| Facade process | environment | `RENDER_MODE` (REQ-015 of SRS; the facade ignores `PLAYWRIGHT_MCP_HEADLESS`); `BROWSER_AUTOMATION_X_MCP_LOG_FILE`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). |
+| Server process | MCP `initialize` | Gives SERVER_NAME, the tools capability of upstream and the instructions of REQ-005. |
+| Server process | MCP `tools/list` | The tools of upstream without the name Playwright; notes for disabled tools. |
+| Server process | MCP `tools/call` | The call pipeline (5.1). Error results: UI-02 of SRS. |
+| Server process | MCP `elicitation/create` (to the client) | The dialog of the ask provider (UI-01). |
+| Server process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument goes to Playwright MCP, e.g. `--isolated`. The server removes `--headless` and `--browser`. |
+| Server process | environment | `RENDER_MODE` (REQ-015 of SRS; the server ignores `PLAYWRIGHT_MCP_HEADLESS` and `PLAYWRIGHT_MCP_BROWSER`); `BROWSER_AUTOMATION_X_MCP_LOG_FILE`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). |
 | Playwright MCP (used) | `browser_run_code_unsafe`, `browser_snapshot` | Page code of the form fill; the snapshot after the submit. |
 | Launcher | `run.sh [install|test|args]` | Makes the runtime; `install` stops after it; `test` runs the tests. |
 | Vault tool (used) | `run.sh --vault NAME get-system SYSTEM` / `get-secret SYSTEM KEY` | The secret names of one system; one secret on stdout. |
@@ -193,63 +189,63 @@ Form fill of a login page:
 
 ```mermaid
 sequenceDiagram
-    Agent->>Facade: tools/call browser_navigate login.example/u/login
-    Facade->>Playwright MCP: browser_navigate
-    Playwright MCP-->>Facade: result, Page URL: login.example/u/login
-    Facade->>Facade: host check; fields.ini matches login.example/u/*
-    Facade->>Playwright MCP: browser_run_code_unsafe: wait for the fields (FILL_WAIT)
-    Facade->>Vault provider: resolve("password", host)
+    Agent->>Server: tools/call browser_navigate login.example/u/login
+    Server->>Playwright MCP: browser_navigate
+    Playwright MCP-->>Server: result, Page URL: login.example/u/login
+    Server->>Server: host check; fields.ini matches login.example/u/*
+    Server->>Playwright MCP: browser_run_code_unsafe: wait for the fields (FILL_WAIT)
+    Server->>Vault provider: resolve("password", host)
     Vault provider->>Vault tool: get-secret "System" password
     Vault tool-->>Vault provider: secret
-    Facade->>Playwright MCP: browser_run_code_unsafe: fill, submit, wait (SUBMIT_WAIT)
-    Facade->>Playwright MCP: browser_snapshot
-    Playwright MCP-->>Facade: page after the submit (may show a value)
-    Facade->>Facade: host check; scrub: value → ***; remove code sections
-    Facade-->>Agent: page after the submit
+    Server->>Playwright MCP: browser_run_code_unsafe: fill, submit, wait (SUBMIT_WAIT)
+    Server->>Playwright MCP: browser_snapshot
+    Playwright MCP-->>Server: page after the submit (may show a value)
+    Server->>Server: host check; scrub: value → ***; remove code sections
+    Server-->>Agent: page after the submit
 ```
 
 A redirect to a denied host:
 
 ```mermaid
 sequenceDiagram
-    Agent->>Facade: tools/call browser_navigate allowed.example/redirect
-    Facade->>Facade: check allowed.example: allowed
-    Facade->>Playwright MCP: browser_navigate
-    Playwright MCP-->>Facade: result, Page URL: denied.example/x
-    Facade->>Facade: check denied.example: [deny]
-    Facade->>Playwright MCP: browser_navigate about:blank
-    Facade-->>Agent: error: page closed, reason
+    Agent->>Server: tools/call browser_navigate allowed.example/redirect
+    Server->>Server: check allowed.example: allowed
+    Server->>Playwright MCP: browser_navigate
+    Playwright MCP-->>Server: result, Page URL: denied.example/x
+    Server->>Server: check denied.example: [deny]
+    Server->>Playwright MCP: browser_navigate about:blank
+    Server-->>Agent: error: page closed, reason
 ```
 
 Dialog of the ask provider:
 
 ```mermaid
 sequenceDiagram
-    Agent->>Facade: tools/call browser_navigate shop.example/order
-    Facade->>Facade: fields.ini: phone = #phone; ask provider
-    Facade->>Client: elicitation/create (host, field name)
+    Agent->>Server: tools/call browser_navigate shop.example/order
+    Server->>Server: fields.ini: phone = #phone; ask provider
+    Server->>Client: elicitation/create (host, field name)
     Client->>User: dialog
     User-->>Client: value, accept
-    Client-->>Facade: {action: accept, content: {value}}
-    Facade->>Playwright MCP: browser_run_code_unsafe: fill, submit
-    Facade-->>Agent: page after the submit, *** in place of the value
+    Client-->>Server: {action: accept, content: {value}}
+    Server->>Playwright MCP: browser_run_code_unsafe: fill, submit
+    Server-->>Agent: page after the submit, *** in place of the value
 ```
 
 ## 8. Data model
 
 | File | Committed | Format | Written by |
 | --- | --- | --- | --- |
-| `<config>/facade.ini` | yes | `[fill] providers = vault, ini, ask`; `[mask]` `<provider> = true|false`; `[hosts] record = true|false` | user |
+| `<config>/server.ini` | yes | `[fill] providers = vault, ini, ask`; `[mask]` `<provider> = true|false`; `[hosts] record = true|false` | user |
 | `<config>/fields.ini` | yes | `[<URL pattern>]` with `<field name> = <CSS selector>` and `submit = <CSS selector>` (REQ-037 of SRS) | user |
-| `<config>/playwright-tools.ini` | yes | `[tools]` `<tool> = enabled|disabled`, sorted | user; facade adds missing tools |
-| `<config>/host-policy.ini` | yes | header comments; `[deny]`, `[allow]`: one host pattern per line, sorted, unique | user; facade records hosts |
+| `<config>/tools.ini` | yes | `[tools]` `<tool> = enabled|disabled`, sorted | user; server adds missing tools |
+| `<config>/host-policy.ini` | yes | header comments; `[deny]`, `[allow]`: one host pattern per line, sorted, unique | user; server records hosts |
 | `<config>/provider-vault.ini` | yes | `[vault]` `vault = vault-<name>`; `[systems]` `<host or URL prefix> = <system name>` | user |
 | `<config>/provider-ini.ini` | yes | `[values]` with `<field name> = <value>` | user |
 | `<config>/provider-ask.ini` | yes | `[ask]` `fields = a, b, c` | user |
-| `config/*.template.ini`, `<facade>/config/tools.template.ini`, `providers-form-fill/<name>/config.template.ini` | yes | the first content of each file above | user; facade copies a template to a missing file |
-| `LOG_FILE` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | facade |
-| `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of facade and Xvfb), profiles, tmp, `discovered-fields.ini` | launcher, Playwright, facade |
-| OUTPUT_DIR | no | snapshots, screenshots, console logs of upstream | Playwright; facade scrubs |
+| `config/*.template.ini`, `playwright/config/tools.template.ini`, `providers-form-fill/<name>/config.template.ini` | yes | the first content of each file above | user; server copies a template to a missing file |
+| `LOG_FILE` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
+| `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of the server and Xvfb), profiles, tmp, `discovered-fields.ini` | launcher, Playwright, server |
+| OUTPUT_DIR | no | snapshots, screenshots, console logs of upstream | Playwright; server scrubs |
 | `<repo>/.local_assets/tmp/` | no | temp files of Chromium when the tool folder cannot hold its socket | Playwright |
 
 Host patterns: `*` (each host), `*.example.com` (subdomains only), `example.com` (exact),
@@ -270,9 +266,9 @@ of the repository.
 
 | Dependency | Container | Use |
 | --- | --- | --- |
-| Node.js NODE_VERSION (downloaded) | Launcher, facade, Playwright MCP | Runtime |
+| Node.js NODE_VERSION (downloaded) | Launcher, server, Playwright MCP | Runtime |
 | `@playwright/mcp` 0.0.83 | Playwright MCP | Browser tools |
-| `@modelcontextprotocol/sdk` 1.32.2 | Facade process | MCP server and client |
+| `@modelcontextprotocol/sdk` 1.32.2 | Server process | MCP server and client |
 | Chromium (downloaded) | Chromium | Browser |
 | `ldd`, `apt-get`, `apt-cache`, `dpkg-deb` (Ubuntu base) | Launcher | Missing libraries, no root |
 | `curl`, `tar`, `sha256sum` / `certutil` | Launcher | Download of Node.js |
@@ -285,18 +281,18 @@ Manual test: see [README.md](../README.md#tests), and run `claude -p` with `--mc
 
 All decisions are in [ADL.md](ADL.md).
 
-- [ADR-20261028-facade_folders](adr/ADR-20261028-facade_folders.md): one folder for each facade, shared
-  providers and config.
+- [ADR-20261028-tool_folders](adr/ADR-20261028-tool_folders.md): one folder for each browser
+  tool, shared providers and config. Superseded: the tool has one browser tool only (ADL
+  20261103-01).
 
 ## 11. Open issues
 
-- A second facade, for the browser that Claude opens in a chat of the Claude desktop app.
 - A pop-up allow provider (MCP elicitation) for hosts that are not in `[allow]`.
 - A network fill provider.
 - Proof of QAS-001 in clean Ubuntu 22.04 and 24.04 containers, with instructions (B3).
 - CJK fonts (`fonts-noto-cjk`, 58 MB) for screenshots of Chinese, Japanese and Korean text.
 - `libgssapi-krb5-2` for Kerberos sign-on on hosts without it (lazy-loaded by Chromium).
-- In `claude -p` (no UI), Claude Code cancels each dialog of the ask provider. The facade does not fill
+- In `claude -p` (no UI), Claude Code cancels each dialog of the ask provider. The server does not fill
   the form.
 - `browser_evaluate` can read a value that stays in a field after a failed submit.
 - A deny rule does not stop each shell command. An agent with a shell can still read the tool

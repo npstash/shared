@@ -1,5 +1,5 @@
 // Settings of the Chrome profile that stop the bubbles and prompts of Chrome itself. They cover
-// the page, and Playwright cannot close them. The facade writes them into Default/Preferences
+// the page, and Playwright cannot close them. The server writes them into Default/Preferences
 // of the persistent profile before the browser starts. Other settings of the profile stay.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,9 +26,6 @@ export const CHROME_PREFS = {
   // "Save address?" and "save card?".
   autofill: { profile_enabled: false, credit_card_enabled: false },
 };
-
-// The browsers that read Default/Preferences.
-export const CHROMIUM_BROWSERS = new Set(['chromium', 'chrome', 'chrome-beta', 'chrome-dev', 'chrome-canary', 'msedge', 'msedge-beta', 'msedge-dev', 'msedge-canary']);
 
 function merge(target, source) {
   for (const [key, value] of Object.entries(source)) {

@@ -1,46 +1,44 @@
 # browser-automation-x-mcp
 
-Facades for the browser tools of AI agents. A facade puts tool switches, a form fill, host lists
-and a log between the agent and a browser tool.
+An MCP server for browser automation. It gives the agent the browser tools, and adds tool
+switches, a form fill, host lists and a log.
 
-The facade is opaque to the agents. An agent sees the MCP server `browser-automation-x-mcp` and the
-browser tools. No text for the agent names the facade, Playwright, the form fill or its providers.
+The internals are hidden from the agents. An agent sees the MCP server `browser-automation-x-mcp`
+and the browser tools. No text for the agent names Playwright, the form fill or its providers.
 The deny rules of the agent tools close this folder and the config folder to the agents (see
 [Deny rules](#deny-rules)). Keep each link to this folder out of the files that agents read.
 
-| Facade | Folder | Browser tool | State |
-| --- | --- | --- | --- |
-| Playwright facade (MCP server `browser-automation-x-mcp`) | `playwright/` | [Playwright MCP](https://github.com/microsoft/playwright-mcp) (`@playwright/mcp`) | done |
-| Facade of the desktop app browser | — | The browser that Claude opens in a chat of the Claude desktop app | planned |
+The implementation uses [Playwright MCP](https://github.com/microsoft/playwright-mcp)
+(`@playwright/mcp`) and Chromium. The browser is always Chromium.
 
 Documents (SDD): [PRD](sdd/PRD.md), [SRS](sdd/SRS.md), [QAS](sdd/QAS.md), [DESIGN](sdd/DESIGN.md),
 [ADL](sdd/ADL.md). Open items: [DESIGN, section 11](sdd/DESIGN.md#11-open-issues).
 
 ```
-MCP client (Claude Code) <-stdio-> facade <-stdio-> Playwright MCP (child process) -> Chromium
+MCP client (Claude Code) <-stdio-> server <-stdio-> Playwright MCP (child process) -> Chromium
 ```
 
 ## Structure
 
 ```
-run.sh run.bat                launcher of all facades; one runtime for all
-package.json                  Node.js packages of all facades
-config/                       templates of the shared config files
+run.sh run.bat                launcher of the server and its runtime
+package.json                  Node.js packages
+config/                       templates of the config files
 providers-form-fill/<name>/   form-fill providers: index.js, config.template.ini
-src/                          shared code: INI files, logger, tool switches, host lists, form fields
-tests/                        tests of the shared code
-<facade>/                     one folder for each facade: src/, config/tools.template.ini, tests/
+src/                          INI files, logger, tool switches, host lists, form fields
+tests/                        tests of src/ and of the providers
+playwright/                   the server: src/, config/tools.template.ini, tests/
 sdd/                          documents of the tool
 ```
 
 ## Run
 
 ```bash
-./run.sh install                                              # make the runtime, install the browsers, then stop
-./run.sh playwright --config-dir <DIR>                        # start the Playwright facade (MCP server on stdio)
-./run.sh playwright --config-dir <DIR> --isolated             # each other argument goes to Playwright MCP
-./run.sh test                                                 # the tests of the shared code and of each facade
-run.bat install                                               # the same on Windows
+./run.sh install                           # make the runtime, install the browser, then stop
+./run.sh --config-dir <DIR>                # start the server (MCP server on stdio)
+./run.sh --config-dir <DIR> --isolated     # each other argument goes to Playwright MCP
+./run.sh test                              # run the tests
+run.bat install                            # the same on Windows
 ```
 
 - Do `install` one time before you add the server to a client. The first install downloads
@@ -63,9 +61,9 @@ entry in `.kilo/kilo.jsonc`.
 
 | Claude Code runs in | `command` | `args` |
 | --- | --- | --- |
-| Linux, macOS, WSL | `<TOOL>/run.sh` | `["playwright", "--config-dir", "<DIR>"]` |
-| Windows (native) | `cmd` | `["/c", "<TOOL>\\run.bat", "playwright", "--config-dir", "<DIR>"]` |
-| Windows, browser in WSL | `wsl.exe` | `["<TOOL in WSL>/run.sh", "playwright", "--config-dir", "<DIR>"]` |
+| Linux, macOS, WSL | `<TOOL>/run.sh` | `["--config-dir", "<DIR>"]` |
+| Windows (native) | `cmd` | `["/c", "<TOOL>\\run.bat", "--config-dir", "<DIR>"]` |
+| Windows, browser in WSL | `wsl.exe` | `["<TOOL in WSL>/run.sh", "--config-dir", "<DIR>"]` |
 
 `<TOOL>` is the path of this folder. A client cannot start a `.bat` file directly on Windows. Use
 `cmd /c`.
@@ -80,27 +78,27 @@ entry in `.kilo/kilo.jsonc`.
         "type": "stdio",
         "command": "shared/tools/browser-automation-x-mcp/run.sh",
         "env": { "RENDER_MODE": "DEFAULT" },
-        "args": ["playwright", "--config-dir", "local/configs/browser-automation-x-mcp"]
+        "args": ["--config-dir", "local/configs/browser-automation-x-mcp"]
       }
     }
   }
   ```
 
-- **CLI, user scope:** `claude mcp add --scope user browser-automation-x-mcp -- <TOOL>/run.sh playwright --config-dir <DIR>`.
+- **CLI, user scope:** `claude mcp add --scope user browser-automation-x-mcp -- <TOOL>/run.sh --config-dir <DIR>`.
   Check with `claude mcp list`. In a session, `/mcp` shows the state.
 - **VSCode:** the extension uses the configuration of the CLI. If VSCode runs in WSL, run
   `claude mcp add` in the WSL terminal and use `run.sh`.
 - **Native Windows:** the root `.mcp.json` has `run.sh`. Add the server in the local scope, which
-  wins over the project scope: `claude mcp add --scope local browser-automation-x-mcp -- cmd /c <TOOL>\run.bat playwright --config-dir <DIR>`.
+  wins over the project scope: `claude mcp add --scope local browser-automation-x-mcp -- cmd /c <TOOL>\run.bat --config-dir <DIR>`.
 - **Desktop app (Code tab):** uses the configuration of Claude Code on the same computer.
 - **Agent SDK:** give the server in `mcp_servers` / `mcpServers` of the options, and allow
   `mcp__browser-automation-x-mcp__*`. Use `--isolated` if the wrapper runs more than one session
-  at the same time. An `env` entry goes to the facade and to Playwright MCP.
+  at the same time. An `env` entry goes to the server and to Playwright MCP.
 
   ```python
   options = ClaudeAgentOptions(
       mcp_servers={"browser-automation-x-mcp": {"type": "stdio", "command": "<TOOL>/run.sh",
-                   "args": ["playwright", "--config-dir", "<DIR>", "--isolated"]}},
+                   "args": ["--config-dir", "<DIR>", "--isolated"]}},
       allowed_tools=["mcp__browser-automation-x-mcp__*"],
       disallowed_tools=["mcp__playwright", "mcp__plugin_playwright_playwright"],
   )
@@ -143,16 +141,16 @@ file is first a copy of its template in this folder.
 
 | File | Content | Template |
 | --- | --- | --- |
-| `facade.ini` | `[fill] providers`: provider order; `[mask]`: masked providers; `[hosts] record` | `config/facade.template.ini` |
+| `server.ini` | `[fill] providers`: provider order; `[mask]`: masked providers; `[hosts] record` | `config/server.template.ini` |
 | `fields.ini` | form fields for each URL pattern | `config/fields.template.ini` |
 | `host-policy.ini` | `[deny]` and `[allow]` host patterns | `config/host-policy.template.ini` |
-| `playwright-tools.ini` | tool switches of the Playwright facade | `playwright/config/tools.template.ini` |
+| `tools.ini` | tool switches | `playwright/config/tools.template.ini` |
 | `provider-<name>.ini` | config of one form-fill provider | `providers-form-fill/<name>/config.template.ini` |
 
 ## Form fill
 
-The agent never fills credentials or personal data. After each call, the facade checks the page.
-If `fields.ini` has a section for the URL, the facade fills the fields and submits the form. The
+The agent never fills credentials or personal data. After each call, the server checks the page.
+If `fields.ini` has a section for the URL, the server fills the fields and submits the form. The
 agent gets the page after the submit. It does not know about the fill.
 
 ```ini
@@ -165,22 +163,22 @@ password = input[name="passwd"]
 - **URL pattern:** `host/path`. The host part is a host pattern (see [Host lists](#host-lists)). In
   the path, `*` matches each sequence of characters, also `/`. A pattern without a path matches
   each path. Scheme, port, query and fragment have no effect.
-- **Lines:** `<field name> = <CSS selector>`. The facade looks for the selector in each frame of the
+- **Lines:** `<field name> = <CSS selector>`. The server looks for the selector in each frame of the
   page. If more sections match, all apply. For a field name in more sections, the longer pattern
   wins.
-- **Wait:** the facade waits a maximum of 10 s for a visible field. It waits only one time for each
+- **Wait:** the server waits a maximum of 10 s for a visible field. It waits only one time for each
   URL, and after each submit.
-- **Values:** for each visible field, the facade asks the providers of `[fill] providers` in
-  `facade.ini`, in that order. The first value goes to the field. A field without a value stays
-  empty. If no field has a value, the facade does nothing.
-- **Submit:** the facade clicks the `submit` selector if it is visible. Else it calls
+- **Values:** for each visible field, the server asks the providers of `[fill] providers` in
+  `server.ini`, in that order. The first value goes to the field. A field without a value stays
+  empty. If no field has a value, the server does nothing.
+- **Submit:** the server clicks the `submit` selector if it is visible. Else it calls
   `requestSubmit()` of the form, else it presses Enter in the last field. Then it waits a maximum
   of 10 s for the page. A second step on the same URL, e.g. the password after the username, gets
   a fill in the same call. Maximum 3 rounds.
-- **Loop guard:** the facade fills each set of visible fields of a form one time. If the same fields
+- **Loop guard:** the server fills each set of visible fields of a form one time. If the same fields
   come back, e.g. after a wrong password, it does not fill them again. The log gets `fill_failed`.
   The guard is reset when a page does not match `fields.ini`.
-- **Mask:** `[mask] <provider> = true` in `facade.ini` replaces the values of the provider with
+- **Mask:** `[mask] <provider> = true` in `server.ini` replaces the values of the provider with
   `***` in each result and in each text file of the output folder. A provider without a line is
   masked. Binary files, e.g. screenshots, stay unchanged.
 - **Errors:** a provider error or a page error goes only to the log. The agent gets the page as it
@@ -196,12 +194,13 @@ To add a provider, see [src/fill/provider.js](src/fill/provider.js).
 
 ### Find the fields of a page (discovery)
 
-1. Start the facade with `BROWSER_AUTOMATION_X_MCP_DISCOVER=1`, e.g. in the `env` of `.mcp.json`.
-2. Open each login page in a session. On a page with more steps, do the steps: the facade records
+1. Start the server with `BROWSER_AUTOMATION_X_MCP_DISCOVER=1`, e.g. in the `env` of `.mcp.json`.
+2. Open each login page in a session. On a page with more steps, do the steps: the server records
    each step.
-3. The facade writes `.local_assets/discovered-fields.ini` of this folder. Each section is the URL
+3. The server writes `.local_assets/discovered-fields.ini` of this folder. Each section is the URL
    pattern of a page. Path segments that look like an ID are `*`. Each field has a comment line
-   with its type, name, label and frame, and a proposed line `<field name> = <selector>`.
+   with its type, name, label and frame, and a proposed line `<field name> = <selector>`. It also
+   writes proposed `submit` selectors for visible submit buttons.
 4. Copy the lines of the username and password fields into `fields.ini`. Check that the section
    pattern covers each URL of the login.
 5. Give the vault system of the host the secrets with these field names, e.g. `username` and
@@ -216,20 +215,20 @@ password lines with their sections. Confirm the lines before the agent writes th
 ## Host lists
 
 `host-policy.ini` of the config folder has two sections: `[deny]` and `[allow]`, one host pattern on
-each line. Deny wins. Move a line between the sections to change the list. All facades use it.
+each line. Deny wins. Move a line between the sections to change the list.
 
 - Patterns: `*` (each host), `*.example.com` (subdomains), `example.com` (exact), `192.168.1.*`
   (IPv4). A pattern has no scheme, port or path.
-- The facade checks the URL before it opens a page, and the page after each call (clicks,
+- The server checks the URL before it opens a page, and the page after each call (clicks,
   redirects, submits). A blocked page is replaced by `about:blank`, and the call fails.
-- The facade adds the host of each opened page to `[allow]`, also if a pattern covers it.
-  `[hosts] record = false` in `facade.ini` stops this.
+- The server adds the host of each opened page to `[allow]`, also if a pattern covers it.
+  `[hosts] record = false` in `server.ini` stops this.
 - To add an other allow provider, see [src/hosts/allow-provider.js](src/hosts/allow-provider.js).
 
 ## Tool switches
 
-`playwright-tools.ini` has one line for each tool: `<tool> = enabled` or `<tool> = disabled`. At
-start, the facade adds the missing tools with their default.
+`tools.ini` has one line for each tool: `<tool> = enabled` or `<tool> = disabled`. At
+start, the server adds the missing tools with their default.
 
 - Disabled by default: `browser_run_code_unsafe`, `browser_evaluate`, `browser_file_upload` and
   `browser_drop`. A web page can misuse them through prompt injection.
@@ -239,7 +238,7 @@ start, the facade adds the missing tools with their default.
 
 ## Render mode
 
-Some sites block a headless browser. Thus the facade never runs headless by default. `RENDER_MODE`
+Some sites block a headless browser. Thus the server never runs headless by default. `RENDER_MODE`
 selects the mode:
 
 | Value | Host with a display | WSL | Linux without a display |
@@ -250,13 +249,13 @@ selects the mode:
 | `HEADLESS` | no window | no window | no window |
 
 - `HEADED_INVISIBLE` runs a headed browser on Xvfb, a virtual display. Nobody sees the window.
-- Only `HEADLESS` gives a headless browser. If a mode is not possible, the facade stops with an
+- Only `HEADLESS` gives a headless browser. If a mode is not possible, the server stops with an
   error.
-- The facade ignores `--headless` and `PLAYWRIGHT_MCP_HEADLESS`. The render mode also applies with
+- The server ignores `--headless` and `PLAYWRIGHT_MCP_HEADLESS`. The render mode also applies with
   `--config`.
-- `run.sh install` unpacks Xvfb into this folder on Linux. No root. The facade starts Xvfb on the
+- `run.sh install` unpacks Xvfb into this folder on Linux. No root. The server starts Xvfb on the
   first free display from `:99`, only on the abstract socket of Linux, and stops it at the end.
-  After a SIGKILL of the facade, the kernel stops Xvfb. The next start kills a leftover Xvfb.
+  After a SIGKILL of the server, the kernel stops Xvfb. The next start kills a leftover Xvfb.
 - To solve a challenge of a site, use `HEADED` on a host with a display. The persistent profile
   keeps the result.
 
@@ -274,37 +273,38 @@ fonts.
 
 ## Arguments and defaults
 
-Each argument after `playwright`, except `--config-dir`, goes to Playwright MCP. For the list, run
-`./run.sh playwright --config-dir <DIR> --help`.
+Each argument, except `--config-dir`, `--browser` and `--headless`, goes to Playwright MCP. For the
+list, run `./run.sh --config-dir <DIR> --help`.
 
-| Value | Default of the facade | Default of Playwright MCP |
+| Value | Default of the server | Default of Playwright MCP |
 | --- | --- | --- |
-| Browser (`PLAYWRIGHT_MCP_BROWSER`) | `chromium`, installed by the launcher | `chrome` |
 | Render mode (`RENDER_MODE`) | `DEFAULT`: never headless | a window if the host has a display |
 | Browser files (`PLAYWRIGHT_BROWSERS_PATH`) | `.local_assets/browsers/<platform>/` | cache folder of the user |
-| Profile (`PLAYWRIGHT_MCP_USER_DATA_DIR`) | `.local_assets/profiles/<platform>-<browser>-<workspace hash>/` | cache folder of the user |
+| Profile (`PLAYWRIGHT_MCP_USER_DATA_DIR`) | `.local_assets/profiles/<platform>-chromium-<workspace hash>/` | cache folder of the user |
 | Output files (`PLAYWRIGHT_MCP_OUTPUT_DIR`) | `.local_assets/browser-automation-x-mcp/output/` of the working folder | in the workspace |
 | Temp files (`TMPDIR`, `TEMP`, `TMP`) | `.local_assets/tmp/` | temp folder of the OS |
 | Browser registry (`XDG_CACHE_HOME`, Linux only) | `.local_assets/cache/` | `~/.cache/ms-playwright/b/` |
 
-- An argument or an env variable of the user overrides each default.
-- The facade sets no profile with `--isolated`, `--user-data-dir`, `--cdp-endpoint`, `--extension`
+- The browser is always Chromium, installed by the launcher. The server ignores `--browser` and
+  `PLAYWRIGHT_MCP_BROWSER`, and logs `ignored`.
+- An argument or an env variable of the user overrides each other default.
+- The server sets no profile with `--isolated`, `--user-data-dir`, `--cdp-endpoint`, `--extension`
   or `--endpoint`. With `--config <file>` or `PLAYWRIGHT_MCP_CONFIG`, it sets no `PLAYWRIGHT_MCP_*`
-  default.
+  default, except the browser.
 - The persistent profile keeps logins. Two sessions in the same workspace cannot use it at the same
   time. For parallel sessions, use `--isolated`.
-- Chromium makes a Unix socket in the temp folder. If this folder cannot hold it, the facade uses
+- Chromium makes a Unix socket in the temp folder. If this folder cannot hold it, the server uses
   `.local_assets/tmp/` of the repository root, else the temp folder of the OS. It logs
   `tmp_dir_fallback`.
 - On Windows and macOS, Playwright writes a registry of the open browsers into the cache folder of
-  the user. The facade cannot move it.
+  the user. The server cannot move it.
 - `--save-session` of Playwright MCP writes the code of the form fill, with the values, into the
   output folder. Do not use it.
 
 ## Logs
 
 The log is `.local_assets/logs/browser-automation-x-mcp.log` of this folder. It has one JSON object
-on each line. Above 10 MB, the facade moves the file to `.log.1` at start.
+on each line. Above 10 MB, the server moves the file to `.log.1` at start.
 
 | Env variable | Default | Effect |
 | --- | --- | --- |
@@ -336,7 +336,7 @@ tail -f .local_assets/logs/browser-automation-x-mcp.log | jq -c '{ts, event, too
   double in [tests/fixtures/fake-vault/](tests/fixtures/fake-vault/)).
 - [playwright/tests/policy.test.js](playwright/tests/policy.test.js): tool switches, host lists,
   form fill (fill, submit, mask, loop guard, two steps), discovery.
-- [playwright/tests/facade.test.js](playwright/tests/facade.test.js): the same tools as upstream,
+- [playwright/tests/tools.test.js](playwright/tests/tools.test.js): the same tools as upstream,
   the texts for the client, navigation, errors, screenshots, the log and the persistent profile.
 - [playwright/tests/forms.test.js](playwright/tests/forms.test.js): form tools of the agent on local
   pages.
@@ -353,11 +353,3 @@ tail -f .local_assets/logs/browser-automation-x-mcp.log | jq -c '{ts, event, too
 2. Run `npm install` in this folder with the Node.js of `.local_assets/runtime/` to update
    `package-lock.json`.
 3. Run `./run.sh test`. The launcher installs the new Chromium.
-
-## Add a facade
-
-1. Make `<facade>/src/server.js` (an MCP server on stdio), `<facade>/config/tools.template.ini` and
-   `<facade>/tests/`.
-2. Use the shared code of [src/](src/): `ToolsConfig` with the dangerous tools of the browser tool,
-   `FillRegistry` and `FieldsConfig` for the form fill, `HostPolicy` with `host-policy.ini`.
-3. Add the steps for its browser to `run.sh` and `run.bat`, and a row to the table at the top.

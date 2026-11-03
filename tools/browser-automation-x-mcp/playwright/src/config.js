@@ -1,4 +1,4 @@
-// Paths and defaults of the Playwright facade. Each default keeps the files in the tool folder.
+// Paths and defaults of the server. Each default keeps the files in the tool folder.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
@@ -7,21 +7,22 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ASSETS_DIR, PLATFORM, TOOL_DIR } from '../../src/paths.js';
 
-export const FACADE_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const PLAYWRIGHT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const TMP_DIR = path.join(ASSETS_DIR, 'tmp');
 export const REPO_TMP_DIR = path.join(repoRoot(TOOL_DIR), '.local_assets', 'tmp');
 export const SYSLIBS_DIR = path.join(ASSETS_DIR, 'syslibs', PLATFORM);
-export const DEFAULT_BROWSER = 'chromium';
+// The only browser. --browser and PLAYWRIGHT_MCP_BROWSER have no effect.
+export const BROWSER = 'chromium';
 const LIB_TRIPLETS = { x64: 'x86_64-linux-gnu', arm64: 'aarch64-linux-gnu' };
 
 const require = createRequire(import.meta.url);
 export const UPSTREAM_CLI = path.join(path.dirname(require.resolve('@playwright/mcp/package.json')), 'cli.js');
 
-// The tool switches of this facade: playwright-tools.ini in the config folder. See src/paths.js.
-export const TOOLS_CONFIG = 'playwright-tools.ini';
-export const TOOLS_TEMPLATE = path.join(FACADE_DIR, 'config', 'tools.template.ini');
+// The tool switches of the server: tools.ini in the config folder. See src/paths.js.
+export const TOOLS_CONFIG = 'tools.ini';
+export const TOOLS_TEMPLATE = path.join(PLAYWRIGHT_DIR, 'config', 'tools.template.ini');
 
-// Take --config-dir DIR out of the arguments: the facade uses it, Playwright MCP does not know it.
+// Take --config-dir DIR out of the arguments: the server uses it, Playwright MCP does not know it.
 // Give { configDir, args }. A relative path is relative to cwd. The argument is necessary.
 export function takeConfigDir(args, cwd = process.cwd()) {
   const rest = [];
@@ -70,10 +71,12 @@ export function upstreamEnv(args, env = process.env, cwd = process.cwd(), tmpDir
     if (fs.existsSync(fontsConf)) result.FONTCONFIG_FILE ??= fontsConf;
   }
 
+  // The env variable overrides the browser of a config file too.
+  result.PLAYWRIGHT_MCP_BROWSER = BROWSER;
+
   // A config file sets its own values. The env variables would override them.
   if (hasArg(args, '--config') || env.PLAYWRIGHT_MCP_CONFIG) return result;
 
-  result.PLAYWRIGHT_MCP_BROWSER ??= DEFAULT_BROWSER;
   // The output files go to the workspace: the agent reads them. The tool folder can be closed to agents.
   result.PLAYWRIGHT_MCP_OUTPUT_DIR ??= path.join(cwd, '.local_assets', 'browser-automation-x-mcp', 'output');
 
@@ -82,10 +85,9 @@ export function upstreamEnv(args, env = process.env, cwd = process.cwd(), tmpDir
     || ['PLAYWRIGHT_MCP_ISOLATED', 'PLAYWRIGHT_MCP_USER_DATA_DIR', 'PLAYWRIGHT_MCP_CDP_ENDPOINT', 'PLAYWRIGHT_MCP_EXTENSION']
       .some((name) => env[name]);
   if (!ownProfile) {
-    // Like upstream: one persistent profile for each browser and workspace.
-    const browser = argValue(args, '--browser') ?? result.PLAYWRIGHT_MCP_BROWSER;
+    // Like upstream: one persistent profile for each workspace.
     const workspace = crypto.createHash('sha256').update(cwd).digest('hex').slice(0, 8);
-    result.PLAYWRIGHT_MCP_USER_DATA_DIR = path.join(ASSETS_DIR, 'profiles', `${PLATFORM}-${browser}-${workspace}`);
+    result.PLAYWRIGHT_MCP_USER_DATA_DIR = path.join(ASSETS_DIR, 'profiles', `${PLATFORM}-${BROWSER}-${workspace}`);
   }
   return result;
 }
@@ -127,6 +129,16 @@ export function connectsToBrowser(args) {
 // Give the arguments without --headless. The render mode replaces it.
 export function withoutHeadless(args) {
   return args.filter((arg) => arg !== '--headless' && !arg.startsWith('--headless='));
+}
+
+// Give the arguments without --browser. The browser is always BROWSER.
+export function withoutBrowser(args) {
+  const result = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--browser') i++;
+    else if (!args[i].startsWith('--browser=')) result.push(args[i]);
+  }
+  return result;
 }
 
 function hasArg(args, name) {

@@ -1,4 +1,4 @@
-// JSON Lines logger of the facade. Each line is one event.
+// JSON Lines logger of the server. Each line is one event.
 import fs from 'node:fs';
 import path from 'node:path';
 

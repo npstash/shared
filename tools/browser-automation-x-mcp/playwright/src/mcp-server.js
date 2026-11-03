@@ -1,14 +1,13 @@
-// The facade: an MCP server that forwards each tool request to Playwright MCP.
+// The MCP server. It forwards each tool request to Playwright MCP.
 //
-//   MCP client (Claude Code) <-> facade server | facade client <-> Playwright MCP (child process)
+//   MCP client (Claude Code) <-> server | upstream client <-> Playwright MCP (child process)
 //
 // Each tool call goes through these steps (see callTool()):
-//   tool switch (playwright-tools.ini) → host check (host-policy.ini); both in the config folder
+//   tool switch (tools.ini) → host check (host-policy.ini); both in the config folder
 //   → Playwright MCP → host check of the opened page → discovery (optional)
 //   → form fill and submit (fields.ini, providers-form-fill/; see autofill.js)
 //   → scrub of masked values → log
-// The client does not see that the server is a facade: texts for the client do not name the
-// facade, Playwright or the form fill.
+// Texts for the client do not name upstream, Playwright or the form fill.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -33,8 +32,8 @@ import { summarizeResult } from '../../src/logger.js';
 import { PROVIDERS_DIR, VERSION, configFile } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
 import { autofill, discover } from './autofill.js';
-import { CHROMIUM_BROWSERS, writeChromePrefs } from './chrome-prefs.js';
-import { DEFAULT_BROWSER, TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, UPSTREAM_CLI, argValue, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutHeadless } from './config.js';
+import { writeChromePrefs } from './chrome-prefs.js';
+import { TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, UPSTREAM_CLI, argValue, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutBrowser, withoutHeadless } from './config.js';
 import { cleanStaleXvfb, startXvfb } from './xvfb.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
@@ -69,45 +68,47 @@ export const DANGEROUS_TOOLS = {
 const CODE_SECTION = /### Ran Playwright code\n```[a-z]*\n[\s\S]*?\n```\n?/g;
 
 // configDir: the config folder (--config-dir). See src/paths.js.
-export async function startFacade({ args: givenArgs, configDir, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
+export async function startServer({ args: givenArgs, configDir, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
   let markDownstreamReady;
   const downstreamReady = new Promise((resolve) => { markDownstreamReady = resolve; });
   let server;
 
-  // 1. Load the config of the facade.
+  // 1. Load the config of the server.
   logger.info('config_dir', { dir: configDir });
-  const facadeIni = readIni(configFile(configDir, 'facade.ini'));
+  const serverIni = readIni(configFile(configDir, 'server.ini'));
   const toolsConfig = new ToolsConfig(configFile(configDir, TOOLS_CONFIG, TOOLS_TEMPLATE), logger, DANGEROUS_TOOLS);
   const hostsFile = new HostsFile(configFile(configDir, 'host-policy.ini'));
-  const record = sectionValues(facadeIni, 'hosts').record !== 'false';
+  const record = sectionValues(serverIni, 'hosts').record !== 'false';
   const hostPolicy = new HostPolicy({ hostsFile, allowProvider: new FileAllowProvider({ hostsFile, record, logger }) });
   const fill = await FillRegistry.load({
-    names: listValue(sectionValues(facadeIni, 'fill').providers),
+    names: listValue(sectionValues(serverIni, 'fill').providers),
     providersDir: PROVIDERS_DIR,
     configDir,
     logger,
-    mask: sectionValues(facadeIni, 'mask'),
+    mask: sectionValues(serverIni, 'mask'),
   });
   const fields = new FieldsConfig(configFile(configDir, 'fields.ini'));
   const discovery = env.BROWSER_AUTOMATION_X_MCP_DISCOVER === '1';
   if (discovery) logger.info('discovery_mode', {});
 
   // 2. Select the render mode. RENDER_MODE replaces --headless and PLAYWRIGHT_MCP_HEADLESS:
-  //    the facade ignores them, without an error.
-  const args = withoutHeadless(givenArgs);
-  if (args.length !== givenArgs.length) logger.info('ignored', { control: '--headless', reason: 'RENDER_MODE selects the render mode' });
+  //    the server ignores them, without an error.
+  //    The browser is always Chromium: the server ignores --browser and PLAYWRIGHT_MCP_BROWSER.
+  const headedArgs = withoutHeadless(givenArgs);
+  if (headedArgs.length !== givenArgs.length) logger.info('ignored', { control: '--headless', reason: 'RENDER_MODE selects the render mode' });
   if (env.PLAYWRIGHT_MCP_HEADLESS !== undefined) logger.info('ignored', { control: 'PLAYWRIGHT_MCP_HEADLESS', reason: 'RENDER_MODE selects the render mode' });
-   const mode = connectsToBrowser(args) ? undefined : renderMode(env);
-   cleanStaleXvfb(logger);
+  const args = withoutBrowser(headedArgs);
+  if (args.length !== headedArgs.length) logger.info('ignored', { control: '--browser', reason: 'the browser is always Chromium' });
+  if (env.PLAYWRIGHT_MCP_BROWSER !== undefined) logger.info('ignored', { control: 'PLAYWRIGHT_MCP_BROWSER', reason: 'the browser is always Chromium' });
+  const mode = connectsToBrowser(args) ? undefined : renderMode(env);
+  cleanStaleXvfb(logger);
 
-   // 3. Start Playwright MCP and connect to it.
-   const tmpDir = await tmpDirForChromium();
-   if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
-   const childEnv = upstreamEnv(args, env, cwd, tmpDir);
-   // Set PLAYWRIGHT_MCP_HEADLESS based on RENDER_MODE. Don't override if already set by Kilo.
-   if (mode && !childEnv.PLAYWRIGHT_MCP_HEADLESS) {
-     childEnv.PLAYWRIGHT_MCP_HEADLESS = mode === 'HEADLESS' ? 'true' : 'false';
-   }
+  // 3. Start Playwright MCP and connect to it.
+  const tmpDir = await tmpDirForChromium();
+  if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
+  const childEnv = upstreamEnv(args, env, cwd, tmpDir);
+  delete childEnv.PLAYWRIGHT_MCP_HEADLESS;
+  if (mode) childEnv.PLAYWRIGHT_MCP_HEADLESS = mode === 'HEADLESS' ? 'true' : 'false';
   const xvfb = mode === 'HEADED_INVISIBLE' ? await startXvfb({ logger }) : undefined;
   if (xvfb) {
     childEnv.DISPLAY = xvfb.display;
@@ -115,10 +116,9 @@ export async function startFacade({ args: givenArgs, configDir, logger, serverTr
   }
   logger.info('render_mode', { mode: mode ?? 'none: upstream connects to a running browser', display: childEnv.DISPLAY });
   const outputDir = argValue(args, '--output-dir') ?? childEnv.PLAYWRIGHT_MCP_OUTPUT_DIR;
-  // The persistent profile of a Chromium browser gets CHROME_PREFS. An isolated profile has no folder.
-  const browser = argValue(args, '--browser') ?? childEnv.PLAYWRIGHT_MCP_BROWSER ?? DEFAULT_BROWSER;
+  // The persistent profile gets CHROME_PREFS. An isolated profile has no folder.
   const userDataDir = argValue(args, '--user-data-dir') ?? childEnv.PLAYWRIGHT_MCP_USER_DATA_DIR;
-  const profileDir = userDataDir && CHROMIUM_BROWSERS.has(browser) ? path.resolve(cwd, userDataDir) : undefined;
+  const profileDir = userDataDir ? path.resolve(cwd, userDataDir) : undefined;
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [UPSTREAM_CLI, ...args],
@@ -159,7 +159,7 @@ export async function startFacade({ args: givenArgs, configDir, logger, serverTr
   const upstreamCapabilities = client.getServerCapabilities() ?? {};
   logger.info('upstream_ready', { pid: transport.pid, server: upstreamInfo, capabilities: upstreamCapabilities });
 
-  // Each tool of the facade has a line in playwright-tools.ini. Add the missing ones.
+  // Each tool of the server has a line in tools.ini. Add the missing ones.
   toolsConfig.addMissing((await allTools(client)).map((tool) => tool.name));
 
   // 4. Make the server for the downstream client. It has the tools capability of upstream.
@@ -300,7 +300,7 @@ function fillContext(session, url) {
 
 // The steps of one call. Each step can stop the call with an error result.
 async function runSteps(session, request, extra) {
-  const { client, toolsConfig, hostPolicy, fill } = session;
+  const { client, toolsConfig, hostPolicy, fill, logger } = session;
   const { name, arguments: args } = request.params;
 
   if (!toolsConfig.isEnabled(name)) return toolsConfig.disabledResult(name);
@@ -338,6 +338,7 @@ async function runSteps(session, request, extra) {
     const check = await hostPolicy.check(opened, { tool: name });
     if (!check.allowed) return blockedResult(session, name, opened, check, true);
     await hostPolicy.opened(opened, { tool: name });
+    if (step === 0) logger.info('page_opened', { url: logUrl(opened), source: 'tool' });
     if (step > 0) break;
     if (session.discovery) await discover(session, opened);
     const filled = await autofill(session, opened, (url) => fillContext(session, url));
@@ -361,6 +362,15 @@ async function blockedResult(session, tool, url, check, closePage) {
 
 function capitalize(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+function logUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
 }
 
 async function callTool(session, request, extra) {

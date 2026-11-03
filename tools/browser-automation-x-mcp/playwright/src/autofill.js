@@ -1,6 +1,6 @@
-// Form fill without the agent: after a call, the facade fills the fields of fields.ini on the page
+// Form fill without the agent: after a call, the server fills the fields of fields.ini on the page
 // and submits the form. The agent gets the page after the submit. See sdd/DESIGN.md.
-// The facade runs the page code through browser_run_code_unsafe of upstream. The tool switch of
+// The server runs the page code through browser_run_code_unsafe of upstream. The tool switch of
 // the agent does not apply to these calls, and their results never go to the agent.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -135,7 +135,7 @@ async function listFields(page) {
 }
 
 // After a call: fill the fields of fields.ini on the page and submit, in rounds. Give the snapshot
-// result of the page after the last submit, or undefined if the facade did not submit.
+// result of the page after the last submit, or undefined if the server did not submit.
 // Errors go to the log only: the agent gets the result of its call.
 export async function autofill(session, url, ctx) {
   const { client, fields, fill, logger, fillState } = session;
@@ -230,34 +230,33 @@ export async function autofill(session, url, ctx) {
     });
     
     current = await runCode(client, (page) => page.url(), null).catch(() => current);
+    logger.info('page_opened', { url: logUrl(current), source: 'form_submit' });
+    if (session.discovery) await discover(session, current);
   }
   if (!submitted) return undefined;
   return client.callTool({ name: 'browser_snapshot', arguments: {} }, undefined, { timeout: CALL_TIMEOUT });
 }
 
-// Discovery mode: write the input fields of the page into DISCOVERED_FILE, one section for each
-// URL pattern. A later visit of the same pattern replaces its section.
+// Discovery mode: write the fields and submit buttons of the page into DISCOVERED_FILE, one
+// section for each URL pattern. A later visit of the same pattern replaces its section.
 export async function discover(session, url) {
   const { client, logger } = session;
   
   // Get input fields
-  let items;
+  let items = [];
   try {
-    items = await runCode(client, listFields, null);
+    items = await runCode(client, listFields, null) ?? [];
   } catch (error) {
     logger.error('discover_error', { url, message: error.message });
-    return;
   }
-  if (!items?.length) return;
   const pattern = urlPattern(url);
   
   // Get submit buttons
-  let submitButtons;
+  let submitButtons = [];
   try {
-    submitButtons = await runCode(client, listSubmitButtons, null);
+    submitButtons = await runCode(client, listSubmitButtons, null) ?? [];
   } catch (error) {
     logger.debug('discover_submit_buttons_error', { url, message: error.message });
-    submitButtons = [];
   }
   
   const used = new Map();
@@ -287,12 +286,12 @@ export async function discover(session, url) {
   }
   
   // Add discovered submit buttons
-  if (submitButtons && submitButtons.length > 0) {
+  if (submitButtons.length > 0) {
     const uniqueSelectors = new Set();
     for (const btn of submitButtons) {
       if (btn.selector && !uniqueSelectors.has(btn.selector)) {
         uniqueSelectors.add(btn.selector);
-        lines.push(`; submit button: ${btn.tag}${btn.id ? `#${btn.id}` : ''} type=${btn.type}`);
+        lines.push(`; submit button: ${btn.tag}${btn.id ? `#${btn.id}` : ''} type=${btn.type || 'submit'}${btn.frame ? ` frame=${btn.frame}` : ''}`);
         if (btn.text) {
           lines.push(`;   text: "${btn.text}"`);
         }
@@ -323,57 +322,62 @@ function fieldName({ type, autocomplete, name }) {
 
 // Page code: find submit buttons on the page
 async function listSubmitButtons(page) {
-  const buttons = await page.evaluate(() => {
-    const allElements = document.querySelectorAll('button, input[type="submit"], input[type="image"]');
-    return [...allElements].map((el) => ({
-      tag: el.tagName.toLowerCase(),
-      type: (el.getAttribute('type') ?? '').toLowerCase(),
-      name: el.name || '',
-      id: el.id || '',
-      text: (el.innerText || el.value || '').trim().replace(/\s+/g, ' ').slice(0, 80),
-      selector: null
-    }));
-  }).catch(() => []);
-  
-  // Find unique selectors for each button
   const result = [];
-  for (const btn of buttons) {
-    const candidates = [];
-    if (btn.text && !btn.type) {
-      candidates.push(`button:contains("${btn.text}")`);
-    }
-    if (btn.id) {
-      candidates.push(`#${CSS.escape(btn.id)}`);
-    }
-    if (btn.name && btn.tag === 'input') {
-      candidates.push(`input[name=${JSON.stringify(btn.name)}]`);
-    }
-    if (btn.type === 'submit' || btn.type === 'image') {
-      const typeSelector = btn.type === 'image' ? 'input[type="image"]' : 'button';
-      candidates.push(`${typeSelector}${btn.id ? '' : ''}`);
-    }
-    
-    // Use the first candidate that is unique
-    let selector = null;
-    for (const cand of candidates) {
-      try {
-        if (document.querySelectorAll(cand).length === 1) {
-          selector = cand;
-          break;
+  for (const frame of page.frames()) {
+    const buttons = await frame.evaluate(() => {
+      const visible = (el) => {
+        const box = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const unique = (selector) => {
+        try {
+          return document.querySelectorAll(selector).length === 1;
+        } catch {
+          return false;
         }
-      } catch {
-        continue;
-      }
-    }
-    
-    result.push({ ...btn, selector });
+      };
+      return [...document.querySelectorAll('button, input[type="submit"], input[type="image"]')]
+        .filter((el) => {
+          const tag = el.tagName.toLowerCase();
+          const type = (el.getAttribute('type') ?? '').toLowerCase();
+          return visible(el) && (tag === 'input' || type === 'submit' || (!type && el.form));
+        })
+        .map((el) => {
+          const tag = el.tagName.toLowerCase();
+          const type = (el.getAttribute('type') ?? '').toLowerCase();
+          const candidates = [];
+          if (el.id) candidates.push(`#${CSS.escape(el.id)}`);
+          if (el.name) candidates.push(`${tag}[name=${JSON.stringify(el.name)}]`);
+          if (tag === 'input') candidates.push(`input[type=${JSON.stringify(type)}]`);
+          else if (type) candidates.push(`button[type=${JSON.stringify(type)}]`);
+          else candidates.push('button');
+          return {
+            tag,
+            type,
+            name: el.name || '',
+            id: el.id || '',
+            text: (el.innerText || el.value || '').trim().replace(/\s+/g, ' ').slice(0, 80),
+            selector: candidates.find(unique) ?? null,
+          };
+        });
+    }).catch(() => []);
+    for (const button of buttons) result.push({ ...button, frame: frame === page.mainFrame() ? '' : frame.url() });
   }
-  
   return result;
 }
 
+function logUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
 const DISCOVERED_HEADER = [
-  '# Input fields that the discovery mode found. One section for each URL pattern.',
+  '# Fields and submit buttons that the discovery mode found. One section for each URL pattern.',
   '# Copy the lines of a login form into fields.ini of the config folder. See README.md.',
 ];
 
