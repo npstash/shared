@@ -293,7 +293,31 @@ def test_list_systems_needs_a_terminal_and_the_passphrase(home, monkeypatch, cap
     assert "list-systems runs only in a terminal" in capsys.readouterr().err
     monkeypatch.setattr(cs, "_tty", lambda: True)
     assert cs.main(["--vault-home", str(home), "list-systems"]) == 0 and asked == ["Master passphrase: "]
-    assert capsys.readouterr().out == "a\nb\n"
+    assert capsys.readouterr().out == "a\thttps://g\ttoken\n  scope line\nb\thttps://g\ttoken\n  scope line\n"
+
+
+def test_get_system_by_entry_id_or_encrypted_name_needs_the_passphrase(home, monkeypatch, capsys):
+    cs.Store(home, PW).set_system(SYS, url="https://g", authority_info=["scope"], secrets={"token": "t"})
+    cs.Store(home, PW).enrol("here", None)
+    [(eid, record)] = vault_doc(home)["entries"].items()
+    for key in (eid, record["name"]):
+        with pytest.raises(cs.CredentialError, match="needs the master passphrase"):
+            cs.Store(home).get_system(key)                 # a clone key alone does not open the name
+        c = cs.Store(home, PW).get_system(key)
+        assert (c.name, c.url, list(c.secrets())) == (SYS, "https://g", ["token"])
+        line = log_lines(home)[-1]
+        assert (line[1], line[3]) == ("get-system", f'"{eid}"')
+    with pytest.raises(cs.CredentialError, match="unknown system"):
+        cs.Store(home, PW).get_secret(eid, "token")        # only get-system takes an ID
+    before = len(log_lines(home))
+    assert cs.Store(home).get_system(SYS).name == SYS      # a name needs no passphrase and no log line
+    assert len(log_lines(home)) == before
+    asked = []
+    monkeypatch.setattr(cs.getpass, "getpass", lambda prompt: asked.append(prompt) or PW)
+    monkeypatch.setattr(cs, "_tty", lambda: True)
+    capsys.readouterr()
+    assert cs.main(["--vault-home", str(home), "get-system", eid]) == 0 and asked == ["Master passphrase: "]
+    assert capsys.readouterr().out == f"{SYS}\thttps://g\ttoken\n  scope\n"
 
 
 def test_set_system_adds_and_updates(home):

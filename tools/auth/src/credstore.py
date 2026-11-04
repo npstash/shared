@@ -882,16 +882,33 @@ class Store:
 
     def _names(self, admin) -> dict[str, str]:
         """ID -> name of each entry. Only the admin key (the passphrase) opens the names."""
-        names = {}
-        for eid, record in self._entries().items():
-            try:
-                name = admin.decrypt(b64decode(record["name"]), _oaep()).decode()
-            except (KeyError, ValueError) as exc:
-                raise CredentialError(f"the name of entry {eid} cannot be decrypted") from exc
-            if entry_id(self._key, name) != eid:
-                raise CredentialError(f"entry {eid} in {self.vault} is damaged")
-            names[eid] = name
-        return names
+        return {eid: self._name_of(admin, eid, record) for eid, record in self._entries().items()}
+
+    def _name_of(self, admin, eid: str, record: dict) -> str:
+        """The name of the entry `eid`, decrypted with the admin key and checked against the ID."""
+        try:
+            name = admin.decrypt(b64decode(record["name"]), _oaep()).decode()
+        except (KeyError, ValueError) as exc:
+            raise CredentialError(f"the name of entry {eid} cannot be decrypted") from exc
+        if entry_id(self._key, name) != eid:
+            raise CredentialError(f"entry {eid} in {self.vault} is damaged")
+        return name
+
+    def _lookup(self, key: str) -> str | None:
+        """The name of the entry with the ID or the encrypted name `key`, else None.
+
+        A match needs the passphrase: only the admin key opens the name."""
+        entries = self._entries()
+        eid = key if key in entries else next(
+            (e for e, record in entries.items() if record.get("name") == key), None)
+        if eid is None:
+            return None
+        name = self._name_of(_admin_key(self._admin_pem(self._confirm_passphrase())), eid, entries[eid])
+        _log(self.home, "get-system", eid, method=self.method)
+        return name
+
+    def _show(self, name: str) -> Credential:
+        return self._resolve(self._need(name))
 
     # -- wrapping and backups --------------------------------------------------------------
 
@@ -1173,18 +1190,21 @@ class Store:
         return sorted(names.values())
 
     def get_system(self, system: str) -> Credential:
-        """A system, with no access log line. Use get_credential() or get_secret() to hand out secrets."""
-        return self._resolve(self._need(system))
+        """A system by its name, entry ID or encrypted name. Use get_credential() or get_secret() to hand out secrets.
+
+        An entry ID or an encrypted name needs the passphrase, and writes an access log line.
+        A name writes no log line."""
+        return self._show(self._lookup(system) or system)
 
     def get_credential(self, system: str) -> Credential:
         """A system with all its secrets. Logs each secret."""
-        c = self.get_system(system)
+        c = self._show(system)
         _log(self.home, "get", self._id(system), list(c.secrets()), self.method)
         return c
 
     def get_secret(self, system: str, key: str) -> str:
         """One secret value. Logs only this secret."""
-        c = self.get_system(system)
+        c = self._show(system)
         if key not in c.secrets():
             raise CredentialError(f"no secret {key!r} in system {system!r} "
                                   f"(known: {', '.join(c.secrets()) or 'none'})")
@@ -1477,6 +1497,13 @@ def _tty() -> bool:
     return sys.stdin is not None and sys.stdin.isatty()
 
 
+def _print_system(c: Credential) -> None:
+    """Name, url and secret names on one line, then one indented line for each authority info line."""
+    print(f"{c.name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
+    for line in c.authority_info:
+        print(f"  {line}")
+
+
 def _prompt_new_passphrase() -> str:
     if not _tty():
         raise CredentialError("a new passphrase must be typed in a terminal")
@@ -1569,12 +1596,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("delete-all-keyring-secrets", help="delete each key passphrase, and the key files they open")
     sub.add_parser("push-enrol", help="commit and push the new recipient files of each vault, and the submodule "
                                       "pointers above them; only in a terminal")
-    sub.add_parser("list-systems", help="print the names of all systems; only in a terminal, needs the passphrase")
+    sub.add_parser("list-systems", help="show all systems as get-system does; only in a terminal, needs the passphrase")
     p = sub.add_parser("edit", help="write an edit file for each system; secret values empty")
     p.add_argument("systems", nargs="+", metavar="SYSTEM")
     sub.add_parser("sync", help="apply the edit files to the vault, then delete them")
     p = sub.add_parser("get-system", help="show a system: url, secret names, authority info; no values")
-    p.add_argument("system")
+    p.add_argument("system", help="name, entry ID or encrypted name; an ID or an encrypted name needs the passphrase")
     p = sub.add_parser("get-secret", help="print one secret value")
     p.add_argument("system")
     p.add_argument("key")
@@ -1640,17 +1667,14 @@ def main(argv: list[str] | None = None) -> int:
             if not _tty():
                 raise CredentialError("list-systems runs only in a terminal: it needs the master passphrase")
             for name in store.list_systems():
-                print(name)
+                _print_system(store._show(name))
         elif a.cmd == "edit":
             for path in store.edit(a.systems):
                 print(path)
         elif a.cmd == "sync":
             print(f"synced {len(store.sync())} system(s); commit and push the vault home")
         elif a.cmd == "get-system":
-            c = store.get_system(a.system)
-            print(f"{c.name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
-            for line in c.authority_info:
-                print(f"  {line}")
+            _print_system(store.get_system(a.system))
         elif a.cmd == "get-secret":
             print(store.get_secret(a.system, a.key))
         elif a.cmd == "set-system":
