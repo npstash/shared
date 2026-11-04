@@ -87,10 +87,9 @@ describe('xvfb', { skip }, () => {
 
     before(async () => {
       site = await startSite();
-      // The old controls ask for a headless browser. The render mode decides.
+      // The old control asks for a headless browser. The render mode decides.
       mcp = await startServerClient({
         name: 'xvfb',
-        args: ['--headless', '--isolated'],
         env: { RENDER_MODE: 'HEADED', PLAYWRIGHT_MCP_HEADLESS: 'true', DISPLAY: '', WAYLAND_DISPLAY: '' },
       });
     });
@@ -100,17 +99,33 @@ describe('xvfb', { skip }, () => {
       await site?.close();
     });
 
-    test('runs a headed browser on Xvfb and ignores the old controls', async () => {
+    test('runs a headed browser on Xvfb and ignores the variables of Playwright MCP', async () => {
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/` });
       assert.doesNotMatch(await evaluate(mcp.client, '() => navigator.userAgent'), /Headless/);
       const log = readLog(mcp.logFile);
       assert.equal(log.find((entry) => entry.event === 'render_mode').mode, 'HEADED_INVISIBLE');
-      assert.deepEqual(log.filter((entry) => entry.event === 'ignored').map((entry) => entry.control), ['--headless', 'PLAYWRIGHT_MCP_HEADLESS']);
-      assert.equal(log.find((entry) => entry.event === 'upstream_start').args.includes('--headless'), false);
+      assert.ok(log.filter((entry) => entry.event === 'ignored').some((entry) => entry.control === 'PLAYWRIGHT_MCP_HEADLESS'));
+    });
+
+    test('denies a permission without a prompt', async () => {
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/` });
+      assert.equal(await evaluate(mcp.client, '() => Notification.requestPermission()'), 'denied');
+    });
+
+    test('stops Chromium and Xvfb when the last lane closes, and starts them again for a new lane', async () => {
+      const first = readLog(mcp.logFile).filter((entry) => entry.event === 'xvfb_started').at(-1).pid;
+      assert.ok(running(first));
+      await call(mcp.client, 'browser_close');
+      assert.ok(await waitUntilStopped(first));
+      assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'browser_stopped'));
+      await call(mcp.client, 'browser_navigate', { url: `${site.url}/` });
+      const second = readLog(mcp.logFile).filter((entry) => entry.event === 'xvfb_started').at(-1).pid;
+      assert.notEqual(second, first);
+      assert.ok(running(second));
     });
 
     test('stops Xvfb with the server', async () => {
-      const { pid } = readLog(mcp.logFile).find((entry) => entry.event === 'xvfb_started');
+      const { pid } = readLog(mcp.logFile).filter((entry) => entry.event === 'xvfb_started').at(-1);
       assert.ok(running(pid));
       await mcp.close();
       mcp = undefined;

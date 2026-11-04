@@ -1,13 +1,12 @@
-// The server forwards the tools of Playwright MCP 1:1, and it logs each call.
+// The server forwards the tools of Playwright MCP 1:1 with the parameter lane, and it logs each call.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { createConnection } from '@playwright/mcp';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ASSETS_DIR, TOOL_DIR } from '../../src/paths.js';
-import { UPSTREAM_CLI, upstreamEnv } from '../src/config.js';
-import { call, evaluate, ref, startServerClient, startSite } from './helpers.js';
+import { LANE_TOOL_NAMES, call, evaluate, ref, startServerClient, startSite } from './helpers.js';
 
 function readLog(file) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
@@ -29,22 +28,21 @@ describe('tools', () => {
     await site?.close();
   });
 
-  test('gives the same tools as Playwright MCP', async () => {
-    const args = ['--headless', '--isolated'];
+  test('gives the lane tools and the tools of Playwright MCP, each with the parameter lane', async () => {
+    const upstreamServer = await createConnection({ browser: { browserName: 'chromium' } });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await upstreamServer.connect(serverTransport);
     const upstream = new Client({ name: 'test-upstream', version: '0' });
-    await upstream.connect(new StdioClientTransport({
-      command: process.execPath,
-      args: [UPSTREAM_CLI, ...args],
-      env: upstreamEnv(args),
-      cwd: TOOL_DIR,
-    }));
+    await upstream.connect(clientTransport);
     try {
       // The server changes only texts: the name Playwright and notes of disabled tools. Names stay.
       const expected = (await upstream.listTools()).tools;
       const actual = (await client.listTools()).tools;
       assert.ok(expected.length > 10);
-      assert.deepEqual(actual.map((tool) => tool.name), expected.map((tool) => tool.name));
-      assert.deepEqual(actual.map((tool) => Object.keys(tool.inputSchema.properties ?? {})), expected.map((tool) => Object.keys(tool.inputSchema.properties ?? {})));
+      assert.deepEqual(actual.map((tool) => tool.name), [...LANE_TOOL_NAMES, ...expected.map((tool) => tool.name)]);
+      const forwarded = actual.filter((tool) => !LANE_TOOL_NAMES.has(tool.name));
+      assert.deepEqual(forwarded.map((tool) => Object.keys(tool.inputSchema.properties ?? {})), expected.map((tool) => [...Object.keys(tool.inputSchema.properties ?? {}), 'lane']));
+      for (const tool of forwarded) assert.ok(tool.inputSchema.required.includes('lane'), tool.name);
     } finally {
       await upstream.close();
     }
@@ -60,7 +58,8 @@ describe('tools', () => {
     ];
     for (const text of texts) assert.doesNotMatch(text, /upstream|playwright|placeholder|credential|vault|provider|fill_values/i);
     assert.equal(client.getServerVersion().name, 'browser-automation-x-mcp');
-    assert.match(client.getInstructions(), /^Use the tools of this server for each browser automation task when they are available\. This is mandatory\.$/m);
+    assert.match(client.getInstructions(), /^Use the tools of this server for each browser automation task when they are available\. This is mandatory\. /);
+    assert.match(client.getInstructions(), /browser_lane_open/);
   });
 
   test('navigates, reads a page and follows a link', async () => {
@@ -101,11 +100,11 @@ describe('tools', () => {
     await call(client, 'browser_navigate', { url: `${site.url}/` });
     const entries = readLog(mcp.logFile);
     const events = new Set(entries.map((entry) => entry.event));
-    for (const event of ['upstream_start', 'upstream_ready', 'client_ready', 'list_tools', 'tool_call', 'tool_result']) {
+    for (const event of ['upstream_ready', 'client_ready', 'list_tools', 'browser_started', 'lane_opened', 'tool_call', 'tool_result']) {
       assert.ok(events.has(event), `no ${event} entry`);
     }
     const call_ = entries.findLast((entry) => entry.event === 'tool_call' && entry.tool === 'browser_navigate');
-    assert.deepEqual(call_.args, { url: `${site.url}/` });
+    assert.deepEqual(call_.args, { url: `${site.url}/`, lane: client.lane });
     const result = entries.find((entry) => entry.event === 'tool_result' && entry.id === call_.id);
     assert.equal(result.isError, false);
     assert.equal(typeof result.ms, 'number');
@@ -115,7 +114,7 @@ describe('tools', () => {
     assert.ok(mcp.logFile.includes(`${path.sep}test-tools${path.sep}`));
     assert.equal(mcp.textLogFile, mcp.logFile.replace(/\.json$/, ''));
     const lines = fs.readFileSync(mcp.textLogFile, 'utf8').trim().split('\n');
-    assert.ok(lines.some((line) => /^\d\d:\d\d:\d\d tool_call id=\d+ tool=browser_navigate args=url:127\.0\.0\.1:\d+\/$/.test(line)), lines.join('\n'));
+    assert.ok(lines.some((line) => /^\d\d:\d\d:\d\d tool_call id=\d+ tool=browser_navigate args=url:127\.0\.0\.1:\d+\/,lane:lane-[0-9a-f]+$/.test(line)), lines.join('\n'));
     for (const line of lines) {
       assert.match(line, /^\d\d:\d\d:\d\d [a-z_-]+/);
       assert.ok(line.length <= 160, line);
@@ -124,35 +123,30 @@ describe('tools', () => {
   });
 });
 
-describe('persistent profile', () => {
-  test('keeps localStorage from one session to the next; the profile has no Chrome bubbles', async () => {
-    const profile = path.join(ASSETS_DIR, 'test-profile');
-    fs.rmSync(profile, { recursive: true, force: true });
+describe('storage state', () => {
+  test('keeps cookies and localStorage from one session to the next, in a file with mode 0600', async () => {
     const site = await startSite();
     const values = [];
-    let prefs;
+    let mcp;
     try {
       for (const session of [1, 2]) {
-        const mcp = await startServerClient({ name: 'profile', args: ['--user-data-dir', profile] });
+        mcp = await startServerClient({ name: 'state', keepState: session === 2 });
         try {
           await call(mcp.client, 'browser_navigate', { url: `${site.url}/` });
-          if (session === 1) await evaluate(mcp.client, `() => { localStorage.setItem('key', 'kept'); return true; }`);
-          values.push(await evaluate(mcp.client, `() => localStorage.getItem('key')`));
+          if (session === 1) await evaluate(mcp.client, `() => { localStorage.setItem('key', 'kept'); document.cookie = 'c=kept; max-age=3600'; return true; }`);
+          values.push(await evaluate(mcp.client, `() => [localStorage.getItem('key'), document.cookie]`));
         } finally {
-          // The client closes the server without browser_close, as Claude Code does.
+          // The client closes the server without browser_lane_close, as Claude Code does.
           await mcp.close();
         }
       }
-      // Chrome writes the file again at exit. The settings stay.
-      prefs = JSON.parse(fs.readFileSync(path.join(profile, 'Default', 'Preferences'), 'utf8'));
     } finally {
       await site.close();
-      fs.rmSync(profile, { recursive: true, force: true });
     }
-    assert.deepEqual(values, ['kept', 'kept']);
-    assert.equal(prefs.profile.password_manager_leak_detection, false);
-    assert.equal(prefs.credentials_enable_service, false);
-    assert.equal(prefs.translate.enabled, false);
+    assert.deepEqual(values, [['kept', 'c=kept'], ['kept', 'c=kept']]);
+    assert.equal(fs.statSync(mcp.stateFile).mode & 0o777, 0o600);
+    const log = fs.readFileSync(mcp.logFile, 'utf8');
+    assert.ok(!log.includes('kept'), 'a value of the storage state is in the log');
   });
 });
 

@@ -1,7 +1,8 @@
 # browser-automation-x-mcp
 
-An MCP server for browser automation. It gives the agent the browser tools, and adds tool
-switches, a form fill, host lists and a log.
+An MCP server for browser automation. It gives the agent the browser tools, and adds lanes, tool
+switches, a form fill, host lists and a log. A lane is an own browser context for one agent:
+agents and sessions use the browser in parallel (see [Lanes](#lanes)).
 
 The internals are hidden from the agents. An agent sees the MCP server `browser-automation-x-mcp`
 and the browser tools. No text for the agent names Playwright, the form fill or its providers.
@@ -15,7 +16,8 @@ Documents (SDD): [PRD](sdd/PRD.md), [SRS](sdd/SRS.md), [QAS](sdd/QAS.md), [DESIG
 [ADL](sdd/ADL.md). Open items: [DESIGN, section 11](sdd/DESIGN.md#11-open-issues).
 
 ```
-MCP client (Claude Code) <-stdio-> server <-stdio-> Playwright MCP (child process) -> Chromium
+MCP client (Claude Code) <-stdio-> server: one Playwright MCP connection for each lane -> Chromium
+                                           (in the server process)       one context for each lane
 ```
 
 ## Structure
@@ -36,7 +38,6 @@ sdd/                          documents of the tool
 ```bash
 ./run.sh install                           # make the runtime, install the browser, then stop
 ./run.sh --config-dir <DIR>                # start the server (MCP server on stdio)
-./run.sh --config-dir <DIR> --isolated     # each other argument goes to Playwright MCP
 ./run.sh test                              # run the tests
 run.bat install                            # the same on Windows
 ```
@@ -44,7 +45,8 @@ run.bat install                            # the same on Windows
 - Do `install` one time before you add the server to a client. The first install downloads
   approximately 350 MB. A client can stop a server that does not start in time.
 - `--config-dir` is necessary. A relative path is relative to the working folder. See
-  [Config folder](#config-folder).
+  [Config folder](#config-folder). The server takes no other argument: an other argument stops it
+  with an error.
 - `run.sh` and `run.bat` download a pinned Node.js into `.local_assets/runtime/`. The Node.js of
   the system stays unchanged.
 - `run.sh` supports Linux and macOS (x64, arm64). `run.bat` supports Windows (x64, arm64).
@@ -92,13 +94,13 @@ entry in `.kilo/kilo.jsonc`.
   wins over the project scope: `claude mcp add --scope local browser-automation-x-mcp -- cmd /c <TOOL>\run.bat --config-dir <DIR>`.
 - **Desktop app (Code tab):** uses the configuration of Claude Code on the same computer.
 - **Agent SDK:** give the server in `mcp_servers` / `mcpServers` of the options, and allow
-  `mcp__browser-automation-x-mcp__*`. Use `--isolated` if the wrapper runs more than one session
-  at the same time. An `env` entry goes to the server and to Playwright MCP.
+  `mcp__browser-automation-x-mcp__*`. Sessions can run at the same time: each one uses its own
+  lanes.
 
   ```python
   options = ClaudeAgentOptions(
       mcp_servers={"browser-automation-x-mcp": {"type": "stdio", "command": "<TOOL>/run.sh",
-                   "args": ["--config-dir", "<DIR>", "--isolated"]}},
+                   "args": ["--config-dir", "<DIR>"]}},
       allowed_tools=["mcp__browser-automation-x-mcp__*"],
       disallowed_tools=["mcp__playwright", "mcp__plugin_playwright_playwright"],
   )
@@ -119,8 +121,9 @@ a `client_ready` entry and a `tool_call` entry for `browser_navigate`.
 | --- | --- |
 | The server does not start, or it fails at the first start | The install takes too long. Run `run.sh install` or `run.bat install` first. |
 | `error while loading shared libraries` in the log | Linux: a library has no package. See [Linux: libraries and fonts](#linux-libraries-and-fonts). |
-| `Browser is already in use` | An other session uses the persistent profile. Add `--isolated`, or close the other session. |
-| No window opens | On WSL and without a display, the default is `HEADED_INVISIBLE`. Set `RENDER_MODE=HEADED`. |
+| `unknown argument` | The server takes only `--config-dir`. Remove the other arguments. |
+| No window opens | On WSL and without a display, the default is `HEADED_INVISIBLE`. Set `RENDER_MODE=HEADED`. The window opens with the first lane and closes with the last lane. On WSLg it can open behind the editor. |
+| A change of `kilo.jsonc` has no effect | Kilo keeps a server that runs. Reload the VSCode window. |
 
 ## Deny rules
 
@@ -141,7 +144,7 @@ file is first a copy of its template in this folder.
 
 | File | Content | Template |
 | --- | --- | --- |
-| `server.ini` | `[fill] providers`: provider order; `[mask]`: masked providers; `[hosts] record` | `config/server.template.ini` |
+| `server.ini` | `[fill] providers`: provider order; `[mask]`: masked providers; `[hosts] record`; `[storage] indexeddb` | `config/server.template.ini` |
 | `fields.ini` | form fields for each URL pattern | `config/fields.template.ini` |
 | `host-policy.ini` | `[deny]` and `[allow]` host patterns | `config/host-policy.template.ini` |
 | `tools.ini` | tool switches | `playwright/config/tools.template.ini` |
@@ -264,6 +267,37 @@ start, the server adds the missing tools with their default.
 - The form fill uses `browser_run_code_unsafe` of Playwright MCP also when the switch disables it.
 - `browser_evaluate` can read a value that stays in a field after a failed submit.
 
+## Lanes
+
+A lane is an own browser context for one agent: its own tabs, current tab and form state. All lanes
+of a server use one Chromium. Each session (a Claude Code chat, a Codex session, a Kilo window) has
+its own server, and thus its own Chromium and render mode.
+
+- `browser_lane_open` gives a lane ID, e.g. `lane-3f9a`. Each other tool needs the parameter
+  `lane` with this ID. Each agent that works in parallel, also a subagent, opens its own lane.
+- `browser_lane_close` closes the lane. `browser_close` does the same.
+- `browser_lanes` gives the open lanes and the maximum. When `browser_lane_open` gives "Busy",
+  call `browser_lanes` later, then try again.
+- Limits: 3 lanes for each server, 5 tabs for each lane. A popup over the tab limit closes, and the
+  next result tells it. A lane without a call for 10 minutes closes.
+- Chromium starts with the first lane and stops after the last lane.
+- **Logins:** a new lane loads the storage state of the workspace,
+  `.local_assets/storage-state-<workspace hash>.json` of this folder: cookies and localStorage. When a lane closes, the server merges its state into the file.
+  Thus a login reaches the lanes and sessions that open after the lane closed. The file has the
+  mode `0600`, and it never goes into a result, a log or the output folder.
+- **IndexedDB:** some sites keep the login in IndexedDB, e.g. Firebase apps or WhatsApp Web. List
+  their hosts in `server.ini`:
+
+  ```ini
+  [storage]
+  indexeddb = web.whatsapp.com, myapp.firebaseapp.com
+  ```
+
+- **File names:** the `filename` of a tool must be in the output folder. A name without a folder
+  goes there. An other path gives an error.
+- **Headers:** the values of `Cookie`, `Set-Cookie`, `Authorization` and `Proxy-Authorization`
+  become `***` in the results and in the output files.
+
 ## Render mode
 
 Some sites block a headless browser. Thus the server never runs headless by default. `RENDER_MODE`
@@ -279,13 +313,14 @@ selects the mode:
 - `HEADED_INVISIBLE` runs a headed browser on Xvfb, a virtual display. Nobody sees the window.
 - Only `HEADLESS` gives a headless browser. If a mode is not possible, the server stops with an
   error.
-- The server ignores `--headless` and `PLAYWRIGHT_MCP_HEADLESS`. The render mode also applies with
-  `--config`.
-- `run.sh install` unpacks Xvfb into this folder on Linux. No root. The server starts Xvfb on the
-  first free display from `:99`, only on the abstract socket of Linux, and stops it at the end.
-  After a SIGKILL of the server, the kernel stops Xvfb. The next start kills a leftover Xvfb.
-- To solve a challenge of a site, use `HEADED` on a host with a display. The persistent profile
-  keeps the result.
+- The server ignores `PLAYWRIGHT_MCP_HEADLESS` and each other `PLAYWRIGHT_MCP_*` variable.
+- `run.sh install` unpacks Xvfb into this folder on Linux. No root. The server starts Xvfb with
+  Chromium on the first free display from `:99`, only on the abstract socket of Linux, and stops it
+  with Chromium. After a SIGKILL of the server, the kernel stops Xvfb. The next start kills a
+  leftover Xvfb.
+- To solve a challenge of a site, use `HEADED` on a host with a display. The storage state keeps
+  the cookies of the result.
+- Chromium shows no permission prompt: it denies the request (`--deny-permission-prompts`).
 
 ## Linux: libraries and fonts
 
@@ -301,33 +336,26 @@ fonts.
 
 ## Arguments and defaults
 
-Each argument, except `--config-dir`, `--browser` and `--headless`, goes to Playwright MCP. For the
-list, run `./run.sh --config-dir <DIR> --help`.
+The server takes only `--config-dir`. It ignores each `PLAYWRIGHT_MCP_*` variable and logs
+`ignored`.
 
-| Value | Default of the server | Default of Playwright MCP |
-| --- | --- | --- |
-| Render mode (`RENDER_MODE`) | `DEFAULT`: never headless | a window if the host has a display |
-| Browser files (`PLAYWRIGHT_BROWSERS_PATH`) | `.local_assets/browsers/<platform>/` | cache folder of the user |
-| Profile (`PLAYWRIGHT_MCP_USER_DATA_DIR`) | `.local_assets/profiles/<platform>-chromium-<workspace hash>/` | cache folder of the user |
-| Output files (`PLAYWRIGHT_MCP_OUTPUT_DIR`) | `.local_assets/browser-automation-x-mcp/output/` of the working folder | in the workspace |
-| Temp files (`TMPDIR`, `TEMP`, `TMP`) | `.local_assets/tmp/` | temp folder of the OS |
-| Browser registry (`XDG_CACHE_HOME`, Linux only) | `.local_assets/cache/` | `~/.cache/ms-playwright/b/` |
+| Value | Default of the server |
+| --- | --- |
+| Render mode (`RENDER_MODE`) | `DEFAULT`: never headless |
+| Browser files (`PLAYWRIGHT_BROWSERS_PATH`) | `.local_assets/browsers/<platform>/` |
+| Storage state (`BROWSER_AUTOMATION_X_MCP_STORAGE_STATE`) | `.local_assets/storage-state-<workspace hash>.json` |
+| Output files | `.local_assets/browser-automation-x-mcp/output/` of the working folder |
+| Temp files (`TMPDIR`, `TEMP`, `TMP`) | `.local_assets/tmp/` |
+| Browser registry (`XDG_CACHE_HOME`, Linux only) | `.local_assets/cache/` |
 
-- The browser is always Chromium, installed by the launcher. The server ignores `--browser` and
-  `PLAYWRIGHT_MCP_BROWSER`, and logs `ignored`.
-- An argument or an env variable of the user overrides each other default.
-- The server sets no profile with `--isolated`, `--user-data-dir`, `--cdp-endpoint`, `--extension`
-  or `--endpoint`. With `--config <file>` or `PLAYWRIGHT_MCP_CONFIG`, it sets no `PLAYWRIGHT_MCP_*`
-  default, except the browser.
-- The persistent profile keeps logins. Two sessions in the same workspace cannot use it at the same
-  time. For parallel sessions, use `--isolated`.
-- Chromium makes a Unix socket in the temp folder. If this folder cannot hold it, the server uses
-  `.local_assets/tmp/` of the repository root, else the temp folder of the OS. It logs
+- The browser is always Chromium, installed by the launcher.
+- A `PLAYWRIGHT_BROWSERS_PATH` of the user stays.
+- Chromium makes a Unix socket in the temp folder. If the temp folder of this tool cannot hold it,
+  the server uses `.local_assets/tmp/` of the first folder with `.git` above this tool (in a
+  submodule: the submodule, e.g. `shared/`), else the temp folder of the OS. It logs
   `tmp_dir_fallback`.
 - On Windows and macOS, Playwright writes a registry of the open browsers into the cache folder of
   the user. The server cannot move it.
-- `--save-session` of Playwright MCP writes the code of the form fill, with the values, into the
-  output folder. Do not use it.
 
 ## Logs
 
@@ -355,9 +383,11 @@ Events of the form fill: `fill_providers`, `fill_value` (field and provider, no 
 `fill_submitted`, `fill_failed`, `fill_no_value`, `fill_error`, `scrub_file`. Events of the
 discovery: `fields_discovered`, `user_filled`, `user_pressed`, `user_submitted`, `agent_filled`,
 `agent_pressed`, `agent_submitted`, `discover_error`, `record_error`. Other events:
-`upstream_start`, `upstream_ready`, `client_ready`, `list_tools`, `tool_call`, `tool_result`,
-`tool_error`, `page_opened` (`via`: `tool`, `auto_submit` or `user_submit`), `host_blocked`,
-`host_recorded`, `tools_config_added`, `upstream_stderr`, `tools_changed`, `shutdown`. The name of
+`upstream_ready`, `client_ready`, `list_tools`, `tool_call`, `tool_result`, `tool_error`,
+`browser_started`, `browser_stopped`, `lane_opened`, `lane_closed` (`reason`: `tool`, `idle` or the
+shutdown), `tab_limit`, `state_saved`, `state_save_failed`, `mask_file`, `page_opened` (`via`:
+`tool`, `auto_submit` or `user_submit`), `host_blocked`, `host_recorded`, `tools_config_added`,
+`ignored`, `shutdown`. The name of
 an error event ends in `_error` or `_failed`.
 
 - By default, the log has no typed text and no form values: `"<redacted 8 chars>"`. The log never
@@ -371,7 +401,9 @@ tail -f "$(ls -t .local_assets/logs/*/*.log | head -1)"
 ## Tests
 
 `./run.sh test` runs the tests with `node --test`. Each test uses a copy of the config in
-`.local_assets/test-config/`. The committed config stays unchanged.
+`.local_assets/test-config/` and its own storage-state file in `.local_assets/test-state/`. The
+committed config and the real storage state stay unchanged. The test client opens a lane and gives
+it in each call.
 
 - [tests/policy-unit.test.js](tests/policy-unit.test.js): INI files, host patterns and lists, tool
   switches, URL patterns, the fill registry and the three providers (the vault through the test
@@ -379,8 +411,11 @@ tail -f "$(ls -t .local_assets/logs/*/*.log | head -1)"
 - [playwright/tests/policy.test.js](playwright/tests/policy.test.js): tool switches, host lists,
   form fill (fill, submit, mask, loop guard, two steps, label locators, several submits, host
   check after a submit), discovery (merge, used marks of the user and the agent).
-- [playwright/tests/tools.test.js](playwright/tests/tools.test.js): the same tools as upstream,
-  the texts for the client, navigation, errors, screenshots, the log and the persistent profile.
+- [playwright/tests/tools.test.js](playwright/tests/tools.test.js): the same tools as upstream with
+  the parameter `lane`, the texts for the client, navigation, errors, screenshots, the log and the
+  storage state from one session to the next.
+- [playwright/tests/lanes.test.js](playwright/tests/lanes.test.js): lanes in parallel, the limits,
+  the lane errors, `browser_close`, logins between lanes, file names, header masks.
 - [playwright/tests/forms.test.js](playwright/tests/forms.test.js): form tools of the agent on local
   pages.
 - [playwright/tests/online.test.js](playwright/tests/online.test.js): public sites. A test is
@@ -388,7 +423,8 @@ tail -f "$(ls -t .local_assets/logs/*/*.log | head -1)"
   them.
 - [playwright/tests/unit.test.js](playwright/tests/unit.test.js),
   [playwright/tests/xvfb.test.js](playwright/tests/xvfb.test.js): redaction, defaults, the library
-  mapping, Xvfb.
+  mapping, the storage-state merge, the masks, idle lanes, Xvfb, the start and stop of Chromium
+  with the lanes.
 
 ## Update Playwright MCP
 

@@ -1,13 +1,17 @@
-// Unit tests: redaction, result summary, the upstream environment and the render mode.
+// Unit tests: redaction, result summary, the environment, the render mode, the storage state,
+// the masks and the lanes.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
-import { ASSETS_DIR } from '../../src/paths.js';
+import { ASSETS_DIR, TOOL_DIR } from '../../src/paths.js';
 import { redact, summarizeResult } from '../../src/logger.js';
 import { packageCandidates, parseLdd } from '../src/setup/syslibs.js';
-import { CHROME_PREFS, writeChromePrefs } from '../src/chrome-prefs.js';
-import { TMP_DIR, connectsToBrowser, renderMode, takeConfigDir, tmpDirForChromium, upstreamEnv, withoutBrowser, withoutHeadless } from '../src/config.js';
+import { STATE_DIR, TMP_DIR, ignoredVariables, outputDir, processEnv, renderMode, stateFile, takeConfigDir, tmpDirForChromium } from '../src/config.js';
+import { LANE_IDLE, Lanes, MAX_LANES, MAX_TABS_PER_LANE } from '../src/lanes.js';
+import { fileInOutput, maskHeaders } from '../src/mcp-server.js';
+import { filterIndexedDb, loadState, mergeState, writeState } from '../src/storage-state.js';
 import { patchXkbBinDir } from '../src/xvfb.js';
 
 describe('redact', () => {
@@ -44,50 +48,30 @@ describe('summarizeResult', () => {
   });
 });
 
-describe('upstreamEnv', () => {
-  const cwd = '/work/space';
-
-  test('sets the defaults in the tool folder; the output files go to the workspace', () => {
-    const env = upstreamEnv([], {}, cwd);
-    assert.equal(env.PLAYWRIGHT_MCP_BROWSER, 'chromium');
-    assert.equal(env.PLAYWRIGHT_MCP_OUTPUT_DIR, path.join(cwd, '.local_assets', 'browser-automation-x-mcp', 'output'));
-    assert.ok(env.PLAYWRIGHT_MCP_USER_DATA_DIR.startsWith(path.join(ASSETS_DIR, 'profiles')));
-    assert.match(env.PLAYWRIGHT_MCP_USER_DATA_DIR, /-chromium-[0-9a-f]{8}$/);
+describe('environment', () => {
+  test('sets the browsers, the cache and the temp folder in the tool folder; keeps a browsers path of the user', () => {
+    const env = processEnv({});
     assert.ok(env.PLAYWRIGHT_BROWSERS_PATH.startsWith(path.join(ASSETS_DIR, 'browsers')));
     if (process.platform === 'linux') assert.equal(env.XDG_CACHE_HOME, path.join(ASSETS_DIR, 'cache'));
+    assert.equal(env.TMPDIR, undefined);
+    assert.equal(processEnv({}, '/t').TMPDIR, '/t');
+    assert.equal(processEnv({ PLAYWRIGHT_BROWSERS_PATH: '/b' }).PLAYWRIGHT_BROWSERS_PATH, '/b');
   });
 
-  test('gives one profile for each workspace', () => {
-    const a = upstreamEnv([], {}, '/a').PLAYWRIGHT_MCP_USER_DATA_DIR;
-    const b = upstreamEnv([], {}, '/b').PLAYWRIGHT_MCP_USER_DATA_DIR;
-    assert.notEqual(a, b);
+  test('the output files go to the workspace', () => {
+    assert.equal(outputDir('/work/space'), path.join('/work/space', '.local_assets', 'browser-automation-x-mcp', 'output'));
   });
 
-  test('always selects Chromium', () => {
-    assert.equal(upstreamEnv([], { PLAYWRIGHT_MCP_BROWSER: 'firefox' }, cwd).PLAYWRIGHT_MCP_BROWSER, 'chromium');
-    assert.equal(upstreamEnv(['--config', 'c.json'], { PLAYWRIGHT_MCP_BROWSER: 'firefox' }, cwd).PLAYWRIGHT_MCP_BROWSER, 'chromium');
+  test('one storage-state file for each workspace in the tool folder, except when the variable gives an other file', () => {
+    assert.match(stateFile({}, '/a'), /storage-state-[0-9a-f]{8}\.json$/);
+    assert.equal(path.dirname(stateFile({}, '/a')), STATE_DIR);
+    assert.ok(STATE_DIR.startsWith(ASSETS_DIR));
+    assert.notEqual(stateFile({}, '/a'), stateFile({}, '/b'));
+    assert.equal(stateFile({ BROWSER_AUTOMATION_X_MCP_STORAGE_STATE: '/s.json' }, '/a'), '/s.json');
   });
 
-  test('sets no profile when the user selects the profile', () => {
-    for (const args of [['--isolated'], ['--user-data-dir', '/p'], ['--cdp-endpoint=http://x'], ['--extension']]) {
-      assert.equal(upstreamEnv(args, {}, cwd).PLAYWRIGHT_MCP_USER_DATA_DIR, undefined, args.join(' '));
-    }
-    assert.equal(upstreamEnv([], { PLAYWRIGHT_MCP_ISOLATED: 'true' }, cwd).PLAYWRIGHT_MCP_USER_DATA_DIR, undefined);
-  });
-
-  test('keeps the values of the user', () => {
-    const env = upstreamEnv([], { PLAYWRIGHT_MCP_USER_DATA_DIR: '/mine' }, cwd);
-    assert.equal(env.PLAYWRIGHT_MCP_USER_DATA_DIR, '/mine');
-  });
-
-  test('sets no PLAYWRIGHT_MCP_* default with a config file, except the browser', () => {
-    const env = upstreamEnv(['--config', 'c.json'], {}, cwd);
-    assert.deepEqual(Object.keys(env).filter((key) => key.startsWith('PLAYWRIGHT_MCP_')), ['PLAYWRIGHT_MCP_BROWSER']);
-  });
-
-  test('sets the temp folder only when it is given', () => {
-    assert.equal(upstreamEnv([], {}, cwd).TMPDIR, undefined);
-    assert.equal(upstreamEnv([], {}, cwd, '/t').TMPDIR, '/t');
+  test('finds the variables of Playwright MCP', () => {
+    assert.deepEqual(ignoredVariables({ PLAYWRIGHT_MCP_HEADLESS: 'true', PLAYWRIGHT_BROWSERS_PATH: '/b', PLAYWRIGHT_MCP_BROWSER: 'x' }), ['PLAYWRIGHT_MCP_BROWSER', 'PLAYWRIGHT_MCP_HEADLESS']);
   });
 });
 
@@ -129,31 +113,30 @@ describe('renderMode', () => {
   });
 });
 
-describe('render mode arguments', () => {
-  test('removes --headless', () => {
-    assert.deepEqual(withoutHeadless(['--headless', '--isolated', '--headless=true']), ['--isolated']);
-  });
-
-  test('removes --browser', () => {
-    assert.deepEqual(withoutBrowser(['--browser', 'firefox', '--isolated', '--browser=chrome']), ['--isolated']);
-  });
-
-  test('finds a browser that runs already', () => {
-    assert.ok(connectsToBrowser(['--cdp-endpoint=http://x']));
-    assert.ok(connectsToBrowser(['--extension']));
-    assert.ok(!connectsToBrowser(['--isolated']));
-  });
-});
-
 describe('takeConfigDir', () => {
-  test('takes --config-dir out of the arguments; a relative path is relative to cwd', () => {
-    assert.deepEqual(takeConfigDir(['--isolated', '--config-dir', 'local/c', '--browser', 'chrome'], '/repo'),
-      { configDir: path.resolve('/repo', 'local/c'), args: ['--isolated', '--browser', 'chrome'] });
-    assert.deepEqual(takeConfigDir(['--config-dir=/abs/c'], '/repo'), { configDir: path.resolve('/abs/c'), args: [] });
+  test('takes --config-dir; a relative path is relative to cwd', () => {
+    assert.deepEqual(takeConfigDir(['--config-dir', 'local/c'], '/repo'), { configDir: path.resolve('/repo', 'local/c') });
+    assert.deepEqual(takeConfigDir(['--config-dir=/abs/c'], '/repo'), { configDir: path.resolve('/abs/c') });
   });
 
   test('the argument is necessary', () => {
-    assert.throws(() => takeConfigDir(['--isolated']), /give the config folder with --config-dir DIR/);
+    assert.throws(() => takeConfigDir([]), /give the config folder with --config-dir DIR/);
+  });
+
+  test('an other argument is an error', () => {
+    for (const arg of ['--isolated', '--headless', '--browser=firefox', '--viewport-size']) {
+      assert.throws(() => takeConfigDir(['--config-dir', 'c', arg]), new RegExp(`unknown argument ${arg}`));
+    }
+  });
+
+  test('the server does not start with an other argument', () => {
+    const result = spawnSync(process.execPath, [path.join(TOOL_DIR, 'playwright', 'src', 'server.js'), '--config-dir', 'c', '--isolated'], {
+      encoding: 'utf8',
+      env: { ...process.env, BROWSER_AUTOMATION_X_MCP_LOG_DIR: path.join(ASSETS_DIR, 'test-unit', 'logs') },
+      timeout: 20000,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /unknown argument --isolated/);
   });
 });
 
@@ -176,32 +159,101 @@ describe('patchXkbBinDir', () => {
   });
 });
 
-describe('writeChromePrefs', () => {
-  const dir = path.join(ASSETS_DIR, 'test-unit', 'chrome-prefs');
-  const file = path.join(dir, 'Default', 'Preferences');
-  const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
+describe('storage state', () => {
+  const cookie = (name, value, extra = {}) => ({ name, value, domain: 'a.test', path: '/', expires: -1, httpOnly: false, secure: false, sameSite: 'Lax', ...extra });
+  const origin = (url, value, extra = {}) => ({ origin: url, localStorage: [{ name: 'k', value }], ...extra });
 
-  test('adds the settings and keeps the other settings of the profile', () => {
-    fs.rmSync(dir, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ homepage: 'x', profile: { name: 'P', exit_type: 'Crashed', password_manager_enabled: true } }));
-    writeChromePrefs(dir);
-    const prefs = read();
-    assert.equal(prefs.homepage, 'x');
-    assert.equal(prefs.profile.name, 'P');
-    assert.equal(prefs.profile.exit_type, 'Normal');
-    assert.equal(prefs.profile.password_manager_enabled, false);
-    assert.equal(prefs.profile.password_manager_leak_detection, false);
-    assert.equal(prefs.profile.default_content_setting_values.notifications, 2);
+  test('an entry that the lane changed or added wins; an entry that it did not change keeps the file value', () => {
+    const base = { cookies: [cookie('a', '1'), cookie('b', '1')], origins: [origin('https://a.test', '1')] };
+    const mine = { cookies: [cookie('a', '2'), cookie('b', '1'), cookie('n', '1')], origins: [origin('https://a.test', '1')] };
+    const theirs = { cookies: [cookie('a', '1'), cookie('b', '9')], origins: [origin('https://a.test', '9')] };
+    const merged = mergeState(base, mine, theirs);
+    assert.deepEqual(Object.fromEntries(merged.cookies.map((c) => [c.name, c.value])), { a: '2', b: '9', n: '1' });
+    assert.equal(merged.origins[0].localStorage[0].value, '9');
   });
 
-  test('a missing or damaged file gets only the settings', () => {
-    fs.rmSync(dir, { recursive: true, force: true });
-    writeChromePrefs(dir);
-    assert.deepEqual(read(), CHROME_PREFS);
+  test('an entry that the lane removed goes away, if the file did not change it', () => {
+    const base = { cookies: [cookie('a', '1'), cookie('b', '1')], origins: [] };
+    const mine = { cookies: [], origins: [] };
+    const theirs = { cookies: [cookie('a', '1'), cookie('b', '9')], origins: [] };
+    assert.deepEqual(mergeState(base, mine, theirs).cookies.map((c) => `${c.name}=${c.value}`), ['b=9']);
+  });
+
+  test('removes expired cookies', () => {
+    const state = { cookies: [cookie('old', '1', { expires: 100 }), cookie('session', '1'), cookie('new', '1', { expires: 300 })], origins: [] };
+    assert.deepEqual(mergeState({ cookies: [], origins: [] }, state, { cookies: [], origins: [] }, 200).cookies.map((c) => c.name), ['session', 'new']);
+  });
+
+  test('keeps IndexedDB only for the listed hosts', () => {
+    const state = { cookies: [], origins: [origin('https://web.whatsapp.com', '1', { indexedDB: [{ name: 'db' }] }), origin('https://other.test', '1', { indexedDB: [{ name: 'db' }] })] };
+    const filtered = filterIndexedDb(state, ['web.whatsapp.com']);
+    assert.ok(filtered.origins[0].indexedDB);
+    assert.equal(filtered.origins[1].indexedDB, undefined);
+    assert.equal(filtered.origins[1].localStorage[0].value, '1');
+  });
+
+  test('writes the file with mode 0600; a missing or damaged file gives an empty state', { skip: process.platform === 'win32' }, () => {
+    const file = path.join(ASSETS_DIR, 'test-unit', 'state', 'state.json');
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+    assert.deepEqual(loadState(file), { cookies: [], origins: [] });
+    writeState(file, { cookies: [cookie('a', '1')], origins: [] });
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(loadState(file).cookies[0].value, '1');
     fs.writeFileSync(file, '{not json');
-    writeChromePrefs(dir);
-    assert.deepEqual(read(), CHROME_PREFS);
+    assert.deepEqual(loadState(file), { cookies: [], origins: [] });
+  });
+});
+
+describe('masks', () => {
+  test('masks the values of secret headers', () => {
+    const text = 'GET /\ncookie: a=1; b=2\nSet-Cookie: s=3\n- authorization: Bearer x\naccept: */*\nProxy-Authorization: Basic y';
+    assert.equal(maskHeaders(text), 'GET /\ncookie: ***\nSet-Cookie: ***\n- authorization: ***\naccept: */*\nProxy-Authorization: ***');
+  });
+
+  test('a file name must be in the output folder; a relative name is relative to it', () => {
+    const dir = path.resolve('/w/out');
+    assert.equal(fileInOutput(dir, 'a.yml'), path.join(dir, 'a.yml'));
+    assert.equal(fileInOutput(dir, 'sub/a.yml'), path.join(dir, 'sub', 'a.yml'));
+    assert.equal(fileInOutput(dir, path.join(dir, 'b.png')), path.join(dir, 'b.png'));
+    for (const name of ['../a.yml', '/etc/passwd', path.resolve('/w/other.yml'), '.', '']) assert.equal(fileInOutput(dir, name), undefined, name);
+  });
+});
+
+describe('lanes', () => {
+  const logger = { info() {}, debug() {}, error() {} };
+  const lanes = (options = {}) => {
+    const value = new Lanes({ mode: 'HEADLESS', logger, stateFile: '/nowhere.json', ...options });
+    clearInterval(value.timer);
+    return value;
+  };
+
+  test('the limits', () => {
+    assert.equal(MAX_LANES, 3);
+    assert.equal(MAX_TABS_PER_LANE, 5);
+    assert.equal(LANE_IDLE, 10 * 60 * 1000);
+  });
+
+  test('closes a lane without a call for the idle time, but not a busy lane', async () => {
+    const value = lanes({ idle: 1000 });
+    const closed = [];
+    value.close = async (id, reason) => { closed.push([id, reason]); value.lanes.delete(id); };
+    value.lanes.set('lane-1', { id: 'lane-1', lastUsed: 0, busy: 0 });
+    value.lanes.set('lane-2', { id: 'lane-2', lastUsed: 0, busy: 1 });
+    value.lanes.set('lane-3', { id: 'lane-3', lastUsed: 500, busy: 0 });
+    await value.closeIdle(1200);
+    assert.deepEqual(closed, [['lane-1', 'idle']]);
+  });
+
+  test('gives no lane over the maximum', async () => {
+    const value = lanes({ maxLanes: 1 });
+    value.lanes.set('lane-1', { id: 'lane-1', lastUsed: 0, busy: 0 });
+    assert.equal(await value.open(), undefined);
+  });
+
+  test('the status gives the open lanes and the maximum', () => {
+    const value = lanes();
+    value.lanes.set('lane-1', { id: 'lane-1', lastUsed: 0, busy: 1, context: { pages: () => [1, 2] } });
+    assert.equal(value.status(5000), 'Open lanes: 1 of 3.\n- lane-1: 2 tabs, idle 5 s, busy');
   });
 });
 

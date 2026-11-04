@@ -114,3 +114,12 @@ The log of the decisions that change the design. Format and rules:
 - 20261103-11 Nestor e78edede6674 Discovery waits DISCOVER_WAIT for a field or a button only after an auto-submit or a submit of the user
 - 20261103-12 Nestor e78edede6674 Each server start writes a .log file with lines of at most LOG_LINE_MAX characters for a person, and a .log.json file with all fields
 - 20261103-13 Nestor e78edede6674 The log files are in LOG_DIR/<client name of initialize>/mm-dd_hhmmss_<pid>; the newest LOG_KEEP pairs stay
+- 20261104-01 Nestor 598b2ac53d38 Give each agent a lane: an own browser context in one Chromium of the server; each upstream tool needs the parameter lane; browser_lane_open, browser_lane_close and browser_lanes; MAX_LANES 3, MAX_TABS_PER_LANE 5, LANE_IDLE 10 min
+- 20261104-02 Nestor 598b2ac53d38 Run Playwright MCP in the server process through createConnection, one connection for each lane; no upstream child process and no network port
+- 20261104-03 Nestor 598b2ac53d38 Keep the logins of the lanes in one storage-state file for each workspace in the tool folder, mode 0600; merge the state of a lane into the file when the lane closes; keep IndexedDB only for the hosts in [storage] indexeddb of server.ini
+- 20261104-04 Nestor 598b2ac53d38 Start Chromium and Xvfb with the first lane and stop them after the last lane
+- 20261104-05 Nestor 598b2ac53d38 The server takes only the argument --config-dir; an other argument stops the server; the server ignores and logs each PLAYWRIGHT_MCP_* variable
+- 20261104-06 Nestor 598b2ac53d38 Stop permission prompts with --deny-permission-prompts; write no Default/Preferences
+- 20261104-07 Nestor 598b2ac53d38 Put the temp files of Chromium into .local_assets/tmp of the tool, then into .local_assets/tmp of the first folder with .git above the tool, then into the temp folder of the OS
+- 20261104-08 Nestor 598b2ac53d38 Accept a filename of the agent only in the output folder; resolve a relative name against the output folder
+- 20261104-09 Nestor 598b2ac53d38 Mask the values of the Cookie, Set-Cookie, Authorization and Proxy-Authorization headers in the results and in the output files

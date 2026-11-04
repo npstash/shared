@@ -1,27 +1,23 @@
-// The MCP server. It forwards each tool request to Playwright MCP.
+// The MCP server. It forwards each tool request to Playwright MCP, in the lane of the call.
 //
-//   MCP client (Claude Code) <-> server | upstream client <-> Playwright MCP (child process)
+//   MCP client (Claude Code) <-> server | lane client <-> Playwright MCP (in this process) -> context
 //
+// A lane is one browser context for one agent (see lanes.js). Each tool, except the lane tools,
+// needs the parameter lane.
 // Each tool call goes through these steps (see callTool()):
-//   tool switch (tools.ini) → host check (host-policy.ini); both in the config folder
-//   → Playwright MCP → host check of the opened page → recorder and discovery (optional; discover.js)
-//   → form fill and submit (fields.ini, providers-form-fill/; see autofill.js), with a host check
-//     of each page after a submit
-//   → scrub of masked values → log
+//   tool switch (tools.ini) → lane → file name check → host check (host-policy.ini); both in the
+//   config folder → Playwright MCP → host check of the opened page → recorder and discovery
+//   (optional; discover.js) → form fill and submit (fields.ini, providers-form-fill/; see
+//   autofill.js), with a host check of each page after a submit
+//   → scrub of masked values and of secret headers → log
 // Texts for the client do not name upstream, Playwright or the form fill.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import {
-  CallToolRequestSchema,
-  ListRootsRequestSchema,
-  ListToolsRequestSchema,
-  RootsListChangedNotificationSchema,
-  ToolListChangedNotificationSchema,
-} from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { createConnection } from '@playwright/mcp';
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 import { FieldsConfig } from '../../src/fill/fields.js';
 import { FillRegistry } from '../../src/fill/registry.js';
 import { FileAllowProvider } from '../../src/hosts/file-allow-provider.js';
@@ -34,15 +30,12 @@ import { PROVIDERS_DIR, VERSION, configFile } from '../../src/paths.js';
 import { ToolsConfig } from '../../src/tools-config.js';
 import { autofill } from './autofill.js';
 import { DISCOVER_WAIT, discover, syncRecorder } from './discover.js';
-import { writeChromePrefs } from './chrome-prefs.js';
-import { TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, UPSTREAM_CLI, argValue, connectsToBrowser, renderMode, tmpDirForChromium, upstreamEnv, withoutBrowser, withoutHeadless } from './config.js';
-import { cleanStaleXvfb, startXvfb } from './xvfb.js';
+import { TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, ignoredVariables, outputDir, renderMode, stateFile } from './config.js';
+import { Lanes } from './lanes.js';
+import { cleanStaleXvfb } from './xvfb.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
 const TOOL_TIMEOUT = 10 * 60 * 1000;
-
-// Maximum time of browser_close at shutdown.
-const CLOSE_TIMEOUT = 5000;
 
 // Maximum time that the user has to answer a dialog of the ask provider.
 const ASK_TIMEOUT = 5 * 60 * 1000;
@@ -56,7 +49,12 @@ const MTIME_SLACK = 2000;
 // The name of the server for the client.
 export const SERVER_NAME = 'browser-automation-x-mcp';
 
-const INSTRUCTIONS = 'Use the tools of this server for each browser automation task when they are available. This is mandatory.';
+const INSTRUCTIONS = [
+  'Use the tools of this server for each browser automation task when they are available. This is mandatory.',
+  'First call browser_lane_open. It gives a lane ID: an own browser with its own tabs. Give this ID as the parameter lane in each other call.',
+  'Each agent that works in parallel (also a subagent) opens its own lane. Do not share a lane between agents.',
+  'If browser_lane_open is busy, call browser_lanes later, then try again. Call browser_lane_close at the end of the task.',
+].join(' ');
 
 // Tools of Playwright MCP that a web page can misuse through prompt injection. Disabled by default.
 export const DANGEROUS_TOOLS = {
@@ -66,11 +64,40 @@ export const DANGEROUS_TOOLS = {
   browser_drop: 'it drops files from this computer onto a web page',
 };
 
+const LANE_PARAM = { type: 'string', description: 'The lane ID from browser_lane_open, e.g. lane-3f9a.' };
+
+// The tools of the server itself.
+export const LANE_TOOLS = [
+  {
+    name: 'browser_lane_open',
+    title: 'Open a lane',
+    description: 'Open a lane: an own browser with its own tabs, for one agent. Give its ID as the parameter lane in each other call. The lane has the logins of the earlier lanes.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'browser_lane_close',
+    title: 'Close a lane',
+    description: 'Close a lane and its tabs. The logins of the lane stay for the next lanes.',
+    inputSchema: { type: 'object', properties: { lane: LANE_PARAM }, required: ['lane'] },
+  },
+  {
+    name: 'browser_lanes',
+    title: 'List the lanes',
+    description: 'Give the open lanes and the maximum. If browser_lane_open is busy, call this tool later, then try again.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+];
+
+// Header lines that hold secrets: the value becomes *** in results and output files.
+const SECRET_HEADER = /^(\s*[-*]?\s*(?:cookie|set-cookie|authorization|proxy-authorization)\s*:\s*)(\S.*)$/gim;
+const MASK = '***';
+
 // The "Ran Playwright code" section of an upstream result: the code that upstream ran.
 const CODE_SECTION = /### Ran Playwright code\n```[a-z]*\n[\s\S]*?\n```\n?/g;
 
 // configDir: the config folder (--config-dir). See src/paths.js.
-export async function startServer({ args: givenArgs, configDir, logger, serverTransport, cwd = process.cwd(), env = process.env, onClose }) {
+// laneOptions: limits of the lanes for the tests (see lanes.js).
+export async function startServer({ configDir, logger, serverTransport, cwd = process.cwd(), env = process.env, tmpDir, onClose, laneOptions = {} }) {
   let markDownstreamReady;
   const downstreamReady = new Promise((resolve) => { markDownstreamReady = resolve; });
   let server;
@@ -93,84 +120,43 @@ export async function startServer({ args: givenArgs, configDir, logger, serverTr
   const discovery = env.BROWSER_AUTOMATION_X_MCP_DISCOVER === '1';
   if (discovery) logger.info('discovery_mode', {});
 
-  // 2. Select the render mode. RENDER_MODE replaces --headless and PLAYWRIGHT_MCP_HEADLESS:
-  //    the server ignores them, without an error.
-  //    The browser is always Chromium: the server ignores --browser and PLAYWRIGHT_MCP_BROWSER.
-  const headedArgs = withoutHeadless(givenArgs);
-  if (headedArgs.length !== givenArgs.length) logger.info('ignored', { control: '--headless', reason: 'RENDER_MODE selects the render mode' });
-  if (env.PLAYWRIGHT_MCP_HEADLESS !== undefined) logger.info('ignored', { control: 'PLAYWRIGHT_MCP_HEADLESS', reason: 'RENDER_MODE selects the render mode' });
-  const args = withoutBrowser(headedArgs);
-  if (args.length !== headedArgs.length) logger.info('ignored', { control: '--browser', reason: 'the browser is always Chromium' });
-  if (env.PLAYWRIGHT_MCP_BROWSER !== undefined) logger.info('ignored', { control: 'PLAYWRIGHT_MCP_BROWSER', reason: 'the browser is always Chromium' });
-  const mode = connectsToBrowser(args) ? undefined : renderMode(env);
+  // 2. Select the render mode. The server does not use the variables of Playwright MCP.
+  for (const name of ignoredVariables(env)) logger.info('ignored', { control: name, reason: 'the server does not use this variable' });
+  const mode = renderMode(env);
   cleanStaleXvfb(logger);
-
-  // 3. Start Playwright MCP and connect to it.
-  const tmpDir = await tmpDirForChromium();
   if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
-  const childEnv = upstreamEnv(args, env, cwd, tmpDir);
-  delete childEnv.PLAYWRIGHT_MCP_HEADLESS;
-  if (mode) childEnv.PLAYWRIGHT_MCP_HEADLESS = mode === 'HEADLESS' ? 'true' : 'false';
-  const xvfb = mode === 'HEADED_INVISIBLE' ? await startXvfb({ logger }) : undefined;
-  if (xvfb) {
-    childEnv.DISPLAY = xvfb.display;
-    delete childEnv.WAYLAND_DISPLAY;
-  }
-  logger.info('render_mode', { mode: mode ?? 'none: upstream connects to a running browser', display: childEnv.DISPLAY });
-  const outputDir = argValue(args, '--output-dir') ?? childEnv.PLAYWRIGHT_MCP_OUTPUT_DIR;
-  // The persistent profile gets CHROME_PREFS. An isolated profile has no folder.
-  const userDataDir = argValue(args, '--user-data-dir') ?? childEnv.PLAYWRIGHT_MCP_USER_DATA_DIR;
-  const profileDir = userDataDir ? path.resolve(cwd, userDataDir) : undefined;
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [UPSTREAM_CLI, ...args],
-    env: childEnv,
-    cwd,
-    stderr: 'pipe',
-  });
-  readline.createInterface({ input: transport.stderr }).on('line', (line) => logger.info('upstream_stderr', { line }));
+  logger.info('render_mode', { mode, display: mode === 'HEADED_INVISIBLE' ? 'Xvfb' : env.DISPLAY });
 
-  const client = new Client(
-    { name: SERVER_NAME, version: VERSION },
-    { capabilities: { roots: { listChanged: true } } },
-  );
-
-  // Playwright MCP asks for the roots to find the workspace. Ask the downstream client.
-  client.setRequestHandler(ListRootsRequestSchema, async (request, extra) => {
+  // 3. The lanes, and a connection to Playwright MCP that only gives the tool list.
+  const output = outputDir(cwd);
+  const roots = async (request, extra) => {
     await downstreamReady;
     if (!server.getClientCapabilities()?.roots) return { roots: [] };
     const result = await server.listRoots(request.params, { signal: extra.signal });
     logger.debug('roots', { roots: result.roots });
     return result;
+  };
+  const lanes = new Lanes({
+    mode,
+    logger,
+    outputDir: output,
+    stateFile: stateFile(env, cwd),
+    indexedDbHosts: listValue(sectionValues(serverIni, 'storage').indexeddb),
+    roots,
+    beforeClose: async (lane) => {
+      if (discovery && lane.session) await syncRecorder(lane.session).catch(() => {});
+    },
+    ...laneOptions,
   });
-  client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
-    logger.info('tools_changed');
-    await downstreamReady;
-    await server.sendToolListChanged();
-  });
-  client.fallbackNotificationHandler = async (notification) => logger.debug('upstream_notification', { notification });
+  const catalog = await catalogClient(output);
+  const upstreamTools = await allTools(catalog);
+  toolsConfig.addMissing([...upstreamTools.map((tool) => tool.name), ...LANE_TOOLS.map((tool) => tool.name)]);
+  logger.info('upstream_ready', { tools: upstreamTools.length, version: catalog.getServerVersion()?.version });
 
-  logger.info('upstream_start', { args });
-  try {
-    await client.connect(transport);
-  } catch (error) {
-    xvfb?.stop();
-    throw error;
-  }
-  const upstreamInfo = client.getServerVersion();
-  const upstreamCapabilities = client.getServerCapabilities() ?? {};
-  logger.info('upstream_ready', { pid: transport.pid, server: upstreamInfo, capabilities: upstreamCapabilities });
-
-  // Each tool of the server has a line in tools.ini. Add the missing ones.
-  toolsConfig.addMissing((await allTools(client)).map((tool) => tool.name));
-
-  // 4. Make the server for the downstream client. It has the tools capability of upstream.
+  // 4. Make the server for the downstream client.
   server = new Server(
     { name: SERVER_NAME, version: VERSION },
-    {
-      capabilities: { tools: upstreamCapabilities.tools ?? {} },
-      instructions: [client.getInstructions() && neutral(client.getInstructions()), INSTRUCTIONS].filter(Boolean).join('\n\n'),
-    },
+    { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
   );
   // The log files open in the folder of the client name. A client can send its first notification
   // before the server has the name: then the first request opens them.
@@ -183,52 +169,48 @@ export async function startServer({ args: givenArgs, configDir, logger, serverTr
     logger.info('client_ready', { client: server.getClientVersion(), capabilities: server.getClientCapabilities() });
     markDownstreamReady();
   };
-  server.setNotificationHandler(RootsListChangedNotificationSchema, async () => {
-    await client.sendRootsListChanged();
-  });
 
   const session = {
-    client, server, logger, toolsConfig, hostPolicy, fill, fields, discovery, cwd,
-    outputDir: outputDir && path.resolve(cwd, outputDir), profileDir, browserOpen: false, pageUrl: undefined,
-    fillState: { attempts: new Set(), failed: new Set(), waitedUrl: undefined },
-    // The time of the recent agent calls: the recorder gives their events to the agent.
-    agentCalls: [],
+    server, logger, toolsConfig, hostPolicy, fill, fields, discovery, cwd, lanes,
+    outputDir: output, upstreamTools,
   };
-  server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
     openLog();
-    return listTools(session, request);
+    return listTools(session);
   });
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     openLog();
     return callTool(session, request, extra);
   });
 
-  // 5. Close the two sides together.
+  // 5. Close the lanes and the browser with the server.
   let closed = false;
   async function close(reason) {
     if (closed) return;
     closed = true;
     logger.open();
     logger.info('shutdown', { reason });
-    // The fills and submits of the user since the last call.
-    if (session.discovery && session.browserOpen && reason !== 'upstream closed') await syncRecorder(session);
-    // Without browser_close, Chromium does not save a persistent profile (cookies, localStorage).
-    // Upstream does not do this when its client goes away.
-    if (session.browserOpen && reason !== 'upstream closed') {
-      await client.callTool({ name: 'browser_close', arguments: {} }, undefined, { timeout: CLOSE_TIMEOUT })
-        .catch((error) => logger.error('browser_close_failed', { message: error.message }));
-    }
-    await Promise.allSettled([client.close(), server.close(), fill.dispose()]);
-    xvfb?.stop();
+    await lanes.closeAll(reason);
+    await Promise.allSettled([catalog.close(), server.close(), fill.dispose()]);
     onClose?.(reason);
   }
-  client.onclose = () => close('upstream closed');
-  client.onerror = (error) => logger.error('upstream_error', { message: error.message });
   server.onclose = () => close('client closed');
   server.onerror = (error) => logger.error('client_error', { message: error.message });
 
   await server.connect(serverTransport);
-  return { server, client, close };
+  return { server, close, lanes };
+}
+
+// A connection to Playwright MCP without a browser: it gives only the tool list.
+async function catalogClient(output) {
+  const upstream = await createConnection({ browser: { browserName: 'chromium', isolated: false }, outputDir: output }, async () => {
+    throw new Error('open a lane first');
+  });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await upstream.connect(serverTransport);
+  const client = new Client({ name: SERVER_NAME, version: VERSION }, { capabilities: {} });
+  await client.connect(clientTransport);
+  return client;
 }
 
 async function allTools(client) {
@@ -242,12 +224,23 @@ async function allTools(client) {
   return tools;
 }
 
-async function listTools({ client, logger, toolsConfig }, request) {
-  const result = await client.listTools(request.params);
-  const tools = result.tools.map((tool) => toolsConfig.describe(JSON.parse(neutral(JSON.stringify(tool)))));
+// The tools for the client: the lane tools, and each upstream tool with the parameter lane.
+function listTools({ logger, toolsConfig, upstreamTools }) {
+  const withLane = upstreamTools.map((tool) => {
+    const schema = tool.inputSchema ?? { type: 'object' };
+    return {
+      ...tool,
+      inputSchema: {
+        ...schema,
+        properties: { ...(schema.properties ?? {}), lane: LANE_PARAM },
+        required: [...new Set([...(schema.required ?? []), 'lane'])],
+      },
+    };
+  });
+  const tools = [...LANE_TOOLS, ...withLane].map((tool) => toolsConfig.describe(JSON.parse(neutral(JSON.stringify(tool)))));
   logger.info('list_tools', { count: tools.length });
   logger.debug('list_tools_names', { tools: tools.map((tool) => tool.name) });
-  return { ...result, tools };
+  return { tools };
 }
 
 // A text of upstream for the client, without the name Playwright.
@@ -269,6 +262,47 @@ function errorResult(text) {
   return { isError: true, content: [{ type: 'text', text: `### Error\n${text}` }] };
 }
 
+function textResult(text) {
+  return { content: [{ type: 'text', text: `### Result\n${text}` }] };
+}
+
+// Replace the values of secret headers with MASK.
+export function maskHeaders(text) {
+  return text.replace(SECRET_HEADER, `$1${MASK}`);
+}
+
+function maskResult(result) {
+  const content = result.content?.map((part) => (part.type === 'text' ? { ...part, text: maskHeaders(part.text) } : part));
+  return { ...result, content };
+}
+
+// The same for the text files of a call. Binary files stay.
+function maskFiles(files, logger) {
+  for (const file of files) {
+    let text;
+    try {
+      const data = fs.readFileSync(file);
+      if (data.includes(0)) continue;
+      text = data.toString('utf8');
+    } catch {
+      continue;
+    }
+    const masked = maskHeaders(text);
+    if (masked === text) continue;
+    fs.writeFileSync(file, masked);
+    logger.info('mask_file', { file });
+  }
+}
+
+// A file name of the agent must be in the output folder. A relative name is relative to it.
+// Give the absolute path, or undefined if the file is outside.
+export function fileInOutput(outputDir, name) {
+  const file = path.resolve(outputDir, name);
+  const relative = path.relative(outputDir, file);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+  return file;
+}
+
 // The URL that a call opens, if the arguments give it.
 function targetUrl(name, args) {
   if (name === 'browser_navigate') return args?.url;
@@ -280,7 +314,6 @@ function targetUrl(name, args) {
 // The files of a call: each file link in the result, and each file of the output folder that
 // changed since the call started. Upstream writes snapshots and console logs there.
 function writtenFiles(session, result, since) {
-  if (!session.fill.secrets.size) return [];
   const files = new Set();
   for (const part of result.content ?? []) {
     if (part.type !== 'text') continue;
@@ -320,10 +353,15 @@ function fillContext(session, url) {
 
 // The steps of one call. Each step can stop the call with an error result.
 async function runSteps(session, request, extra) {
-  const { client, toolsConfig, hostPolicy, fill, logger } = session;
-  const { name, arguments: args } = request.params;
+  const { client, hostPolicy, fill, logger } = session;
+  const { name } = request.params;
+  let args = request.params.arguments;
 
-  if (!toolsConfig.isEnabled(name)) return toolsConfig.disabledResult(name);
+  if (typeof args?.filename === 'string') {
+    const file = fileInOutput(session.outputDir, args.filename);
+    if (!file) return errorResult(`The file name ${args.filename} is not allowed. Give a file name in the output folder, e.g. a name without a folder.`);
+    args = { ...args, filename: file };
+  }
 
   const target = targetUrl(name, args);
   if (target) {
@@ -331,17 +369,11 @@ async function runSteps(session, request, extra) {
     if (!check.allowed) return blockedResult(session, name, target, check, false);
   }
 
-  // The browser starts with the next call. Its profile gets the settings first.
-  if (!session.browserOpen && session.profileDir) {
-    const file = writeChromePrefs(session.profileDir);
-    session.logger.info('chrome_prefs', { file });
-  }
-
   const progressToken = request.params._meta?.progressToken;
   const started = Date.now();
   session.agentCalls.push({ start: started });
   if (session.agentCalls.length > 20) session.agentCalls.shift();
-  let raw = await client.callTool(request.params, undefined, {
+  let raw = await client.callTool({ ...request.params, arguments: args }, undefined, {
     signal: extra.signal,
     timeout: TOOL_TIMEOUT,
     resetTimeoutOnProgress: true,
@@ -350,12 +382,11 @@ async function runSteps(session, request, extra) {
       params: { progressToken, ...progress },
     }),
   });
-  session.browserOpen = name !== 'browser_close';
 
   // The recorder: the fills and submits in the browser since the last call (discovery mode).
   const call = session.agentCalls.at(-1);
   if (call) call.end = Date.now();
-  const userSubmitted = session.discovery && session.browserOpen ? await syncRecorder(session) : false;
+  const userSubmitted = session.discovery ? await syncRecorder(session) : false;
 
   // A click, a redirect or a script can open a page of a blocked host. Close it.
   // Each page after a submit of the form fill gets the same check (see autofill.js).
@@ -383,8 +414,10 @@ async function runSteps(session, request, extra) {
       }
     }
   }
-  fill.scrubFiles(writtenFiles(session, raw, started));
-  return forClient(fill.scrub(raw));
+  const files = writtenFiles(session, raw, started);
+  fill.scrubFiles(files);
+  maskFiles(files, logger);
+  return forClient(maskResult(fill.scrub(raw)));
 }
 
 // The error result for a blocked host. closePage: the browser shows the page; replace it with about:blank.
@@ -401,6 +434,64 @@ function capitalize(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+// The calls of the lane tools.
+async function laneTool(session, name, args) {
+  const { lanes } = session;
+  if (name === 'browser_lanes') return textResult(lanes.status());
+  if (name === 'browser_lane_open') {
+    const lane = await lanes.open();
+    if (!lane) return errorResult(`Busy: ${lanes.size} of ${lanes.maxLanes} lanes are open. Call browser_lanes later, then try again.`);
+    lane.session = laneSession(session, lane);
+    return textResult(`Lane: ${lane.id}\nGive lane="${lane.id}" in each other call. Close the lane with browser_lane_close at the end.`);
+  }
+  // browser_lane_close, and browser_close of a lane.
+  if (!await lanes.close(args?.lane, 'tool')) return unknownLane(args?.lane);
+  return textResult(`The lane ${args.lane} is closed.`);
+}
+
+function unknownLane(id) {
+  if (!id) return errorResult('Give the parameter lane: the ID from browser_lane_open. Call browser_lane_open first.');
+  return errorResult(`The lane ${id} is not open. Call browser_lane_open, and use the new ID.`);
+}
+
+// The state of one lane for the call steps, the form fill and the discovery.
+function laneSession(session, lane) {
+  return Object.assign(Object.create(session), {
+    lane: lane.id,
+    client: lane.client,
+    pageUrl: undefined,
+    fillState: { attempts: new Set(), failed: new Set(), waitedUrl: undefined },
+    // The time of the recent agent calls: the recorder gives their events to the agent.
+    agentCalls: [],
+  });
+}
+
+// One call in a lane.
+async function laneCall(session, request, extra) {
+  const { lanes, toolsConfig } = session;
+  const { name, arguments: given } = request.params;
+  if (!toolsConfig.isEnabled(name)) return toolsConfig.disabledResult(name);
+  if (LANE_TOOLS.some((tool) => tool.name === name)) return laneTool(session, name, given);
+  const lane = lanes.get(given?.lane);
+  if (!lane) return unknownLane(given?.lane);
+  if (name === 'browser_close') return laneTool(session, 'browser_lane_close', given);
+  if (name === 'browser_tabs' && given?.action === 'new' && lanes.tabCount(lane) >= lanes.maxTabs) {
+    return errorResult(`The lane ${lane.id} has the maximum of ${lanes.maxTabs} tabs. Close a tab first.`);
+  }
+  const { lane: _, ...args } = given;
+  lane.busy++;
+  lane.lastUsed = Date.now();
+  try {
+    const result = await runSteps(lane.session, { ...request, params: { ...request.params, arguments: args } }, extra);
+    const notes = lane.notes.splice(0);
+    if (!notes.length) return result;
+    return { ...result, content: [...(result.content ?? []), { type: 'text', text: `### Note\n${notes.join('\n')}` }] };
+  } finally {
+    lane.busy--;
+    lane.lastUsed = Date.now();
+  }
+}
+
 async function callTool(session, request, extra) {
   const { logger } = session;
   const { name, arguments: toolArgs } = request.params;
@@ -409,7 +500,7 @@ async function callTool(session, request, extra) {
   logger.info('tool_call', { id, tool: name, args: logger.args(toolArgs) });
 
   try {
-    const result = await runSteps(session, request, extra);
+    const result = await laneCall(session, request, extra);
     logger.info('tool_result', { id, tool: name, ms: Date.now() - start, ...summarizeResult(result) });
     if (logger.isDebug) {
       const text = result.content?.filter((part) => part.type === 'text').map((part) => part.text).join('\n') ?? '';

@@ -13,6 +13,7 @@ export const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 
 export const FAKE_VAULT = path.join(TOOL_DIR, 'tests', 'fixtures', 'fake-vault');
 export const TEST_LOG_DIR = path.join(ASSETS_DIR, 'test-logs');
 const TEST_CONFIG_DIR = path.join(ASSETS_DIR, 'test-config');
+export const TEST_STATE_DIR = path.join(ASSETS_DIR, 'test-state');
 
 // Serve the fixture pages on 127.0.0.1. "localhost" reaches the same server as an other host.
 //   POST /submit        the form data as JSON in <pre id="result">, also kept in submissions
@@ -98,17 +99,49 @@ export function makeConfig(name, { server, hosts, tools, fields, ini, ask, vault
   };
 }
 
+// The tools of the server that need no lane.
+export const LANE_TOOL_NAMES = new Set(['browser_lane_open', 'browser_lane_close', 'browser_lanes']);
+
+// A client that opens a lane at the first call that needs one, and gives its ID in each call.
+// A call that gives lane itself, and the lane tools, go without a change. client.raw is the client
+// without this. client.lane is the ID of the current lane.
+function laneClient(client) {
+  let lane;
+  const callTool = async (params, ...rest) => {
+    if (LANE_TOOL_NAMES.has(params.name) || params.arguments?.lane !== undefined) return client.callTool(params, ...rest);
+    if (!lane) {
+      const opened = await client.callTool({ name: 'browser_lane_open', arguments: {} });
+      lane = opened.content?.[0]?.text.match(/Lane: (lane-[0-9a-f]+)/)?.[1];
+      if (!lane) throw new Error(`no lane: ${JSON.stringify(opened)}`);
+    }
+    const result = await client.callTool({ ...params, arguments: { ...params.arguments, lane } }, ...rest);
+    if (params.name === 'browser_close') lane = undefined;
+    return result;
+  };
+  return new Proxy(client, {
+    get(target, property) {
+      if (property === 'callTool') return callTool;
+      if (property === 'raw') return target;
+      if (property === 'lane') return lane;
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 // Start the server as a child process and connect an MCP client to it. The browser is headless,
-// except when env gives an other RENDER_MODE.
+// except when env gives an other RENDER_MODE. Each test has its own storage-state file.
 // onElicit: answers the dialogs of the ask provider; without it, the client cannot show dialogs.
-export async function startServerClient({ name, args = ['--isolated'], env = {}, config = {}, onElicit }) {
+export async function startServerClient({ name, args = [], env = {}, config = {}, onElicit, keepState = false }) {
   const logDir = path.join(TEST_LOG_DIR, name);
   fs.rmSync(logDir, { recursive: true, force: true });
   const testConfig = makeConfig(name, config);
+  const stateFile = path.join(TEST_STATE_DIR, `${name}.json`);
+  if (!keepState) fs.rmSync(stateFile, { force: true });
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [path.join(TOOL_DIR, 'playwright', 'src', 'server.js'), '--config-dir', testConfig.configDir, ...args],
-    env: { ...process.env, RENDER_MODE: 'HEADLESS', BROWSER_AUTOMATION_X_MCP_LOG_DIR: logDir, ...testConfig.env, ...env },
+    env: { ...process.env, RENDER_MODE: 'HEADLESS', BROWSER_AUTOMATION_X_MCP_LOG_DIR: logDir, BROWSER_AUTOMATION_X_MCP_STORAGE_STATE: stateFile, ...testConfig.env, ...env },
     cwd: TOOL_DIR,
     stderr: 'inherit',
   });
@@ -118,8 +151,9 @@ export async function startServerClient({ name, args = ['--isolated'], env = {},
   await client.connect(transport);
   // The server opens its log files after initialize, in <logDir>/<client name>/.
   return {
-    client,
+    client: laneClient(client),
     logDir,
+    stateFile,
     get logFile() { return findLog(logDir, '.log.json'); },
     get textLogFile() { return findLog(logDir, '.log'); },
     config: testConfig,

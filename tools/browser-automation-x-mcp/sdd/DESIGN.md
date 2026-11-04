@@ -7,8 +7,9 @@ defined in [SRS.md](SRS.md#default-values) and [QAS.md](QAS.md#default-values).
 
 The tool is an MCP server for browser automation. It runs on stdio between an MCP client (Claude
 Code, a wrapper with the Agent SDK) and Playwright MCP. It forwards the browser tools, and it adds
-tool switches, an automatic form fill and host lists. It runs without root and without OS installs.
-The browser is always Chromium.
+tool switches, an automatic form fill, host lists and lanes. A lane is one browser context for one
+agent: agents and sessions use the browser in parallel. It runs without root and without OS
+installs. The browser is always Chromium.
 
 The server code is in `playwright/`. The code in `src/`, the form-fill providers
 (`providers-form-fill/`) and the config templates in `config/` are the parts that do not use
@@ -64,8 +65,10 @@ flowchart TD
     C[MCP client] -->|MCP, stdio| F
     subgraph S[browser-automation-x-mcp]
         L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.js</i>] -->|starts: run.sh --config-dir DIR| F[Server process<br/><i>Node.js, MCP SDK</i>]
-        F -->|MCP, stdio| M[Playwright MCP<br/><i>Node.js child process</i>]
-        M -->|CDP, pipe| B[Chromium<br/><i>downloaded browser</i>]
+        F -->|MCP, in memory, one for each lane| M[Playwright MCP<br/><i>in the server process</i>]
+        F -->|launches; one context for each lane| B[Chromium<br/><i>downloaded browser</i>]
+        M -->|CDP, pipe| B
+        F -->|reads, writes| ST[(Storage state<br/><i>STATE_FILE, 0600</i>)]
         F -->|appends| G[(Log<br/><i>JSON Lines</i>)]
         L -->|writes| R[(Runtime files<br/><i>.local_assets/</i>)]
     end
@@ -76,18 +79,23 @@ flowchart TD
 - **Launcher:** makes and updates the runtime: Node.js, npm packages, Chromium and the missing
   Linux libraries and fonts. Then it starts the server with its arguments. stdout stays free for
   MCP.
-- **Server process:** the MCP server for the client and the MCP client of Playwright MCP. It runs
-  the call pipeline (section 5.1).
-- **Playwright MCP:** `@playwright/mcp`, unchanged. It runs the browser tools.
-- **Chromium:** the browser of Playwright, from the tool folder.
+- **Server process:** the MCP server for the client. It launches Chromium, and makes one browser
+  context and one Playwright MCP connection for each lane. It runs the call pipeline (section 5.1).
+  It opens no network port.
+- **Playwright MCP:** `@playwright/mcp`, unchanged, through `createConnection()` in the server
+  process. It runs the browser tools in the context of a lane.
+- **Chromium:** the browser of Playwright, from the tool folder. One process for all lanes of a
+  server. It starts with the first lane and stops after the last lane (REQ-065 of SRS).
+- **Storage state:** STATE_FILE: the cookies, localStorage and listed IndexedDB of all lanes and
+  sessions of the workspace (REQ-064 of SRS). Mode `0600`; never in a result, a log or OUTPUT_DIR.
 - **Xvfb:** the virtual display of a headed browser on Linux without a display. The server
-  starts and stops it. Unpacked into the tool folder.
+  starts and stops it with Chromium. Unpacked into the tool folder.
 - **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). It holds
   `server.ini`, `fields.ini`, `host-policy.ini`, `tools.ini` and `provider-<name>.ini`. A missing file is a copy of its template in the tool folder. The server
   adds tool lines and records hosts.
 - **Log:** two files for each server start in LOG_DIR/`<client>`/: `.log` for a person and
   `.log.json` with all fields (REQ-050 of SRS); gitignored.
-- **Runtime files:** Node.js, browsers, libraries, profiles, temp files, DISCOVERED_FILE;
+- **Runtime files:** Node.js, browsers, libraries, temp files, STATE_FILE, DISCOVERED_FILE;
   gitignored.
 - **Output files:** OUTPUT_DIR in the working folder: snapshots and screenshots for the agent.
 
@@ -112,22 +120,34 @@ flowchart TD
         R --> PI[INI provider]
         R --> PA[Ask provider]
         H --> AP[Allow provider<br/><i>file-allow-provider.js</i>]
-        P --> CL[MCP client of upstream]
+        P --> LN[Lanes<br/><i>playwright/src/lanes.js</i>]
+        LN --> CL[MCP client of upstream<br/><i>one for each lane</i>]
+        LN --> SS[Storage state<br/><i>playwright/src/storage-state.js</i>]
         P --> LG[Logger<br/><i>src/logger.js</i>]
-        P --> XV[Xvfb starter<br/><i>playwright/src/xvfb.js</i>]
+        LN --> XV[Xvfb starter<br/><i>playwright/src/xvfb.js</i>]
     end
     XV -->|starts, stops| X[Xvfb]
-    CL -->|MCP, stdio| M[Playwright MCP]
+    CL -->|MCP, in memory| M[Playwright MCP]
+    LN -->|launch, newContext| B[Chromium]
     PA -->|elicitation/create| SV
     PV -->|CLI| V[Vault tool]
 ```
 
-- **MCP server / MCP client:** the SDK objects for the two connections. The server forwards
-  roots, progress, cancellation and tool-list changes between them.
-- **Call pipeline:** the steps of one call, in this order: tool switch → host check of the target
-  URL → upstream → records of the recorder (DISCOVER) → host check of the opened page and record →
-  discovery (DISCOVER) → form fill, with a host check and a discovery of each page after a submit →
-  scrub → removal of the code sections → log.
+- **MCP server / MCP client:** the SDK objects for the connections. The server forwards roots,
+  progress and cancellation between the client and the connection of the lane.
+- **Call pipeline:** the steps of one call, in this order: tool switch → lane tools, or the lane of
+  the call (REQ-061 of SRS) → file name check (REQ-014a) → host check of the target URL → upstream
+  → records of the recorder (DISCOVER) → host check of the opened page and record → discovery
+  (DISCOVER) → form fill, with a host check and a discovery of each page after a submit → scrub of
+  masked values and secret headers (REQ-032, REQ-032a) → removal of the code sections → log. Each
+  lane has its own call state (page URL, fill state, recorder times): an object with the shared
+  session as its prototype.
+- **Lanes:** `playwright/src/lanes.js` (section 7 of SRS). Opens and closes lanes, keeps
+  MAX_LANES and MAX_TABS_PER_LANE, closes idle lanes, and starts and stops Chromium and Xvfb.
+  Chromium starts with `--deny-permission-prompts`.
+- **Storage state:** `playwright/src/storage-state.js`. Reads STATE_FILE, removes the IndexedDB of
+  hosts that `[storage] indexeddb` does not list, merges the state of a lane into the file, and
+  writes it with mode `0600` (REQ-064).
 - **Tool switches:** `src/tools-config.js` with `tools.ini` and the dangerous
   tools of Playwright MCP; adds missing tools; gives the error of a disabled tool.
 - **Host policy:** `[deny]` first, then the allow provider. Patterns: `src/hosts/patterns.js`.
@@ -153,11 +173,12 @@ flowchart TD
 - **Vault, INI, ask providers:** `providers-form-fill/<name>/index.js` with `provider-<name>.ini`.
   The vault provider uses only the systems that `[systems]` names (REQ-034 of SRS).
 - **Xvfb starter:** `playwright/src/xvfb.js`. `renderMode()` of `playwright/src/config.js`
-  resolves `RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the server starts
-  Xvfb through `setpriv --pdeathsig KILL` before upstream, records it in XVFB_DIR and gives
-  `DISPLAY` to upstream. At each start, it kills the Xvfb of servers that do not run (REQ-018).
-- **Chrome settings:** `playwright/src/chrome-prefs.js` writes `CHROME_PREFS` into the persistent
-  profile before the browser starts: at the first call, and after `browser_close`.
+  resolves `RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the lanes start Xvfb through
+  `setpriv --pdeathsig KILL` before Chromium, record it in XVFB_DIR and give its `DISPLAY` to
+  Chromium. At each start, the server kills the Xvfb of servers that do not run (REQ-018).
+- **Entry point:** `playwright/src/server.js` takes only `--config-dir`. It sets the browsers
+  path, the cache folder, the temp folder and the libraries in the process environment before it
+  loads Playwright: Playwright reads them once.
 - **Logger:** `src/logger.js`. It keeps the events in a buffer until `initialize` gives the client
   name, then writes `.log.json` and the short lines of `.log`. It redacts the secret arguments.
 
@@ -175,12 +196,13 @@ flowchart TD
 
 | Container | Operation | Description |
 | --- | --- | --- |
-| Server process | MCP `initialize` | Gives SERVER_NAME, the tools capability of upstream and the instructions of REQ-005. |
-| Server process | MCP `tools/list` | The tools of upstream without the name Playwright; notes for disabled tools. |
+| Server process | MCP `initialize` | Gives SERVER_NAME, the tools capability and the instructions of REQ-005. |
+| Server process | MCP `tools/list` | The lane tools (REQ-060 of SRS), and the tools of upstream with the required parameter `lane`, without the name Playwright; notes for disabled tools. |
 | Server process | MCP `tools/call` | The call pipeline (5.1). Error results: UI-02 of SRS. |
 | Server process | MCP `elicitation/create` (to the client) | The dialog of the ask provider (UI-01). |
-| Server process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument goes to Playwright MCP, e.g. `--isolated`. The server removes `--headless` and `--browser`. |
-| Server process | environment | `RENDER_MODE` (REQ-015 of SRS; the server ignores `PLAYWRIGHT_MCP_HEADLESS` and `PLAYWRIGHT_MCP_BROWSER`); `BROWSER_AUTOMATION_X_MCP_LOG_DIR`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). |
+| Server process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument stops the server (REQ-004). |
+| Server process | environment | `RENDER_MODE` (REQ-015 of SRS); `BROWSER_AUTOMATION_X_MCP_LOG_DIR`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`, `_STORAGE_STATE`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). The server ignores each `PLAYWRIGHT_MCP_*` variable. |
+| Playwright MCP (used) | `createConnection(config, contextGetter)` | One connection for each lane, with the context of the lane. |
 | Playwright MCP (used) | `browser_run_code_unsafe`, `browser_snapshot` | Page code of the form fill; the snapshot after the submit. |
 | Launcher | `run.sh [install|test|args]` | Makes the runtime; `install` stops after it; `test` runs the tests. |
 | Vault tool (used) | `run.sh --vault NAME get-system SYSTEM` / `get-secret SYSTEM KEY` | The secret names of one system; one secret on stdout. |
@@ -191,13 +213,37 @@ flowchart TD
 | --- | --- | --- |
 | Fill provider | `resolve(name, ctx)`: value, `undefined`, or a `FillError`; `dispose()`. `ctx = { host, url, elicit }`. See `src/fill/provider.js`. | Fill registry |
 | Fields | `match(url)` → `{ key, fields: [{ name, selector }], submit }` or `undefined`; `urlMatches(pattern, url)`; `urlPattern(url)` | Form fill |
-| Form fill | `autofill(session, url, ctx)` → snapshot result or `undefined`; `discover(session, url)` | Call pipeline |
+| Form fill | `autofill(session, url, ctx)` → snapshot result or `undefined`; `discover(session, url)`. `session` is the state of one lane. | Call pipeline |
+| Lanes | `open()` → lane or `undefined` (busy); `close(id, reason)`; `get(id)`; `status()`; `tabCount(lane)`; `closeAll(reason)` | Call pipeline |
+| Storage state | `loadState(file)`, `filterIndexedDb(state, hosts)`, `mergeState(base, mine, theirs)`, `writeState(file, state)` | Lanes |
 | Allow provider | `isAllowed(host, ctx)`; `recordOpened(host, ctx)`. `ctx = { url, tool }`. See `src/hosts/allow-provider.js`. | Host policy |
 | Host policy | `check(url, ctx)` → `{ allowed, reason }`; `opened(url, ctx)` | Call pipeline |
 | Tool switches | `addMissing(names)`, `isEnabled(name)`, `describe(tool)`, `disabledResult(name)` | Call pipeline |
 | Fill registry | `resolve(name, ctx)`, `scrub(result)`, `scrubFiles(files)`, `clean(text)` | Form fill, call pipeline |
 
 ## 7. Key flows
+
+Two agents in parallel:
+
+```mermaid
+sequenceDiagram
+    Agent A->>Server: browser_lane_open
+    Server->>Server: start Chromium (first lane); context with STATE_FILE
+    Server-->>Agent A: Lane: lane-3f9a
+    Agent B->>Server: browser_lane_open
+    Server-->>Agent B: Lane: lane-07c1
+    par
+        Agent A->>Server: browser_navigate lane=lane-3f9a
+        Server->>Playwright MCP: browser_navigate (connection of lane-3f9a)
+    and
+        Agent B->>Server: browser_navigate lane=lane-07c1
+        Server->>Playwright MCP: browser_navigate (connection of lane-07c1)
+    end
+    Agent A->>Server: browser_lane_close lane=lane-3f9a
+    Server->>Server: merge the state of the lane into STATE_FILE; close the context
+    Agent B->>Server: browser_lane_close lane=lane-07c1
+    Server->>Server: merge the state; close the context; stop Chromium (last lane)
+```
 
 Form fill of a login page:
 
@@ -260,9 +306,11 @@ sequenceDiagram
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log.json` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log` | no | `HH:MM:SS <event> <url> <key>=<value> ...`, a maximum of LOG_LINE_MAX characters | server |
 | DISCOVERED_FILE | no | sections as in `fields.ini`; a comment line describes each entry; `; used: <filled or pressed> by <who>` marks a used entry | server |
-| `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of the server and Xvfb), profiles, tmp, `discovered-fields.ini` | launcher, Playwright, server |
-| OUTPUT_DIR | no | snapshots, screenshots, console logs of upstream | Playwright; server scrubs |
-| `<repo>/.local_assets/tmp/` | no | temp files of Chromium when the tool folder cannot hold its socket | Playwright |
+| `<config>/server.ini` `[storage]` | yes | `indexeddb = <host>, <host>`: the hosts that keep their IndexedDB (REQ-064 of SRS) | user |
+| STATE_FILE | no | Playwright storage state (JSON): `cookies`, `origins` with `localStorage` and `indexedDB`; mode `0600` | server |
+| `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of the server and Xvfb), tmp, STATE_FILE, `discovered-fields.ini` | launcher, Playwright, server |
+| OUTPUT_DIR | no | snapshots, screenshots, console logs, network files of upstream; the only folder for a `filename` of the agent (REQ-014a) | Playwright; server scrubs and masks |
+| `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `shared/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
 
 Host patterns: `*` (each host), `*.example.com` (subdomains only), `example.com` (exact),
 `192.168.1.*` (IPv4 octets). Host only, no case. A URL without a host passes.
@@ -282,8 +330,8 @@ of the repository.
 
 | Dependency | Container | Use |
 | --- | --- | --- |
-| Node.js NODE_VERSION (downloaded) | Launcher, server, Playwright MCP | Runtime |
-| `@playwright/mcp` 0.0.83 | Playwright MCP | Browser tools |
+| Node.js NODE_VERSION (downloaded) | Launcher, server | Runtime |
+| `@playwright/mcp` 0.0.83 (with its `playwright-core`) | Server process | Browser tools; Chromium launch |
 | `@modelcontextprotocol/sdk` 1.32.2 | Server process | MCP server and client |
 | Chromium (downloaded) | Chromium | Browser |
 | `ldd`, `apt-get`, `apt-cache`, `dpkg-deb` (Ubuntu base) | Launcher | Missing libraries, no root |
@@ -297,6 +345,8 @@ Manual test: see [README.md](../README.md#tests), and run `claude -p` with `--mc
 
 All decisions are in [ADL.md](ADL.md).
 
+- [ADR-20261104-browser_lanes](adr/ADR-20261104-browser_lanes.md): one browser context for each
+  agent, upstream in the server process, logins in a storage-state file.
 - [ADR-20261028-tool_folders](adr/ADR-20261028-tool_folders.md): one folder for each browser
   tool, shared providers and config. Superseded: the tool has one browser tool only (ADL
   20261103-01).
@@ -313,6 +363,8 @@ All decisions are in [ADL.md](ADL.md).
 - `browser_evaluate` can read a value that stays in a field after a failed submit.
 - A deny rule does not stop each shell command. An agent with a shell can still read the tool
   folder.
+- The bubble test of REQ-016 ran on `http://127.0.0.1` on Xvfb. A test on an HTTPS site is not done.
+- Two lanes of the same agent are possible. The server cannot see which agent makes a call.
 
 ## 12. Default values
 

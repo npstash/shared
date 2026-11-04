@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 // Entry point: the MCP server on stdio.
-// --config-dir DIR gives the config folder. Each other argument goes to Playwright MCP without a
-// change. See README.md.
+// --config-dir DIR gives the config folder. The server takes no other argument. See README.md.
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { loggerOptions, takeConfigDir } from './config.js';
-import { startServer } from './mcp-server.js';
+import { loggerOptions, processEnv, takeConfigDir, tmpDirForChromium } from './config.js';
 import { createLogger } from '../../src/logger.js';
 
 const logger = createLogger(loggerOptions());
@@ -19,14 +17,18 @@ process.on('unhandledRejection', (error) => {
 });
 
 try {
-  const { configDir, args } = takeConfigDir(process.argv.slice(2));
+  const { configDir } = takeConfigDir(process.argv.slice(2));
+  // Playwright reads the folder of the browsers and the temp folder from the environment.
+  // Thus set them before Playwright loads.
+  const tmpDir = await tmpDirForChromium();
+  Object.assign(process.env, processEnv(process.env, tmpDir));
+  const { startServer } = await import('./mcp-server.js');
   const mcp = await startServer({
-    args,
     configDir,
     logger,
+    tmpDir,
     serverTransport: new StdioServerTransport(),
-    // Without Playwright MCP the server has no tools. Stop, so that the client shows the failure.
-    onClose: (reason) => process.exit(reason === 'upstream closed' ? 1 : 0),
+    onClose: () => process.exit(0),
   });
   // The stdio transport does not report the end of stdin. The client closes stdin to stop the server.
   process.stdin.on('end', () => mcp.close('stdin closed'));

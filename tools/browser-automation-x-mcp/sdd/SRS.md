@@ -1,7 +1,8 @@
 # Software Requirements Specification (SRS) — browser-automation-x-mcp
 
 The required behaviour of the system. The system is "the server". "Upstream" is Playwright MCP.
-"The client" is the MCP client, e.g. Claude Code. The containers are in [DESIGN.md](DESIGN.md).
+"The client" is the MCP client, e.g. Claude Code. "A lane" is one browser context for one agent
+(section 7). The containers are in [DESIGN.md](DESIGN.md).
 
 **Requirement format:** Structured
 
@@ -12,49 +13,54 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 #### REQ-001 — Forward the tools of upstream
 
 - **Trigger:** The client sends `tools/list` or `tools/call`.
-- **Basic Flow:** The server shall forward the request to upstream and give the answer of upstream
-  to the client. The names and input schemas of the tools shall stay the same.
+- **Basic Flow:** The server shall forward the request to the upstream connection of the lane of
+  the call (REQ-061), and give the answer of upstream to the client. The names of the tools shall
+  stay the same.
 - **Alternative Flow:**
-  - `tools/list` → the server adds notes for disabled tools (REQ-020) and changes the texts
-    (REQ-005). It adds no tools.
+  - `tools/list` → the server adds the lane tools (REQ-060) and the parameter `lane` to each
+    upstream tool (REQ-061). It adds notes for disabled tools (REQ-020) and changes the texts
+    (REQ-005).
   - A step of sections 3–5 stops the call → the server gives an error result (UI-02).
 - **Exception Flow:** Upstream gives an error → the server gives the same error to the client.
 
 #### REQ-002 — Forward roots, progress and cancellation
 
 - **Basic Flow:**
-  1. The server shall answer `roots/list` of upstream with the roots of the client.
+  1. The server shall answer `roots/list` of each upstream connection with the roots of the client.
   2. The server shall forward progress notifications of a call to the client.
   3. The server shall forward the cancellation of a call to upstream.
   4. The server shall forward `notifications/tools/list_changed` of upstream to the client.
 - **Alternative Flow:** The client has no roots capability → the server gives an empty list.
 
-#### REQ-003 — Close the browser at shutdown
+#### REQ-003 — Close the lanes at shutdown
 
-- **Pre-condition:** A tool call ran after the last `browser_close`.
 - **Trigger:** The client closes the connection, or the server gets SIGINT or SIGTERM.
-- **Basic Flow:** The server shall call `browser_close` of upstream, then stop upstream.
-- **Exception Flow:** `browser_close` takes longer than CLOSE_TIMEOUT (5000 ms) → the server logs
-  the error and stops upstream.
-- **Post-condition:** A persistent profile keeps its cookies and localStorage.
+- **Basic Flow:** The server shall close each open lane as REQ-063 says, then stop the browser.
+- **Post-condition:** The storage-state file has the logins of each lane (REQ-064).
 
 #### REQ-005 — Texts for the client
 
 - **Basic Flow:** The texts for the client shall not name upstream, Playwright, the form fill
   or its providers.
   1. The server name shall be SERVER_NAME (browser-automation-x-mcp).
-  2. The instructions shall be: "Use the tools of this server for each browser automation task
-     when they are available. This is mandatory."
+  2. The instructions shall start with: "Use the tools of this server for each browser automation
+     task when they are available. This is mandatory." Then they shall tell the agent to open a
+     lane, to give its ID in each call, to use one lane for each agent, and to close it.
   3. The server shall remove the name Playwright from the tool descriptions and schemas.
   4. The server shall remove the section `### Ran Playwright code` from each result.
   5. Error results shall not name upstream or a config file (UI-02).
 
-#### REQ-004 — Run upstream as a child process
+#### REQ-004 — Run upstream in the server process
 
 - **Trigger:** The client starts the server.
-- **Basic Flow:** The server shall start upstream with each command-line argument of the server,
-  except `--config-dir`, `--browser` and `--headless`.
-- **Exception Flow:** Upstream stops → the server stops with exit code 1.
+- **Basic Flow:**
+  1. The server shall take only the argument `--config-dir` (REQ-019).
+  2. It shall run upstream in its own process, with one connection for each lane (REQ-061). It
+     shall open no network port.
+- **Alternative Flow:** A variable `PLAYWRIGHT_MCP_*` is set → the server ignores it and logs
+  `ignored`.
+- **Exception Flow:** The server gets an other argument → it stops with exit code 1 and an error
+  that names the argument.
 
 ## 2. Runtime and portability
 
@@ -71,12 +77,8 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 - **Basic Flow:**
   1. The launcher shall install BROWSER (chromium) for the pinned Playwright version into the
      tool folder.
-  2. The server shall always start BROWSER (chromium). It shall give
-     `PLAYWRIGHT_MCP_BROWSER=chromium` to upstream, also with `--config`.
-- **Alternative Flow:**
-  - The variable `CI` is `true` → the launcher also installs the OS packages.
-  - `--browser` or `PLAYWRIGHT_MCP_BROWSER` is given → the server ignores it, without an error.
-    It removes `--browser` and logs `ignored`.
+  2. The server shall always start BROWSER (chromium).
+- **Alternative Flow:** The variable `CI` is `true` → the launcher also installs the OS packages.
 
 #### REQ-012 — Missing Linux libraries without root
 
@@ -115,12 +117,22 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 #### REQ-014 — Files only in the tool folder
 
-- **Basic Flow:** The server shall keep the browser profiles, temp files and the browser registry
-  (Linux) in the tool folder. It shall keep the output files (snapshots, screenshots) in
-  OUTPUT_DIR of the working folder: the agent reads them.
+- **Basic Flow:** The server shall keep STATE_FILE, the log, DISCOVERED_FILE, temp files and the
+  browser registry (Linux) in the tool folder. It shall keep the output files (snapshots,
+  screenshots) in OUTPUT_DIR of the working folder: the agent reads them.
 - **Alternative Flow:**
-  - The user gives the value with an argument or a variable → the server keeps it.
-  - The tool folder cannot hold Unix sockets → the server keeps the temp folder of the OS.
+  - The user gives `PLAYWRIGHT_BROWSERS_PATH` → the server keeps it.
+  - The tool folder cannot hold the Unix socket of Chromium → the server uses `.local_assets/tmp/`
+    of the first folder with `.git` above the tool folder (in a submodule: the submodule, e.g.
+    `shared/`). If that fails too, it uses the temp folder of the OS. It logs `tmp_dir_fallback`.
+
+#### REQ-014a — File names of the agent
+
+- **Trigger:** A call has the argument `filename`.
+- **Basic Flow:** The server shall resolve a relative name against OUTPUT_DIR, and give the
+  absolute path to upstream.
+- **Exception Flow:** The file is not in OUTPUT_DIR → the server gives an error result (UI-02) and
+  does not call upstream.
 
 #### REQ-015 — Render mode of the browser
 
@@ -132,12 +144,7 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   | `HEADED` | a window | a window (WSLg) | `HEADED_INVISIBLE` |
   | `HEADED_INVISIBLE` | Xvfb (REQ-018); not Linux: error | Xvfb | Xvfb |
   | `HEADLESS` | no window | no window | no window |
-- **Alternative Flow:**
-  - `--headless` or `PLAYWRIGHT_MCP_HEADLESS` is given → the server ignores it, without an error.
-    It removes `--headless` and sets `PLAYWRIGHT_MCP_HEADLESS` for upstream.
-  - The user gives `--config` → the render mode also applies. The variable overrides the file.
-  - The user gives `--cdp-endpoint`, `--extension` or `--endpoint` → the render mode has no
-    effect.
+- **Alternative Flow:** `PLAYWRIGHT_MCP_HEADLESS` is set → the server ignores it (REQ-004).
 - **Exception Flow:**
   - The value is not known → the server stops with an error.
   - The mode needs Xvfb, and the OS is not Linux → the server stops with an error. The server
@@ -152,7 +159,8 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   1. The server shall start Xvfb on the first free display from XVFB_FIRST_DISPLAY (99), with
      XVFB_SCREEN (1920x1080x24).
   2. Xvfb shall listen only on the abstract socket of Linux.
-  3. The server shall give the display to upstream and `PLAYWRIGHT_MCP_HEADLESS=false`.
+  3. The server shall start Xvfb with the browser (REQ-065), and start the browser headed on its
+     display. It shall stop Xvfb with the browser.
   4. The server shall record the PID and start time of itself and of Xvfb in XVFB_DIR.
   5. The server shall stop Xvfb and delete the record when it stops.
   6. The kernel shall stop Xvfb when the server process stops (parent-death signal of `setpriv`).
@@ -169,14 +177,11 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 #### REQ-016 — No bubbles of the browser
 
-- **Trigger:** The browser starts with a persistent profile.
-- **Basic Flow:** Before the start, the server shall write settings into `Default/Preferences` of
-  the profile. The settings stop the password manager, its leak check, the translate bar, the
-  "restore pages" bubble, autofill prompts and permission prompts. Other settings stay.
-- **Alternative Flow:**
-  - `--isolated` → the server writes no settings.
-  - The file is missing or damaged → the server writes a file with only these settings.
-- **Post-condition:** No bubble of the browser covers the page.
+- **Trigger:** The browser starts (REQ-065).
+- **Basic Flow:** The server shall start Chromium with `--deny-permission-prompts`.
+- **Post-condition:** No bubble of the browser covers the page. Each lane starts with an empty
+  profile: no "restore pages" bubble. The default switches of Playwright stop the translate bar.
+  A test on Xvfb shows no password bubble and no address bubble in a lane.
 
 ## 3. Tool switches
 
@@ -184,8 +189,8 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 - **Trigger:** The server starts.
 - **Basic Flow:** The server shall read its config files from the folder that `--config-dir DIR`
-  gives. A relative path is relative to the working folder. The server shall not give the
-  argument to upstream. The files are in [DESIGN.md](DESIGN.md#data-model).
+  gives. A relative path is relative to the working folder. The files are in
+  [DESIGN.md](DESIGN.md#data-model).
 - **Alternative Flow:** A config file is missing → the server shall copy its template from the
   tool folder.
 - **Exception Flow:** `--config-dir` is missing → the server does not start. It writes the error
@@ -255,6 +260,13 @@ The agent does not fill credentials or personal data. The server fills the field
   changed in the call. Binary files, e.g. screenshots, stay unchanged.
 - **Post-condition:** The client, the log and the text files of upstream never get a masked value
   (QAS-002).
+
+#### REQ-032a — Mask of secret headers
+
+- **Trigger:** A call gives a result, or upstream writes text files in the call.
+- **Basic Flow:** The server shall replace the value of each line `Cookie:`, `Set-Cookie:`,
+  `Authorization:` and `Proxy-Authorization:` with MASK, in the result and in the files of REQ-032.
+  The header name shall stay. Bodies shall stay.
 
 #### REQ-033 — Removed
 
@@ -421,6 +433,79 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 ---
 
+## 7. Lanes
+
+#### REQ-060 — Lane tools
+
+- **Basic Flow:** The server shall give these tools. They need no lane.
+  1. `browser_lane_open`: the server opens a lane (REQ-062) and gives its ID, e.g. `lane-3f9a`.
+     The ID is random.
+  2. `browser_lane_close` with `lane`: the server closes the lane (REQ-063).
+  3. `browser_lanes`: the server gives the open lanes, MAX_LANES, and the tabs and idle time of
+     each lane.
+- **Alternative Flow:** MAX_LANES (3) lanes are open → `browser_lane_open` fails at once with
+  "Busy", the number of open lanes and the text to call `browser_lanes` later.
+
+#### REQ-061 — Lane of a call
+
+- **Basic Flow:**
+  1. Each upstream tool shall have the required parameter `lane`.
+  2. The server shall forward the call without `lane` to the upstream connection of the lane.
+  3. Each lane shall have its own tabs, current tab, page URL, fill state and recorder state.
+- **Alternative Flow:**
+  - `browser_close` → the server closes the lane, as `browser_lane_close`.
+  - `browser_tabs` with `action=new`, and the lane has MAX_TABS_PER_LANE (5) tabs → the server gives
+    an error result and does not call upstream.
+  - A page opens a tab over MAX_TABS_PER_LANE (5) → the server closes the tab at once. The next
+    result of the lane gets a note.
+- **Exception Flow:** `lane` is missing, or the lane is not open → the server gives an error result
+  (UI-02) that tells the agent to call `browser_lane_open`.
+
+#### REQ-062 — Open a lane
+
+- **Basic Flow:**
+  1. The server shall start the browser if it does not run (REQ-065).
+  2. It shall read STATE_FILE and open a new browser context with this state.
+  3. It shall make a new upstream connection with this context.
+- **Alternative Flow:** STATE_FILE is missing or damaged → the lane starts without logins.
+
+#### REQ-063 — Close a lane
+
+- **Trigger:** `browser_lane_close`, `browser_close`, LANE_IDLE (10 min) without a call
+  (REQ-066), or the shutdown (REQ-003).
+- **Basic Flow:**
+  1. In the discovery mode, the server shall get the records of the recorder (REQ-039a).
+  2. It shall save the storage state of the lane (REQ-064).
+  3. It shall close the upstream connection and the context.
+  4. It shall stop the browser when no lane is open (REQ-065).
+- **Post-condition:** The log has `lane_closed` with the reason.
+
+#### REQ-064 — Storage state
+
+- **Basic Flow:**
+  1. The server shall get the cookies and the localStorage of the lane. It shall also get the
+     IndexedDB if `[storage] indexeddb` of `server.ini` lists a host.
+  2. It shall remove the IndexedDB of each origin whose host is not in the list.
+  3. It shall merge the state into STATE_FILE. An entry is a cookie (name, domain and path) or an
+     origin. An entry that the lane changed or added wins. An entry that the lane did not change
+     keeps the value of the file. An entry that the lane removed goes away, if the file did not
+     change it. Expired cookies go away.
+  4. It shall write a temp file with the mode `0600`, then rename it to STATE_FILE.
+- **Exception Flow:** The save fails → the server logs `state_save_failed`.
+- **Post-condition:** STATE_FILE never goes into a result, a log or OUTPUT_DIR.
+
+#### REQ-065 — Browser of the lanes
+
+- **Basic Flow:**
+  1. All lanes of the server shall use one Chromium, in the render mode of REQ-015.
+  2. The server shall start Chromium with the first lane, and stop it when the last lane closes.
+- **Exception Flow:** Chromium does not start → `browser_lane_open` fails with the error.
+
+#### REQ-066 — Idle lanes
+
+- **Basic Flow:** Each IDLE_CHECK (30000 ms), the server shall close each lane without a call for
+  LANE_IDLE (10 min). A lane with a call that runs is not idle.
+
 ## User interface
 
 ### UI-01 — Dialog of the ask provider
@@ -449,12 +534,11 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 | Name | Default | Unit | Configuration key | Meaning |
 | --- | --- | --- | --- | --- |
-| CLOSE_TIMEOUT | 5000 | ms | — | Maximum time of `browser_close` at shutdown |
 | ASK_TIMEOUT | 300000 | ms | — | Maximum time of a dialog of the ask provider |
 | TOOL_TIMEOUT | 600000 | ms | — | Maximum time of one call without progress |
 | NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` / `run.bat` | Pinned Node.js runtime |
 | RENDER_MODE | DEFAULT | — | `RENDER_MODE` | `DEFAULT`, `HEADED`, `HEADED_INVISIBLE` or `HEADLESS` (REQ-015) |
-| BROWSER | chromium | — | — | The only browser of upstream |
+| BROWSER | chromium | — | — | The only browser |
 | SYSLIBS_ROUNDS | 10 | rounds | — | Maximum download rounds of the missing libraries |
 | SYSLIBS_SET | xvfb1 | — | `SYSLIBS_SET` in `run.sh` | Version of the package set of the launcher |
 | XVFB_PACKAGES | xvfb, xserver-common, x11-xkb-utils, xkb-data | — | — | Packages of Xvfb |
@@ -471,7 +555,12 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | LOG_LEVEL | info | — | `BROWSER_AUTOMATION_X_MCP_LOG_LEVEL` | `error`, `info` or `debug` |
 | LOG_SECRETS | unset | — | `BROWSER_AUTOMATION_X_MCP_LOG_SECRETS` | `1` logs the values of the secret arguments |
 | SERVER_NAME | browser-automation-x-mcp | — | — | Server name for the client |
-| OUTPUT_DIR | `.local_assets/browser-automation-x-mcp/output/` of the working folder | — | `--output-dir`, `PLAYWRIGHT_MCP_OUTPUT_DIR` | Output files of upstream |
+| OUTPUT_DIR | `.local_assets/browser-automation-x-mcp/output/` of the working folder | — | — | Output files of upstream |
+| MAX_LANES | 3 | lanes | — | Maximum open lanes of one server |
+| MAX_TABS_PER_LANE | 5 | tabs | — | Maximum tabs of one lane |
+| LANE_IDLE | 10 | min | — | Time without a call, after which a lane closes |
+| IDLE_CHECK | 30000 | ms | — | Interval of the check for idle lanes |
+| STATE_FILE | `.local_assets/storage-state-<hash of the working folder>.json` | — | `BROWSER_AUTOMATION_X_MCP_STORAGE_STATE` | Storage state of the lanes of one workspace (REQ-064) |
 | FILL_WAIT | 10000 | ms | — | Maximum wait for the fields of a page |
 | SUBMIT_WAIT | 10000 | ms | — | Maximum wait for the load and for the network after a submit |
 | FILL_ROUNDS | 3 | rounds | — | Maximum fill and submit rounds in one call |
