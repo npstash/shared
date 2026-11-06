@@ -253,8 +253,8 @@ describe('lanes', () => {
 
   test('the status gives the open lanes and the maximum', () => {
     const value = lanes();
-    value.lanes.set('lane-1', { id: 'lane-1', lastUsed: 0, busy: 1, context: { pages: () => [1, 2] } });
-    assert.equal(value.status(5000), 'Open lanes: 1 of 3.\n- lane-1: 2 tabs, idle 5 s, busy');
+    value.lanes.set('lane-1', { id: 'lane-1', browserSession: 'fresh', lastUsed: 0, busy: 1, context: { pages: () => [1, 2] } });
+    assert.equal(value.status(5000), 'Open lanes: 1 of 3.\n- lane-1: browser session fresh, 2 tabs, idle 5 s, busy');
   });
 });
 

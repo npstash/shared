@@ -164,3 +164,5 @@ The log of the decisions that change the design. Format and rules:
 - 20261106-22 Nestor 29c0c2f718c6 A site key that is not a root domain, a subdomains key outside its node, credentials, and a vault config without vault or entry are load errors
 - 20261106-23 Nestor 29c0c2f718c6 An approval provider is the approval of the entry of a key-value provider in server.json; "enabled": false in approval turns it off; an approval provider in providers is a load error
 - 20261106-24 Nestor 29c0c2f718c6 A refused approval adds the note "The user did not approve an action on this page." to the result of the call; the note does not name the form fill
+- 20261106-25 Nestor a514839531b7 browser_lane_open needs browserSession: normal loads and saves the storage state, fresh starts without it and merges its logins into it without a removal, isolated starts without it and saves nothing
+- 20261106-26 Nestor a514839531b7 The result of browser_lane_open and browser_lanes give the browser session; the agent tells the user the browser session; a "session" of the browser that the user asks for is the browser session

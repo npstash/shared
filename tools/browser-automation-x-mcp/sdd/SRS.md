@@ -45,7 +45,9 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   1. The server name shall be SERVER_NAME (browser-automation-x-mcp).
   2. The instructions shall start with: "Use the tools of this server for each browser automation
      task when they are available. This is mandatory." Then they shall tell the agent to open a
-     lane, to give its ID in each call, to use one lane for each agent, and to close it.
+     lane with a browser session (REQ-062), to tell the user the browser session, to give the lane
+     ID in each call, to use one lane for each agent, and to close it. A "session" of the browser
+     that the user asks for is the browser session.
   3. The server shall remove the name Playwright from the tool descriptions and schemas.
   4. The server shall remove the section `### Ran Playwright code` from each result.
   5. Error results shall not name upstream or a config file (UI-02).
@@ -583,12 +585,18 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 #### REQ-062 — Open a lane
 
+- **Trigger:** `browser_lane_open` with `browserSession`: `normal`, `fresh` or `isolated`.
 - **Basic Flow:**
   1. The server shall make the lane profile in LANES_DIR/`<pid>-<lane id>` with the settings of
      REQ-016, and start a Chromium with it (REQ-065).
-  2. It shall read STATE_FILE and give this state to the context of the Chromium.
+  2. For `normal`, it shall read STATE_FILE and give this state to the context of the Chromium.
+     For `fresh` and `isolated`, the context starts without logins.
   3. It shall make a new upstream connection with this context.
+  4. The result shall give the lane ID and the browser session, and tell the agent to tell the user
+     the browser session. `browser_lanes` shall give the browser session of each lane.
 - **Alternative Flow:** STATE_FILE is missing or damaged → the lane starts without logins.
+- **Exception Flow:** `browserSession` is missing or has an other value → the server gives an error
+  result (UI-02) with the three values.
 
 #### REQ-063 — Close a lane
 
@@ -604,6 +612,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 #### REQ-064 — Storage state
 
+- **Pre-condition:** The browser session of the lane is `normal` or `fresh` (REQ-062).
 - **Trigger:** A page of the lane loads (also after a login of the user), or the lane closes.
 - **Basic Flow:**
   1. The server shall get the cookies, the localStorage and the IndexedDB of the lane.
@@ -613,6 +622,10 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
      keeps the value of the file. An entry that the lane removed goes away, if the file did not
      change it. Expired cookies go away.
   4. It shall write a temp file with the mode `0600`, then rename it to STATE_FILE.
+- **Alternative Flow:**
+  - `fresh` → the merge starts from an empty state: the lane adds or changes entries, but removes
+    no entry of the file.
+  - `isolated` → the server does not save the state of the lane.
 - **Exception Flow:** The save fails → the server logs `state_save_failed`.
 - **Post-condition:** STATE_FILE never goes into a result, a log or OUTPUT_DIR.
 

@@ -158,7 +158,8 @@ flowchart TD
 - **Lanes:** `playwright/src/lanes.js` (section 7 of SRS). Opens and closes lanes, keeps
   MAX_LANES and MAX_TABS_PER_LANE, closes idle lanes, and starts and stops the Chromium of each
   lane and the Xvfb of the server. It writes the lane profile with
-  `playwright/src/chrome-prefs.js` (REQ-016), loads the storage state with `setStorageState()`,
+  `playwright/src/chrome-prefs.js` (REQ-016), loads the storage state with `setStorageState()` for
+  the browser session `normal`, saves it for `normal` and `fresh` (REQ-062, REQ-064),
   and adds a page script that reports the input of the user (REQ-066). At the start of the
   server, it deletes the lane profiles of servers that do not run.
 - **Storage state:** `playwright/src/storage-state.js`. Reads STATE_FILE, removes the IndexedDB of

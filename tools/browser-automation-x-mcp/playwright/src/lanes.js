@@ -72,6 +72,9 @@ function running(pid) {
 // Chromium shows no permission prompt: it denies the request.
 const CHROMIUM_ARGS = ['--deny-permission-prompts'];
 
+
+// The browser sessions of a lane (REQ-062 of sdd/SRS.md).
+export const BROWSER_SESSIONS = ['normal', 'fresh', 'isolated'];
 export class Lanes {
   // mode: HEADED, HEADED_INVISIBLE or HEADLESS. stateFile: the storage-state file.
   // keepIndexedDb(host): true for a host that keeps its IndexedDB (a site of sites.json).
@@ -113,11 +116,15 @@ export class Lanes {
 
   // Open a lane: its own Chromium with the logins of the storage state. Give undefined if all
   // lanes are in use.
-  async open() {
+  // browserSession (REQ-062 of sdd/SRS.md): "normal" loads and saves the logins of the storage
+  // state; "fresh" starts without them and saves into the storage state; "isolated" starts without
+  // them and saves nothing.
+  async open(browserSession = 'normal') {
+    if (!BROWSER_SESSIONS.includes(browserSession)) throw new Error(`unknown browser session "${browserSession}"`);
     if (this.lanes.size >= this.maxLanes) return undefined;
     let id;
     do id = `lane-${crypto.randomBytes(2).toString('hex')}`; while (this.lanes.has(id));
-    const lane = { id, opened: Date.now(), lastUsed: Date.now(), busy: 0, context: undefined, notes: [], base: undefined, dir: path.join(LANES_DIR, `${process.pid}-${id}`) };
+    const lane = { id, browserSession, opened: Date.now(), lastUsed: Date.now(), busy: 0, context: undefined, notes: [], base: undefined, dir: path.join(LANES_DIR, `${process.pid}-${id}`) };
     this.lanes.set(id, lane);
     try {
       fs.rmSync(lane.dir, { recursive: true, force: true });
@@ -130,7 +137,8 @@ export class Lanes {
         env,
         viewport: this.headless ? { width: 1280, height: 720 } : null,
       });
-      lane.base = loadState(this.stateFile);
+      // A fresh or isolated lane starts with an empty base: its save removes no entry of the file.
+      lane.base = browserSession === 'normal' ? loadState(this.stateFile) : { cookies: [], origins: [] };
       await lane.context.setStorageState(lane.base);
       await lane.context.exposeBinding('__baxActivity', () => { lane.lastUsed = Date.now(); });
       await lane.context.addInitScript({ content: ACTIVITY_SCRIPT });
@@ -149,7 +157,7 @@ export class Lanes {
       throw error;
     }
     await this.afterOpen?.(lane);
-    this.logger.info('lane_opened', { lane: id, open: this.lanes.size });
+    this.logger.info('lane_opened', { lane: id, browserSession, open: this.lanes.size });
     return lane;
   }
 
@@ -203,7 +211,7 @@ export class Lanes {
   // Merge the state of the lane into the storage-state file. The merged state is the new base: the
   // next save gives only the changes after it.
   async saveState(lane) {
-    if (!lane.context) return;
+    if (!lane.context || lane.browserSession === 'isolated') return;
     try {
       const mine = filterIndexedDb(await lane.context.storageState({ indexedDB: true }), this.keepIndexedDb);
       const merged = mergeState(lane.base, mine, loadState(this.stateFile));
@@ -226,7 +234,7 @@ export class Lanes {
   status(now = Date.now()) {
     const lines = [`Open lanes: ${this.lanes.size} of ${this.maxLanes}.`];
     for (const lane of this.lanes.values()) {
-      lines.push(`- ${lane.id}: ${this.tabCount(lane)} tabs, idle ${Math.round((now - lane.lastUsed) / 1000)} s${lane.busy ? ', busy' : ''}`);
+      lines.push(`- ${lane.id}: browser session ${lane.browserSession}, ${this.tabCount(lane)} tabs, idle ${Math.round((now - lane.lastUsed) / 1000)} s${lane.busy ? ', busy' : ''}`);
     }
     return lines.join('\n');
   }

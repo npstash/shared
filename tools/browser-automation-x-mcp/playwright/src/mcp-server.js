@@ -29,7 +29,7 @@ import { Sites } from '../../src/sites.js';
 import { autofill } from './autofill.js';
 import { startDiscovery, stopDiscovery } from './discover.js';
 import { TMP_DIR, ignoredVariables, outputDir, renderMode, stateFile } from './config.js';
-import { Lanes, cleanStaleLanes } from './lanes.js';
+import { BROWSER_SESSIONS, Lanes, cleanStaleLanes } from './lanes.js';
 import { cleanStaleXvfb } from './xvfb.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
@@ -52,6 +52,9 @@ const INSTRUCTIONS = [
   'First call browser_lane_open. It gives a lane ID: an own browser with its own tabs. Give this ID as the parameter lane in each other call.',
   'Each agent that works in parallel (also a subagent) opens its own lane. Do not share a lane between agents.',
   'If browser_lane_open is busy, call browser_lanes later, then try again. Call browser_lane_close at the end of the task.',
+  'browser_lane_open needs browserSession: normal (with the saved logins), fresh (without the saved logins; new logins are saved) or isolated (without the saved logins; nothing is saved).',
+  'When the user asks for a session of the browser, e.g. "a fresh session", this is the browserSession. Without such a request, use normal.',
+  'Tell the user the browser session of each lane that you open.',
 ].join(' ');
 
 // Tools of Playwright MCP that a web page can misuse through prompt injection. Disabled by default.
@@ -62,6 +65,13 @@ export const DANGEROUS_TOOLS = {
   browser_drop: 'it drops files from this computer onto a web page',
 };
 
+// The text of each browser session for the result of browser_lane_open.
+const SESSION_TEXT = {
+  normal: 'with the saved logins; its logins are saved',
+  fresh: 'without the saved logins; its new logins are saved',
+  isolated: 'without the saved logins; nothing is saved',
+};
+
 const LANE_PARAM = { type: 'string', description: 'The lane ID from browser_lane_open, e.g. lane-3f9a.' };
 
 // The tools of the server itself.
@@ -69,13 +79,23 @@ export const LANE_TOOLS = [
   {
     name: 'browser_lane_open',
     title: 'Open a lane',
-    description: 'Open a lane: an own browser with its own tabs, for one agent. Give its ID as the parameter lane in each other call. The lane has the logins of the earlier lanes.',
-    inputSchema: { type: 'object', properties: {} },
+    description: 'Open a lane: an own browser with its own tabs, for one agent. Give its ID as the parameter lane in each other call. browserSession sets the logins of the lane. Tell the user the browser session.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        browserSession: {
+          type: 'string',
+          enum: BROWSER_SESSIONS,
+          description: 'normal: the lane has the saved logins of the earlier lanes, and saves its logins. fresh: the lane starts without saved logins; its new logins are saved for the next lanes. isolated: the lane starts without saved logins and saves nothing. A "session" that the user asks for in the browser is this browser session.',
+        },
+      },
+      required: ['browserSession'],
+    },
   },
   {
     name: 'browser_lane_close',
     title: 'Close a lane',
-    description: 'Close a lane and its tabs. The logins of the lane stay for the next lanes.',
+    description: 'Close a lane and its tabs. The logins of a normal or fresh lane stay for the next lanes.',
     inputSchema: { type: 'object', properties: { lane: LANE_PARAM }, required: ['lane'] },
   },
   {
@@ -434,9 +454,13 @@ async function laneTool(session, name, args) {
   const { lanes } = session;
   if (name === 'browser_lanes') return textResult(lanes.status());
   if (name === 'browser_lane_open') {
-    const lane = await lanes.open();
+    const browserSession = args?.browserSession;
+    if (!BROWSER_SESSIONS.includes(browserSession)) {
+      return errorResult(`Give the parameter browserSession: ${BROWSER_SESSIONS.join(', ')}. Use normal if the user did not ask for an other browser session.`);
+    }
+    const lane = await lanes.open(browserSession);
     if (!lane) return errorResult(`Busy: ${lanes.size} of ${lanes.maxLanes} lanes are open. Call browser_lanes later, then try again.`);
-    return textResult(`Lane: ${lane.id}\nGive lane="${lane.id}" in each other call. Close the lane with browser_lane_close at the end.`);
+    return textResult(`Lane: ${lane.id}\nBrowser session: ${browserSession} (${SESSION_TEXT[browserSession]}). Tell the user the browser session.\nGive lane="${lane.id}" in each other call. Close the lane with browser_lane_close at the end.`);
   }
   // browser_lane_close, and browser_close of a lane.
   if (!await lanes.close(args?.lane, 'tool')) return unknownLane(args?.lane);

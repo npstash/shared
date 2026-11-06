@@ -335,7 +335,8 @@ A lane is an own browser for one agent: its own tabs, current tab and form state
 Claude Code chat, a Codex session, a Kilo window) has its own server and render mode.
 
 - `browser_lane_open` gives a lane ID, e.g. `lane-3f9a`. Each other tool needs the parameter
-  `lane` with this ID. Each agent that works in parallel, also a subagent, opens its own lane.
+  `lane` with this ID. It needs `browserSession` (see **Browser session** below), and its result
+  tells the agent to tell you the browser session. Each agent that works in parallel, also a subagent, opens its own lane.
 - `browser_lane_close` closes the lane. `browser_close` does the same.
 - `browser_lanes` gives the open lanes and the maximum. When `browser_lane_open` gives "Busy",
   call `browser_lanes` later, then try again.
@@ -351,6 +352,16 @@ Claude Code chat, a Codex session, a Kilo window) has its own server and render 
   server merges the state of the lane into the file. Thus a login reaches the other lanes and
   sessions. The file has the mode `0600`, and it never goes into a result, a log or the output
   folder.
+- **Browser session:** sets the logins of a lane. Ask the agent for it, e.g. "open amazon.pl in
+  a fresh session". "Session" in such a request means the browser session.
+
+  | Browser session | Loads the saved logins | Saves its logins |
+  | --- | --- | --- |
+  | `normal` | yes | yes |
+  | `fresh` | no | yes: it adds or changes entries, and removes no entry of the file |
+  | `isolated` | no | no |
+
+  `browser_lanes` shows the browser session of each lane.
 - **IndexedDB:** some sites keep the login in IndexedDB, e.g. Firebase apps or WhatsApp Web. The
   server keeps it only for the sites of `sites.json`.
 

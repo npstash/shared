@@ -118,7 +118,7 @@ function laneClient(client) {
   const callTool = async (params, ...rest) => {
     if (LANE_TOOL_NAMES.has(params.name) || params.arguments?.lane !== undefined) return client.callTool(params, ...rest);
     if (!lane) {
-      const opened = await client.callTool({ name: 'browser_lane_open', arguments: {} });
+      const opened = await client.callTool({ name: 'browser_lane_open', arguments: { browserSession: 'normal' } });
       lane = opened.content?.[0]?.text.match(/Lane: (lane-[0-9a-f]+)/)?.[1];
       if (!lane) throw new Error(`no lane: ${JSON.stringify(opened)}`);
     }

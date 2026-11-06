@@ -18,8 +18,8 @@ describe('lanes', () => {
   let raw;
 
   // Open a lane with the client without automatic lanes. Give its ID.
-  async function open() {
-    const { text, isError } = await callText(raw, 'browser_lane_open');
+  async function open(browserSession = 'normal') {
+    const { text, isError } = await callText(raw, 'browser_lane_open', { browserSession });
     assert.ok(!isError, text);
     return text.match(/Lane: (lane-[0-9a-f]+)/)[1];
   }
@@ -64,12 +64,12 @@ describe('lanes', () => {
   test('gives busy at the maximum of lanes; browser_lanes gives the status', async () => {
     try {
       const ids = [await open(), await open(), await open()];
-      const busy = await callText(raw, 'browser_lane_open');
+      const busy = await callText(raw, 'browser_lane_open', { browserSession: 'normal' });
       assert.equal(busy.isError, true);
       assert.match(busy.text, /Busy: 3 of 3 lanes are open\. Call browser_lanes later/);
       const status = (await callText(raw, 'browser_lanes')).text;
       assert.match(status, /Open lanes: 3 of 3\./);
-      for (const id of ids) assert.match(status, new RegExp(id));
+      for (const id of ids) assert.match(status, new RegExp(`${id}: browser session normal`));
       await inLane(ids[0], 'browser_lane_close');
       assert.match((await callText(raw, 'browser_lanes')).text, /Open lanes: 2 of 3\./);
       await open();
@@ -129,6 +129,47 @@ describe('lanes', () => {
       assert.match((await inLane(b, 'browser_evaluate', { function: '() => document.cookie' })).text, /login=yes/);
       await inLane(early, 'browser_navigate', { url: `${site.url}/` });
       assert.doesNotMatch((await inLane(early, 'browser_evaluate', { function: '() => document.cookie' })).text, /login=yes/);
+    } finally {
+      await closeAll();
+    }
+  });
+
+  test('browserSession: required; fresh starts without logins and saves; isolated starts without logins and saves nothing', async () => {
+    const cookie = async (lane) => (await inLane(lane, 'browser_evaluate', { function: '() => document.cookie' })).text;
+    const setCookie = (lane, text) => inLane(lane, 'browser_evaluate', { function: `() => { document.cookie = '${text}; max-age=3600'; return true; }` });
+    try {
+      const missing = await callText(raw, 'browser_lane_open');
+      assert.equal(missing.isError, true);
+      assert.match(missing.text, /Give the parameter browserSession: normal, fresh, isolated/);
+      assert.equal((await callText(raw, 'browser_lane_open', { browserSession: 'other' })).isError, true);
+
+      const normal = await open();
+      await inLane(normal, 'browser_navigate', { url: `${site.url}/` });
+      await setCookie(normal, 'saved=old');
+      await inLane(normal, 'browser_lane_close');
+
+      const { text } = await callText(raw, 'browser_lane_open', { browserSession: 'isolated' });
+      assert.match(text, /Browser session: isolated \(without the saved logins; nothing is saved\)\. Tell the user the browser session\./);
+      const isolated = text.match(/Lane: (lane-[0-9a-f]+)/)[1];
+      await inLane(isolated, 'browser_navigate', { url: `${site.url}/` });
+      assert.doesNotMatch(await cookie(isolated), /saved=/);
+      await setCookie(isolated, 'saved=isolated');
+      await setCookie(isolated, 'other=isolated');
+      await inLane(isolated, 'browser_navigate', { url: `${site.url}/` });
+      await inLane(isolated, 'browser_lane_close');
+
+      const fresh = await open('fresh');
+      await inLane(fresh, 'browser_navigate', { url: `${site.url}/` });
+      assert.doesNotMatch(await cookie(fresh), /saved=/);
+      await setCookie(fresh, 'saved=fresh');
+      await inLane(fresh, 'browser_lane_close');
+
+      const after = await open();
+      await inLane(after, 'browser_navigate', { url: `${site.url}/` });
+      const text2 = await cookie(after);
+      assert.match(text2, /saved=fresh/, 'the fresh lane saves its login');
+      assert.doesNotMatch(text2, /other=isolated/, 'the isolated lane saves nothing');
+      await inLane(after, 'browser_lane_close');
     } finally {
       await closeAll();
     }
