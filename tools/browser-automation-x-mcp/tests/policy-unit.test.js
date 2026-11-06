@@ -14,7 +14,7 @@ import { hostOfUrl } from '../src/hosts/patterns.js';
 import { readJson } from '../src/json.js';
 import { LOG_LINE_MAX, compactUrl, createLogger, folderName, formatLine, redact } from '../src/logger.js';
 import { ServerConfig, ToolsConfig } from '../src/server-config.js';
-import { Sites, covers, pageOf, pathMatches, updateSites } from '../src/sites.js';
+import { Sites, covers, pageOf, pathMatches, rootDomain, updateSites } from '../src/sites.js';
 import ApproveDialogProvider from '../providers-form-fill/approve-dialog/index.js';
 import ApproveHttpsProvider, { normalizeFingerprint } from '../providers-form-fill/approve-https/index.js';
 import AskProvider from '../providers-form-fill/ask/index.js';
@@ -57,12 +57,35 @@ describe('hosts', () => {
 });
 
 describe('sites.json: access', () => {
-  test('a denied site wins over each other site; else the most specific site; else defaultAccess', async () => {
-    const sites = sitesOf({ defaultAccess: 'deny', sites: { 'evil.example': { access: 'deny' }, 'www.evil.example': { access: 'allow' }, 'good.example': { access: 'allow' }, 'pages.example': {} } });
+  test('a deny above wins over an allow below; else the nearest node; else defaultAccess', async () => {
+    const sites = sitesOf({ defaultAccess: 'deny', sites: {
+      'evil.example': { access: 'deny', subdomains: { 'www.evil.example': { access: 'allow' } } },
+      'good.example': { access: 'allow', subdomains: { 'no.good.example': { access: 'deny' } } },
+      'pages.example': {},
+    } });
     assert.deepEqual(sites.access('www.evil.example'), { allowed: false, reason: 'the host www.evil.example is denied', site: 'evil.example' });
     assert.equal(sites.access('a.good.example').allowed, true);
     assert.deepEqual(sites.access('other.org'), { allowed: false, reason: 'the host other.org is not allowed' });
     assert.equal(sites.access('pages.example').allowed, false, 'a site without access gets defaultAccess');
+    assert.deepEqual(sites.access('a.no.good.example'), { allowed: false, reason: 'the host a.no.good.example is denied', site: 'no.good.example' });
+  });
+
+  test('the root domain of a host: the Public Suffix List, also private suffixes; an IP or localhost stays', () => {
+    assert.equal(rootDomain('www.amazon.pl'), 'amazon.pl');
+    assert.equal(rootDomain('a.b.amazon.co.uk'), 'amazon.co.uk');
+    assert.equal(rootDomain('user.github.io'), 'user.github.io');
+    assert.equal(rootDomain('127.0.0.1'), '127.0.0.1');
+    assert.equal(rootDomain('localhost'), 'localhost');
+  });
+
+  test('a site key must be a root domain; a subdomain key must be under its parent; credentials is an error', () => {
+    assert.throws(() => sitesOf({ sites: { 'www.amazon.pl': {} } }).load(), /"www.amazon.pl" is not a root domain; put it into "subdomains" of "amazon.pl"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { subdomains: { 'www.other.pl': {} } } } }).load(), /"www.other.pl" in "subdomains" is not a subdomain of "amazon.pl"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { credentials: { vault: 'A' } } } }).load(), /has "credentials"; use "provider-config"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { pages: { '/': { credentials: { vault: 'A' } } } } } }).load(), /page "\/" has "credentials"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { 'provider-config': { vault: { entry: 'A' } } } } }).load(), /"provider-config"."vault" needs "vault"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { 'provider-config': { vault: { vault: 'vault-main' } } } } }).load(), /"provider-config"."vault" needs "entry"/);
+    assert.doesNotThrow(() => sitesOf({ sites: { 'amazon.pl': { 'provider-config': { other: {} } } } }).load());
   });
 
   test('a missing file allows each host; a wrong defaultAccess is an error', () => {
@@ -98,38 +121,51 @@ describe('sites.json: pages', () => {
     assert.equal(pathMatches('/', '/x'), false);
   });
 
-  test('all matching pages apply; the more specific page wins; submit and login keep their order; login is not a field', () => {
+  test('all matching pages of the exact host apply; the more specific page wins; submit and login keep their order', () => {
     const sites = sitesOf({
       sites: {
-        'example.com': { pages: { '/*': { fields: { '#user': 'username', '#pass': 'password' }, submit: ['#generic'] } } },
-        'login.example.com': { pages: { '/admin/*': { fields: { '#pass': 'Secret', 'input[name="admin-pass"]': 'Password' }, submit: ['#next', 'enter'], login: ['#signin'] } } },
+        'example.com': {
+          pages: { '/*': { fields: { '#root': 'username' } } },
+          subdomains: { 'login.example.com': { pages: {
+            '/*': { fields: { '#user': 'username', '#pass': 'password' }, submit: ['#generic'] },
+            '/admin/*': { fields: { '#pass': 'Secret', 'input[name="admin-pass"]': 'Password' }, submit: ['#next', 'enter'], login: ['#signin'] },
+          } } },
+        },
         'other.example': { pages: {} },
       },
     });
     assert.deepEqual(sites.match('https://login.example.com/admin/login'), {
-      key: 'example.com/* login.example.com/admin/*',
+      key: 'login.example.com/* login.example.com/admin/*',
       fields: [{ name: 'username', selector: '#user' }, { name: 'secret', selector: '#pass' }, { name: 'password', selector: 'input[name="admin-pass"]' }],
       submits: ['#next', 'enter', '#generic'],
       logins: ['#signin'],
     });
     assert.equal(sites.match('https://other.example/'), undefined);
     assert.equal(sites.match('https://unknown.example/'), undefined);
+    assert.equal(sites.match('https://www.example.com/x'), undefined, 'the pages of a parent do not apply to a subdomain');
+    assert.equal(sites.match('https://example.com/x').key, 'example.com/*');
     assert.deepEqual(sitesOf({ sites: { 'shop.example': { pages: { '/': { login: ['a'] } } } } }).match('https://shop.example/'),
       { key: 'shop.example/', fields: [], submits: [], logins: ['a'] });
   });
 
-  test('the vault system: of the most specific page with credentials, else of the most specific site', () => {
+  test('provider-config: the page, else the nearest node; each provider type separately; a page does not reach subdomains', () => {
+    const vault = (entry, name = 'vault-main') => ({ vault: name, entry });
     const sites = sitesOf({
       sites: {
-        'example.com': { credentials: { vault: 'Example' }, pages: { '/a/*': { credentials: { vault: 'Example A' } } } },
-        'b.example.com': { credentials: { vault: 'Example B' } },
+        'example.com': {
+          'provider-config': { vault: vault('Example'), values: { set: 'root' } },
+          pages: { '/a/*': { 'provider-config': { vault: vault('Example A') } } },
+          subdomains: { 'b.example.com': { 'provider-config': { vault: vault('Example B', 'vault-other') } } },
+        },
       },
     });
-    assert.equal(sites.vaultSystem('https://www.example.com/'), 'Example');
-    assert.equal(sites.vaultSystem('https://example.com/a/x'), 'Example A');
-    assert.equal(sites.vaultSystem('https://b.example.com/a/x'), 'Example A');
-    assert.equal(sites.vaultSystem('https://b.example.com/'), 'Example B');
-    assert.equal(sites.vaultSystem('https://other.example/'), undefined);
+    const config = (url, type = 'vault') => sites.providerConfig(url, type);
+    assert.deepEqual(config('https://www.example.com/'), vault('Example'));
+    assert.deepEqual(config('https://example.com/a/x'), vault('Example A'));
+    assert.deepEqual(config('https://b.example.com/a/x'), vault('Example B', 'vault-other'));
+    assert.deepEqual(config('https://x.b.example.com/', 'values'), { set: 'root' }, 'the other provider types stay inherited');
+    assert.equal(config('https://other.example/'), undefined);
+    assert.equal(config('about:blank'), undefined);
   });
 
   test('updateSites reads the file again, keeps the other entries, and writes only on a change', () => {
@@ -326,16 +362,20 @@ describe('fill registry', () => {
     await assert.rejects(FillRegistry.load({ entries: [{ type: 'nope', mask: true, settings: {} }], providersDir, logger }), /the provider type "nope"/);
   });
 
-  test('loads an approval provider with its wrapped key-value provider; the mask of the wrapped entry applies', async () => {
+  test('loads the approval of a key-value provider; the mask of the entry applies; "enabled": false turns the approval off', async () => {
     const providersDir = path.join(TOOL_DIR, 'providers-form-fill');
     const load = (settings, mask = true) => FillRegistry.load({ entries: [{ type: settings.type, mask, settings }], providersDir, logger });
-    const r = await load({ type: 'approve-https', mask: true, address: '', provider: { type: 'values', mask: false, values: { a: '1' } } });
+    const r = await load({ type: 'values', values: { a: '1' }, approval: { type: 'approve-https', address: '' } }, false);
     assert.equal(r.providers[0].kind, 'approval');
+    assert.equal(r.providers[0].name, 'approve-https');
     assert.equal(r.providers[0].inner.name, 'values');
     assert.equal(r.providers[0].masked, false);
-    await assert.rejects(load({ type: 'approve-dialog' }), /needs "provider"/);
-    await assert.rejects(load({ type: 'approve-dialog', provider: { type: 'ask' } }), /can wrap only a key-value provider/);
-    await assert.rejects(load({ type: 'values', provider: { type: 'values' } }), /is not an approval provider/);
+    const off = await load({ type: 'values', values: { a: '1' }, approval: { type: 'approve-https', enabled: false } });
+    assert.equal(off.providers[0].kind, 'key-value');
+    await assert.rejects(load({ type: 'approve-dialog' }), /is an approval provider; attach it to a key-value provider with "approval"/);
+    await assert.rejects(load({ type: 'ask', approval: { type: 'approve-dialog' } }), /is not a key-value provider; remove "approval"/);
+    await assert.rejects(load({ type: 'values', approval: {} }), /needs "approval" with a "type"/);
+    await assert.rejects(load({ type: 'values', approval: { type: 'values' } }), /"values" is not an approval provider/);
   });
 });
 
@@ -373,15 +413,20 @@ describe('config folder', () => {
     assert.equal(fs.existsSync(configFile(dir, 'other.json')), false);   // no template: no file
   });
 
-  test('the server template has a provider for each provider folder', () => {
+  test('the server template has a provider for each provider folder, except the approval providers', () => {
     const types = readJson(CONFIG_TEMPLATES[SERVER_CONFIG]).providers.map(({ type }) => type).sort();
-    assert.deepEqual(types, fs.readdirSync(path.join(TOOL_DIR, 'providers-form-fill')).sort());
+    const folders = fs.readdirSync(path.join(TOOL_DIR, 'providers-form-fill')).filter((name) => !name.startsWith('approve-')).sort();
+    assert.deepEqual(types, folders);
   });
 });
 
 describe('vault provider', () => {
   const callLog = path.join(TMP, 'vault-calls.log');
-  const sites = sitesOf({ sites: { '127.0.0.1': { credentials: { vault: 'Fixture site' } }, 'missing.example': { credentials: { vault: 'Missing' } } } });
+  const sites = sitesOf({ sites: {
+    '127.0.0.1': { 'provider-config': { vault: { vault: 'vault-test', entry: 'Fixture site' } } },
+    'missing.example': { 'provider-config': { vault: { vault: 'vault-test', entry: 'Missing' } } },
+    'other-vault.example': { 'provider-config': { vault: { vault: 'vault-other', entry: 'Fixture site' } } },
+  } });
   const make = (vault = 'vault-test') => new VaultProvider({ name: 'vault', settings: { vault }, sites });
   const calls = async (action) => {
     fs.rmSync(callLog, { force: true });
@@ -396,13 +441,14 @@ describe('vault provider', () => {
   before(() => { process.env.BROWSER_AUTOMATION_X_MCP_VAULT_TOOL = path.join(FAKE_VAULT, 'run.sh'); });
   after(() => { delete process.env.BROWSER_AUTOMATION_X_MCP_VAULT_TOOL; });
 
-  test('selects the system by the credentials of the site', async () => {
+  test('selects the system by the provider-config of the site, only for its vault', async () => {
     const provider = make();
     assert.equal(await provider.resolve('password', { host: '127.0.0.1', url: 'http://127.0.0.1:8080/login' }), 'Fixture-Pa55-word');
     assert.equal(await provider.resolve('username', { host: '127.0.0.1', url: 'http://127.0.0.1:8080/' }), 'fixture-user');
     assert.equal(await provider.resolve('token', { host: '127.0.0.1', url: 'http://127.0.0.1/' }), undefined);
     assert.equal(await provider.resolve('password', { host: 'unknown.example', url: 'https://unknown.example/' }), undefined);
     assert.equal(await provider.resolve('password', {}), undefined);
+    assert.equal(await provider.resolve('password', { host: 'other-vault.example', url: 'https://other-vault.example/' }), undefined);
   });
 
   test('asks the vault only for the system of the site, with the vault name', async () => {

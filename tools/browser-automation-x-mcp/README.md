@@ -147,11 +147,10 @@ JSON files. A missing file is first a copy of its template in `config/` of this 
 ```json
 {
   "providers": [
-    { "type": "vault",  "enabled": true, "mask": true,  "vault": "vault-main" },
+    { "type": "vault",  "enabled": true, "mask": true,  "vault": "vault-main",
+      "approval": { "type": "approve-https", "address": "https://127.0.0.1:8743", "fingerprint": "AB:CD:..." } },
     { "type": "values", "enabled": true, "mask": false, "values": { "name": "Anna Nowak" } },
-    { "type": "ask",    "enabled": true, "mask": true,  "fields": ["phone"] },
-    { "type": "approve-https", "enabled": false, "address": "https://127.0.0.1:8743", "fingerprint": "AB:CD:...",
-      "provider": { "type": "vault", "mask": true, "vault": "vault-main" } }
+    { "type": "ask",    "enabled": true, "mask": true,  "fields": ["phone"] }
   ],
   "tools": {
     "browser_click":           { "enabled": true },
@@ -162,7 +161,8 @@ JSON files. A missing file is first a copy of its template in `config/` of this 
 
 - `providers`: the form-fill providers, in the order that the server asks them. `"enabled": false`
   turns one off. `"mask"`: see [Form fill](#form-fill); without it, the provider is masked. The
-  other keys are the settings of the provider. See [Providers](#providers).
+  other keys are the settings of the provider. `"approval"` attaches an approval provider to a
+  key-value provider. See [Providers](#providers).
 - `tools`: the tool switches (see [Tool switches](#tool-switches)). The server adds missing tools.
 
 **`sites.json`**: what the server knows about sites. Only the discovery mode writes it (see
@@ -174,23 +174,36 @@ JSON files. A missing file is first a copy of its template in `config/` of this 
   "sites": {
     "amazon.pl": {
       "access": "allow",
-      "credentials": { "vault": "Amazon - Nestor" },
-      "pages": {
-        "/":          { "login": ["internal:role=link[name=\"zaloguj się\"i]"] },
-        "/ap/signin": { "fields": { "input[name=\"email\"]": "username", "#ap_password": "password" },
-                        "submit": ["#continue", "#signInSubmit"] }
+      "provider-config": { "vault": { "vault": "vault-main", "entry": "Amazon - Nestor" } },
+      "subdomains": {
+        "www.amazon.pl": {
+          "pages": {
+            "/":          { "login": ["internal:role=link[name=\"zaloguj się\"i]"] },
+            "/ap/signin": { "fields": { "input[name=\"email\"]": "username", "#ap_password": "password" },
+                            "submit": ["#continue", "#signInSubmit"] }
+          }
+        }
       }
     },
-    "sklep.premium.pl": { "access": "deny" }
+    "premium.pl": { "subdomains": { "sklep.premium.pl": { "access": "deny" } } }
   }
 }
 ```
 
-- A site covers its host and each subdomain: `amazon.pl` also covers `www.amazon.pl`.
-- `access`: see [Host access](#host-access). `credentials.vault`: the vault system of the site.
-  A page can have its own `credentials`; they win over the site.
-- `pages`: the key is a path pattern. `*` matches each sequence of characters, also `/`. `/*`
-  matches each path. See [Form fill](#form-fill).
+- A key of `sites` is a root domain, e.g. `amazon.pl`, not `www.amazon.pl`. The Public Suffix List
+  gives the root domain: `amazon.co.uk`, `user.github.io`. An IP address and `localhost` stay.
+- `subdomains`: the nodes of the subdomains, with the same keys as a site. A key is the full host
+  name. A deeper host can be the child of a subdomain.
+- `access` and `provider-config` go down the tree: a subdomain without them gets them from the
+  nearest parent. The nearest value wins. For `provider-config`, this applies to each provider type
+  separately. `access`: see [Host access](#host-access).
+- `provider-config`: the config of a provider for the site, by the provider type. `"vault"` needs
+  `"vault"` (the vault of the vault provider in `server.json`) and `"entry"` (the vault system). A
+  page can have its own `provider-config`. It wins over the host, only for that page.
+- `pages`: only for the host of their node, not for its subdomains. The key is a path pattern. `*`
+  matches each sequence of characters, also `/`. `/*` matches each path. See [Form fill](#form-fill).
+- A site key that is not a root domain, a `subdomains` key outside its parent, `credentials`, or a
+  `"vault"` config without `vault` or `entry` is a load error.
 
 ## Form fill
 
@@ -201,8 +214,8 @@ agent gets the page after the submit. It does not know about the fill.
 - **Fields:** `"fields": { "<selector>": "<key>" }`. The key is the key of a provider value, e.g.
   `password`. A selector is CSS, or a label or role locator of Playwright, e.g.
   `internal:label="Password"s`. The server looks for the selector in each frame of the page. If more
-  pages match, all apply. For a selector in more pages, the more specific page (the longer host and
-  path) wins.
+  pages of the host match, all apply. For a selector in more pages, the more specific page (the
+  longer path) wins.
 - **Wait:** the server waits a maximum of 10 s for a visible field. It waits only one time for each
   URL, and after each submit.
 - **Values:** for each key of the visible fields, the server asks the providers of `server.json`, in
@@ -215,7 +228,7 @@ agent gets the page after the submit. It does not know about the fill.
   a fill in the same call. Maximum 3 rounds.
 - **Login link:** `"login": [...]` gives the sign-in links of a page, e.g. on the start page of a
   shop. Before the fill, the server clicks the first visible one, then fills the login page. It
-  clicks one time for each lane and host, and only for a site or page with `credentials`. Use a
+  clicks one time for each lane and host, and only for a page that has a vault config. Use a
   locator with the text that shows only before the login, e.g.
   `internal:role=link[name="zaloguj się"i]`. After the login the text changes, and the server does
   not click.
@@ -233,21 +246,23 @@ agent gets the page after the submit. It does not know about the fill.
 
 | Provider | Kind | Settings in `server.json` | Values |
 | --- | --- | --- | --- |
-| vault | key-value | `"vault": "vault-<name>"` | The secret of the vault system of the site or page (`credentials.vault` in `sites.json`). The key is the secret name, e.g. `password`. |
+| vault | key-value | `"vault": "vault-<name>"` | The secret of the vault system of the page: `entry` of the nearest `provider-config.vault` in `sites.json`, if its `vault` is the vault of the provider. The key is the secret name, e.g. `password`. |
 | values | key-value | `"values": { "<key>": "<value>" }` | Values that are not secret. |
 | ask | value | `"fields": ["phone", ...]` | A dialog of the client for the listed keys. Only clients with MCP elicitation. In `claude -p`, Claude Code cancels the dialog. Do not list passwords: the MCP specification does not allow this dialog for sensitive data. |
-| approve-dialog | approval | `"provider": { <entry of a key-value provider> }` | The values of the wrapped provider, after the user approves in a dialog of the client. |
-| approve-https | approval | `"address": "https://<host>:<port>"`, `"fingerprint": "<SHA-256>"`, `"provider": { ... }` | The values of the wrapped provider, after an approval service approves. |
+| approve-dialog | approval | none | The values of its key-value provider, after the user approves in a dialog of the client. |
+| approve-https | approval | `"address": "https://<host>:<port>"`, `"fingerprint": "<SHA-256>"` | The values of its key-value provider, after an approval service approves. |
 
 - **Key-value:** has keys and values. In the discovery mode, it gives the key of a value that the user
   filled.
 - **Value:** gives a value for a key. The discovery mode does not use it.
-- **Approval:** wraps one key-value provider: it takes the place of its entry, and the entry goes into
-  `"provider"`. The mask of the wrapped entry applies. Before a fill, the provider asks for one
+- **Approval:** goes into `"approval"` of a key-value provider entry, e.g.
+  `"approval": { "type": "approve-dialog" }`. The mask of that entry applies. `"enabled": false` in
+  `"approval"` turns the approval off. An approval provider in the list of `providers` is a load
+  error. Before a fill, the provider asks for one
   approval for all its keys of the form. The request has the host, the keys and the client name; no
   value and no URL. A refusal, or no answer in 15 s, stops the fill. No later provider gives the keys.
   The result of the call gets the note "The user did not approve an action on this page."
-  The discovery mode uses the wrapped provider without an approval.
+  The discovery mode uses the key-value provider without an approval.
 - **approve-https:** sends `POST <address>/approve` with `{ "host", "keys", "client" }`, and expects
   `{ "approved": true }`. It pins the certificate of the service with `fingerprint` (SHA-256; case and
   `:` have no effect), and sends nothing to an other certificate. An empty `address` or `fingerprint`
@@ -261,8 +276,10 @@ To add a provider, see [src/fill/provider.js](src/fill/provider.js).
 Start the server with `BROWSER_AUTOMATION_X_MCP_DISCOVER=1`, e.g. in the `env` of `.mcp.json`. The
 server writes into `sites.json` at once. No call of the agent is necessary.
 
-- **Hosts:** each loaded page of an allowed host goes into `sites.json` as a site with
-  `"access": "allow"`. An access that the file has stays.
+- **Hosts:** for each loaded page of an allowed host, its root domain goes into `sites.json` with
+  `"access": "allow"`, e.g. `amazon.pl` for `www.amazon.pl`. An access that the file has stays.
+- **Pages:** the pages go into the node of their host. A missing subdomain node goes into
+  `subdomains` of the nearest node that covers the host.
 - **Fields:** at a click of a button or a submit, the server gets the values of the fields that the
   user filled. It asks the key-value providers for the key of each value, in their order, and writes
   `"<selector>": "<key>"`. Then it discards the values. It never logs or writes a value. A field
@@ -272,8 +289,7 @@ server writes into `sites.json` at once. No call of the agent is necessary.
   button of the form goes into `submit`; without such a button, `"enter"`.
 - **Login link:** the last link that the user followed before a submit goes into `login` of the page
   of the link.
-- **Fill:** the key-value providers fill the known fields, also the wrapped providers of approval
-  providers, without an approval. Value providers do not fill. The server does not submit.
+- **Fill:** the key-value providers fill the known fields, without an approval. Value providers do not fill. The server does not submit.
 - Only the fields of the user go into the file. The fills of the agent and of the form fill do not.
 - The log gets each record at once, without values: `user_filled`, `user_pressed`, `user_submitted`,
   `user_followed` and the same for `agent`, each with the time of the event (`at`). It gets
@@ -283,9 +299,10 @@ server writes into `sites.json` at once. No call of the agent is necessary.
   placeholder; else `internal:label="<label>"s`. Selector of a button: id, name, type; else
   `internal:role=button[name="<text>"s]`. A selector must find one element.
 
-1. Open the login page of a site in a lane. The server writes the site.
-2. Add `"credentials": { "vault": "<system>" }` to the site in `sites.json`, and save the file. Do
-   this before the submit: without it, the vault provider has no keys for the site.
+1. Open the login page of a site in a lane. The server writes the root domain.
+2. Add `"provider-config": { "vault": { "vault": "<vault>", "entry": "<system>" } }` to the root
+   domain in `sites.json`, and save the file. Do this before the submit: without it, the vault
+   provider has no keys for the site.
 3. Do each step of the login in the browser.
 4. Remove `BROWSER_AUTOMATION_X_MCP_DISCOVER`.
 
@@ -293,8 +310,9 @@ server writes into `sites.json` at once. No call of the agent is necessary.
 
 `sites.json` decides which hosts open:
 
-- A site with `"access": "deny"` blocks its host and its subdomains. Deny wins over each other site.
-- Else the most specific site with an `access` decides.
+- A node with `"access": "deny"` blocks its host and its subdomains. A deny wins also over an
+  `"allow"` of a subdomain below it.
+- Else the nearest node with an `access` decides: the node of the host, else its parents.
 - Else `defaultAccess` decides (`"allow"` or `"deny"`).
 - The server checks the URL before it opens a page, and the page after each call (clicks,
   redirects, submits). A blocked page is replaced by `about:blank`, and the call fails.

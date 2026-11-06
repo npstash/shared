@@ -17,7 +17,7 @@ export const PROVIDERS_DIR = path.join(TOOL_DIR, 'providers-form-fill');
 // The config files are in the config folder that the argument --config-dir gives, e.g.
 // local/configs/browser-automation-x-mcp of the repository. The tool folder has a template of each file.
 //   server.json   providers and tool switches (src/server-config.js)   config/server.template.json
-//   sites.json    access, credentials and pages of sites (src/sites.js) config/sites.template.json
+//   sites.json    access, provider-config and pages of sites (src/sites.js) config/sites.template.json
 export const SERVER_CONFIG = 'server.json';
 export const SITES_CONFIG = 'sites.json';
 export const CONFIG_TEMPLATES = {

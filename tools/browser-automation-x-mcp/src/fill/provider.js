@@ -6,8 +6,8 @@
 // Kinds (REQ-031 of sdd/SRS.md):
 //   value       FillProvider: gives a value for a key; it has no list of keys, e.g. ask.
 //   key-value   KeyValueProvider: has keys and values; it also gives the key of a value (discovery).
-//   approval    ApprovalProvider: wraps one key-value provider (its "provider" entry) and gets the
-//               approval of the user before the wrapped provider gives its values.
+//   approval    ApprovalProvider: is attached to one key-value provider (the "approval" of its entry)
+//               and gets the approval of the user before that provider gives its values.
 //
 // ctx = { host, url, client, elicit }
 //   host, url  the page that gets the value (host is undefined if the page has no host)
@@ -61,7 +61,7 @@ export class KeyValueProvider extends FillProvider {
 export class ApprovalProvider extends FillProvider {
   static kind = 'approval';
 
-  // inner: the wrapped key-value provider.
+  // inner: the key-value provider that the approval is attached to.
   constructor(options) {
     super(options);
     this.inner = options.inner;

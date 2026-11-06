@@ -98,8 +98,8 @@ flowchart TD
   server: it starts with the first lane and stops after the last lane. Unpacked into the tool
   folder.
 - **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). It holds
-  `server.json` (providers, tool switches) and `sites.json` (access, credentials and pages of
-  sites). A missing file is a copy of its template in the tool folder. The server adds missing
+  `server.json` (providers, tool switches) and `sites.json` (a tree of sites with access,
+  provider config and pages). A missing file is a copy of its template in the tool folder. The server adds missing
   tools to `server.json`. Only the discovery mode writes `sites.json` (REQ-039a of SRS).
 - **Log:** two files for each server start in LOG_DIR/`<client>`/: `.log` for a person and
   `.log.json` with all fields (REQ-050 of SRS); gitignored.
@@ -168,10 +168,12 @@ flowchart TD
   order of the array, with their mask and settings.
 - **Tool switches:** `src/server-config.js` with `tools` of `server.json` and the dangerous tools
   of Playwright MCP; adds missing tools; gives the error of a disabled tool.
-- **Sites:** `src/sites.js` reads `sites.json`: the access of a host (deny wins, else the most
-  specific site, else `defaultAccess`), the form of a URL (fields, submit, login of the matching
-  pages) and the vault system of a URL (REQ-034, REQ-037, REQ-040 of SRS). A site covers its host
-  and its subdomains.
+- **Sites:** `src/sites.js` reads `sites.json` as a tree: root domains with `subdomains`
+  (REQ-037 of SRS). It checks the tree at each load. It gives the chain of nodes of a host, the
+  access of a host (a deny in the chain wins, else the nearest node, else `defaultAccess`), the form
+  of a URL (the matching pages of the node of the exact host) and the provider config of a URL (the
+  page, else the nearest node, for each provider type) (REQ-034, REQ-040 of SRS). The root domain
+  comes from the Public Suffix List (`tldts`).
 - **Host policy:** `src/hosts/host-policy.js` checks the access of the sites.
 - **Form fill:** `playwright/src/autofill.js`. It runs page code through `browser_run_code_unsafe`
   of upstream: find the fields, fill them, submit, wait (REQ-030, REQ-038 of SRS). The tool switch
@@ -187,25 +189,28 @@ flowchart TD
   fields that the form fill did not fill. The server logs each record without values, and gives it
   to the form fill, the agent (by the time of its calls) or the user. At a click or a submit, it
   gets the keys of the values of the user from the fill registry (`match`), discards the values,
-  and writes `sites.json`. A navigation and the close of the lane write the fields that wait,
-  without keys. At each page load, it writes the host. No agent call is necessary.
+  and writes `sites.json` into the node of the exact host. It adds a missing node under the nearest
+  node that covers the host. A navigation and the close of the lane write the fields that wait,
+  without keys. At each page load, it writes the root domain of the host. No agent call is
+  necessary.
 - **Sites writer:** `src/sites.js` (`updateSites()`). It reads `sites.json` again, changes the
   entries of one page or site, and writes the file in one step (REQ-039a).
 - **Page code:** `playwright/src/run-code.js` runs a function in the page through
   `browser_run_code_unsafe`.
-- **Fill registry:** loads the providers of `server.json` in their order, with the wrapped provider
-  of each approval provider. It gives the values of the keys of one fill, with one approval for each
+- **Fill registry:** loads the providers of `server.json` in their order. For an entry with
+  `approval`, it loads the approval provider with the key-value provider as `inner`, and uses it in
+  the place of the entry. It gives the values of the keys of one fill, with one approval for each
   approval provider (REQ-031, REQ-036c of SRS). It gives the key of a value from the key-value
   providers (REQ-039a). It scrubs the values of masked providers from the results and from the
   text files that upstream wrote in the call (REQ-032).
 - **Providers:** `providers-form-fill/<type>/index.js`. The base classes are in
   `src/fill/provider.js`: `FillProvider` (value provider), `KeyValueProvider`, `ApprovalProvider`.
   The settings of a provider are the keys of its entry in `server.json`.
-  - Key-value: `vault` (REQ-034) takes the vault system from the `credentials` of the site or
-    page; `values` (REQ-035).
+  - Key-value: `vault` (REQ-034) takes the vault system from the nearest `provider-config.vault`
+    of `sites.json` with its vault; `values` (REQ-035).
   - Value: `ask` (REQ-036).
-  - Approval: `approve-dialog` (REQ-036a) and `approve-https` (REQ-036b). The `provider` key of the
-    entry is the entry of the wrapped key-value provider.
+  - Approval: `approve-dialog` (REQ-036a) and `approve-https` (REQ-036b). Its settings are the
+    `approval` object of the entry of a key-value provider.
 - **Xvfb starter:** `playwright/src/xvfb.js`. `renderMode()` of `playwright/src/config.js`
   resolves `RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the lanes start Xvfb through
   `setpriv --pdeathsig KILL` before Chromium, record it in XVFB_DIR and give its `DISPLAY` to
@@ -247,7 +252,7 @@ flowchart TD
 | Component | Interface | Used by |
 | --- | --- | --- |
 | Fill provider | `kind`; `resolve(key, ctx)`: value, `undefined`, or a `FillError`; `dispose()`. Key-value: also `has(key, ctx)`, `match(value, ctx)` → key or `undefined`. Approval: `inner`, `approve({ host, keys, client }, ctx)` → `true` or `false`. `ctx = { host, url, client, elicit }`. See `src/fill/provider.js`. | Fill registry |
-| Sites | `access(host)` → `{ allowed, reason }`; `match(url)` → `{ key, fields: [{ name, selector }], submits, logins }` or `undefined`; `vaultSystem(url)`; `has(host)`; `pageOf(url)` → `{ host, path }`; `updateSites(file, change)` | Host policy, form fill, vault provider, lanes, discovery |
+| Sites | `access(host)` → `{ allowed, reason }`; `match(url)` → `{ key, fields: [{ name, selector }], submits, logins }` or `undefined`; `providerConfig(url, type)`; `chainOf(host)`; `has(host)`; `rootDomain(host)`; `pageOf(url)` → `{ host, path }`; `updateSites(file, change)` | Host policy, form fill, vault provider, lanes, discovery |
 | Server config | `providers()` → `[{ type, mask, settings }]`; `writeTools(tools)` | Fill registry, tool switches |
 | Form fill | `autofill(session, url, ctx, checkPage)` → `{ submitted, blocked }`. `session` is the state of one lane. | Call pipeline |
 | Discovery | `startDiscovery(session, context)`, `stopDiscovery(session)` | Lanes |
@@ -313,13 +318,13 @@ sequenceDiagram
     Server-->>Agent: error: page closed, reason
 ```
 
-Discovery of a login form (the site has `credentials` in `sites.json`):
+Discovery of a login form (the root domain has a vault config in `sites.json`):
 
 ```mermaid
 sequenceDiagram
     User->>Browser: opens login.example/u/login
     Browser->>Server: page load
-    Server->>sites.json: site login.example, "access": "allow"
+    Server->>sites.json: root domain login.example, "access": "allow"
     User->>Browser: fills username, password; clicks Sign in
     Browser->>Server: record: press #signin, values of the user fields
     Server->>sites.json: read again
@@ -362,8 +367,8 @@ sequenceDiagram
 
 | File | Committed | Format | Written by |
 | --- | --- | --- | --- |
-| `<config>/server.json` | yes | `providers`: array of `{ type, enabled, mask, <settings> }` (vault: `vault`; values: `values`; ask: `fields`; approve-dialog: `provider`; approve-https: `provider`, `address`, `fingerprint`); `tools`: `{ <tool>: { enabled } }`, sorted | user; server adds missing tools |
-| `<config>/sites.json` | yes | `defaultAccess`; `sites`: `{ <host>: { access, credentials: { vault }, pages: { <path pattern>: { fields: { <selector>: <key> }, submit: [<selector> or "enter"], login: [], credentials } } } }` (REQ-037, REQ-040 of SRS) | user; discovery mode (REQ-039a, REQ-042) |
+| `<config>/server.json` | yes | `providers`: array of `{ type, enabled, mask, <settings> }` (vault: `vault`; values: `values`; ask: `fields`; optional `approval` of a key-value provider: `{ type, enabled, <settings> }`; approve-https: `address`, `fingerprint`); `tools`: `{ <tool>: { enabled } }`, sorted | user; server adds missing tools |
+| `<config>/sites.json` | yes | `defaultAccess`; `sites`: `{ <root domain>: <node> }`; node: `{ access, "provider-config": { <type>: { ... } }, pages: { <path pattern>: { fields: { <selector>: <key> }, submit: [<selector> or "enter"], login: [], "provider-config" } }, subdomains: { <host>: <node> } }`; vault config: `{ vault, entry }` (REQ-037, REQ-040 of SRS) | user; discovery mode (REQ-039a, REQ-042) |
 | `config/server.template.json`, `config/sites.template.json` | yes | the first content of each file above | user; server copies a template to a missing file |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log.json` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log` | no | `HH:MM:SS <event> <url> <key>=<value> ...`, a maximum of LOG_LINE_MAX characters | server |
@@ -373,8 +378,9 @@ sequenceDiagram
 | OUTPUT_DIR | no | snapshots, screenshots, console logs, network files of upstream; the only folder for a `filename` of the agent (REQ-014a) | Playwright; server scrubs and masks |
 | `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `shared/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
 
-Sites: a site key is a host. It covers the host and each subdomain of it. No case. A URL without a
-host passes.
+Sites: a site key is a root domain; a `subdomains` key is a full host name under its node. A node
+covers its host and each subdomain of it. `access` and `provider-config` go down the tree; `pages`
+do not. No case. A URL without a host passes.
 
 Path patterns: the keys of `pages`. `*` matches each sequence of characters, also `/`. `/*` matches
 each path.
@@ -394,6 +400,7 @@ of the repository.
 | Node.js NODE_VERSION (downloaded) | Launcher, server | Runtime |
 | `@playwright/mcp` 0.0.83 (with its `playwright-core`) | Server process | Browser tools; Chromium launch |
 | `@modelcontextprotocol/sdk` 1.32.2 | Server process | MCP server and client |
+| `tldts` 7.4.18 | Server process | Root domain of a host (Public Suffix List) |
 | Chromium (downloaded) | Chromium | Browser |
 | `ldd`, `apt-get`, `apt-cache`, `dpkg-deb` (Ubuntu base) | Launcher | Missing libraries, no root |
 | `curl`, `tar`, `sha256sum` / `certutil` | Launcher | Download of Node.js |
@@ -407,6 +414,9 @@ Manual test: see [README.md](../README.md#tests), and run `claude -p` with `--mc
 
 All decisions are in [ADL.md](ADL.md).
 
+- [ADR-20261106-domain_tree_and_provider_config](adr/ADR-20261106-domain_tree_and_provider_config.md):
+  `sites.json` as a tree of root domains and subdomains; `provider-config`; approval attached to a
+  key-value provider.
 - [ADR-20261106-provider_kinds_and_matching](adr/ADR-20261106-provider_kinds_and_matching.md):
   key-value, value and approval providers; discovery writes `sites.json` with the keys of the
   values that the user filled.

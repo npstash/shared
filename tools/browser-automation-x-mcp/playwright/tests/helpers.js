@@ -81,9 +81,9 @@ function html(res, body) {
 
 // Make a config folder for one test (see src/paths.js). The config of the repository stays unchanged.
 // sites: the "sites" of sites.json, merged into the default sites: 127.0.0.1 and localhost with
-// the systems of the fake vault. tools: { <tool>: true | false }; browser_evaluate is on because the
+// the systems of the fake vault (providerConfig: false leaves them out). tools: { <tool>: true | false }; browser_evaluate is on because the
 // tests read the page with it. values, ask, vault: the settings of the providers.
-export function makeConfig(name, { sites = {}, defaultAccess = 'allow', tools = {}, values = {}, ask = ['phone'], vault = 'vault-test', credentials = true, providers } = {}) {
+export function makeConfig(name, { sites = {}, defaultAccess = 'allow', tools = {}, values = {}, ask = ['phone'], vault = 'vault-test', providerConfig = true, providers } = {}) {
   const root = path.join(TEST_CONFIG_DIR, name);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -96,9 +96,8 @@ export function makeConfig(name, { sites = {}, defaultAccess = 'allow', tools = 
     ],
     tools: Object.fromEntries(Object.entries({ browser_evaluate: true, ...tools }).map(([tool, enabled]) => [tool, { enabled }])),
   });
-  const base = credentials
-    ? { '127.0.0.1': { credentials: { vault: 'Fixture site' } }, localhost: { credentials: { vault: 'Fixture other' } } }
-    : {};
+  const vaultConfig = (entry) => ({ 'provider-config': { vault: { vault, entry } } });
+  const base = providerConfig ? { '127.0.0.1': vaultConfig('Fixture site'), localhost: vaultConfig('Fixture other') } : {};
   const merged = { ...base };
   for (const [host, site] of Object.entries(sites)) merged[host] = { ...base[host], ...site };
   write('sites.json', { defaultAccess, sites: merged });

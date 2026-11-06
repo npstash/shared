@@ -33,21 +33,20 @@ export class FillRegistry {
     };
     const providers = [];
     for (const { type, mask, settings } of entries) {
-      let provider;
-      let masked = mask;
-      if (settings.provider !== undefined) {
-        const inner = settings.provider;
-        if (!inner || typeof inner !== 'object' || !inner.type) throw new Error(`the provider "${type}" of server.json needs "provider" with a "type"`);
-        const wrapped = await make(inner.type, inner);
-        if (wrapped.kind !== 'key-value') throw new Error(`the provider "${type}" of server.json can wrap only a key-value provider, not "${inner.type}"`);
-        provider = await make(type, settings, { inner: wrapped });
-        masked = inner.mask !== false;
-      } else {
-        provider = await make(type, settings);
+      let provider = await make(type, settings);
+      if (provider.kind === 'approval') throw new Error(`the provider "${type}" of server.json is an approval provider; attach it to a key-value provider with "approval"`);
+      const approval = settings.approval;
+      if (approval !== undefined) {
+        if (provider.kind !== 'key-value') throw new Error(`the provider "${type}" of server.json is not a key-value provider; remove "approval"`);
+        if (!approval || typeof approval !== 'object' || !approval.type) throw new Error(`the provider "${type}" of server.json needs "approval" with a "type"`);
+        // "enabled": false in "approval" turns the approval off: the provider fills without approval.
+        if (approval.enabled !== false) {
+          const approver = await make(approval.type, approval, { inner: provider });
+          if (approver.kind !== 'approval') throw new Error(`"approval" of the provider "${type}" of server.json: "${approval.type}" is not an approval provider`);
+          provider = approver;
+        }
       }
-      if (provider.kind === 'approval' && !provider.inner) throw new Error(`the provider "${type}" of server.json needs "provider": the entry of a key-value provider`);
-      if (provider.kind !== 'approval' && settings.provider !== undefined) throw new Error(`the provider "${type}" of server.json is not an approval provider; remove "provider"`);
-      provider.masked = masked;
+      provider.masked = mask;
       providers.push(provider);
     }
     logger.info('fill_providers', {
@@ -125,7 +124,7 @@ export class FillRegistry {
     return undefined;
   }
 
-  // True if a provider has a system for the page (the vault provider: "credentials" in sites.json).
+  // True if a provider has a system for the page (the vault provider: "provider-config" in sites.json).
   canLogIn(ctx) {
     return this.providers.some((provider) => typeof provider.system === 'function' && Boolean(provider.system(ctx)));
   }

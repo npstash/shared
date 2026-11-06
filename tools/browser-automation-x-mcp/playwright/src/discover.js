@@ -11,8 +11,8 @@
 //   key of the value from the key-value providers ("<selector>": "<key>"), the button that the user
 //   clicked into "submit", and the link that the user followed before into "login".
 // The values are discarded after the match. They are never logged or written.
-import { hostOfUrl } from '../../src/hosts/patterns.js';
-import { pageOf, updateSites } from '../../src/sites.js';
+import { hostOfUrl, normalizeHost } from '../../src/hosts/patterns.js';
+import { covers, pageOf, rootDomain, updateSites } from '../../src/sites.js';
 import { pageLib } from './page-lib.js';
 
 // An event of the agent comes in the time of its call, or this much later.
@@ -71,13 +71,15 @@ export async function stopDiscovery(session) {
 export function recordHost(session, url) {
   const host = hostOfUrl(url);
   if (!host || !session.fields.access(host).allowed) return;
+  // The root domain gets the access; the subdomains inherit it (REQ-037).
+  const root = rootDomain(host);
   const added = updateSites(session.fields.file, (data) => {
-    const site = data.sites[host] ??= {};
+    const site = data.sites[root] ??= {};
     if (site.access) return false;
     site.access = 'allow';
     return true;
   });
-  if (added) session.logger.info('host_recorded', { host });
+  if (added) session.logger.info('host_recorded', { host: root });
 }
 
 function entryOf(pending, page) {
@@ -185,11 +187,26 @@ async function flush(session, page) {
 }
 
 // The page entry of a URL in sites.json. Make it if it is missing.
+// The page entry of a URL in the node of its exact host. A missing node goes into "subdomains" of
+// the nearest node that covers the host (REQ-039a).
 function pageEntry(data, url) {
   const { host, path: pattern } = pageOf(url);
-  const site = data.sites[host] ??= {};
-  site.pages ??= {};
-  return site.pages[pattern] ??= {};
+  const root = rootDomain(host);
+  let node = data.sites[root] ??= {};
+  let nodeHost = root;
+  while (nodeHost !== host) {
+    const next = Object.keys(node.subdomains ?? {})
+      .filter((key) => covers(key, host))
+      .sort((a, b) => b.length - a.length)[0];
+    if (next === undefined) {
+      node = (node.subdomains ??= {})[host] = {};
+      break;
+    }
+    node = node.subdomains[next];
+    nodeHost = normalizeHost(next);
+  }
+  node.pages ??= {};
+  return node.pages[pattern] ??= {};
 }
 
 // The name of a field without a key: username, password, email, otp, else its name.

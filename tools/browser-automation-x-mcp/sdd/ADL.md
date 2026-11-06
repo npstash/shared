@@ -155,3 +155,12 @@ The log of the decisions that change the design. Format and rules:
 - 20261106-13 Nestor a5ea4caf7298 One approval covers all keys of an approval provider in one fill; the request has the host, the keys and the client name, and no value and no URL
 - 20261106-14 Nestor a5ea4caf7298 A refusal, or no answer in APPROVAL_TIMEOUT, stops the fill; no later provider gives the keys
 - 20261106-15 Nestor a5ea4caf7298 approve-dialog asks through MCP elicitation; approve-https sends POST <address>/approve, pins the SHA-256 fingerprint of the certificate, sends no authentication, and refuses with an empty address or fingerprint
+- 20261106-16 Nestor 29c0c2f718c6 sites.json is a tree: a key of sites is a root domain of the Public Suffix List, also for private suffixes; an IP address or localhost stays; subdomains holds the nodes of the subdomains by their full host name
+- 20261106-17 Nestor 29c0c2f718c6 access and provider-config go down the tree and the nearest value wins, for provider-config for each provider type separately; pages apply only to the node of the exact host
+- 20261106-18 Nestor 29c0c2f718c6 A deny of a node wins over an allow of a node below it
+- 20261106-19 Nestor 29c0c2f718c6 provider-config replaces credentials and has one object for each provider type; the vault config is { vault, entry } and applies only to the vault provider with that vault
+- 20261106-20 Nestor 29c0c2f718c6 A page can have provider-config; it wins over the host only for that page
+- 20261106-21 Nestor 29c0c2f718c6 Discovery writes the root domain of a loaded host with "access": "allow", and writes the pages into the node of the exact host; a missing node goes into subdomains of the nearest node that covers the host
+- 20261106-22 Nestor 29c0c2f718c6 A site key that is not a root domain, a subdomains key outside its node, credentials, and a vault config without vault or entry are load errors
+- 20261106-23 Nestor 29c0c2f718c6 An approval provider is the approval of the entry of a key-value provider in server.json; "enabled": false in approval turns it off; an approval provider in providers is a load error
+- 20261106-24 Nestor 29c0c2f718c6 A refused approval adds the note "The user did not approve an action on this page." to the result of the call; the note does not name the form fill

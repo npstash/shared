@@ -5,16 +5,17 @@
 //       { "type": "vault",  "enabled": true, "mask": true,  "vault": "vault-<name>" },
 //       { "type": "values", "enabled": true, "mask": false, "values": { "<name>": "<value>" } },
 //       { "type": "ask",    "enabled": true, "mask": true,  "fields": ["<name>"] },
-//       { "type": "approve-https", "enabled": true, "address": "https://<host>:<port>", "fingerprint": "<SHA-256>",
-//         "provider": { "type": "vault", "mask": true, "vault": "vault-<name>" } }
+//       { "type": "vault", "enabled": true, "mask": true, "vault": "vault-<name>",
+//         "approval": { "type": "approve-https", "address": "https://<host>:<port>", "fingerprint": "<SHA-256>" } }
 //     ],
 //     "tools": { "<tool>": { "enabled": true } }   the tool switches; the server adds missing tools
 //   }
 //
 // "enabled": false turns a provider or a tool off. A provider without "mask" is masked: its values
 // show as *** to the agent. The other keys of a provider are its settings (see providers-form-fill/).
-// An approval provider (approve-dialog, approve-https) wraps the key-value provider of its
-// "provider" key; the mask of that entry applies (REQ-031 of sdd/SRS.md).
+// An approval provider (approve-dialog, approve-https) is the "approval" of a key-value provider; the
+// mask of that entry applies. "enabled": false in "approval" turns the approval off (REQ-031 of
+// sdd/SRS.md).
 import { mtimeOf, readJson, writeJson } from './json.js';
 
 export class ServerConfig {

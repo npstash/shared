@@ -195,8 +195,8 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   gives. A relative path is relative to the working folder. The files are JSON:
   1. `server.json`: the providers (an array, in the order that the server asks them) and the tool
      switches.
-  2. `sites.json`: `defaultAccess`, and the sites: for each host its access, its credentials and
-     its pages.
+  2. `sites.json`: `defaultAccess`, and the sites: a tree of root domains and their subdomains,
+     each with its access, its provider config and its pages (REQ-037).
   The schemas are in [DESIGN.md](DESIGN.md#data-model). Only the discovery mode writes
   `sites.json` (REQ-039).
 - **Alternative Flow:** A config file is missing → the server shall copy its template from the
@@ -259,21 +259,24 @@ The agent does not fill credentials or personal data. The server fills the field
   1. A key-value provider has keys and values. It can give the key of a value (REQ-039a). Types:
      `vault`, `values`.
   2. A value provider gives a value for a key, but it has no list of keys. Type: `ask`.
-  3. An approval provider wraps one key-value provider: the entry in its `provider` key. It gets
-     the approval of the user, then gives the values of the wrapped provider (REQ-036c). Types:
-     `approve-dialog`, `approve-https`.
+  3. An approval provider is attached to one key-value provider: it is the `approval` of the
+     entry of that provider. It gets the approval of the user, then that provider gives its values
+     (REQ-036c). Types: `approve-dialog`, `approve-https`.
   The server shall ask the providers of `providers` in `server.json` in the order of the array. The
   first provider that has the key gives the value.
 - **Alternative Flow:**
   - A provider does not have the key → the server asks the next provider.
   - A provider has `"enabled": false` → the server does not use it.
-  - DISCOVER is `1` → the server does not use the value providers. An approval provider gives the
-    values of its wrapped provider without an approval.
+  - DISCOVER is `1` → the server does not use the value providers. A key-value provider gives its
+    values without an approval.
+  - The `approval` of an entry has `"enabled": false` → the provider gives its values without an
+    approval.
 - **Exception Flow:**
   - A provider has no `type`, or its type has no folder in `providers-form-fill/` → the server does
     not start.
-  - An approval provider has no `provider`, or its `provider` is not a key-value provider → the
-    server does not start.
+  - An approval provider is an entry of `providers` → the server does not start.
+  - An entry that is not a key-value provider has `approval`, `approval` has no `type`, or its type
+    is not an approval provider → the server does not start.
 
 #### REQ-032 — Mask of filled values
 
@@ -300,16 +303,16 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-034 — Vault provider
 
 - **Basic Flow:**
-  1. The provider shall take the vault system of the page from `sites.json`: the `credentials` of
-     the most specific page that has them, else of the most specific site that has them. It gives
-     the exact name of a vault system.
+  1. The provider shall take the vault config of the page from `sites.json`: the nearest
+     `provider-config.vault` (REQ-037). The config applies only if its `vault` is the `vault` of
+     the provider entry. Its `entry` is the exact name of a vault system.
   2. It shall give the secret whose name is the key, through the vault tool, from the vault that
      `vault` of its entry in `server.json` gives. The case of the key has no effect.
   3. To give the key of a value, it shall compare the value with each secret of the system, in the
      order of `get-system`. It gives the name of the first equal secret.
   4. It shall not search the vault for systems.
-- **Alternative Flow:** No site or page has credentials, or the system has no such secret → the
-  provider has no value and no key.
+- **Alternative Flow:** No node or page has a vault config, the config is for an other vault, or the
+  system has no such secret → the provider has no value and no key.
 - **Exception Flow:**
   - `vault` is empty → error.
   - The vault tool fails → error with its message.
@@ -365,30 +368,43 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   1. The server shall ask each approval provider one time for each fill of a form. The request has
      all keys of the fill that the provider gives, the host of the page, and the client name of
      MCP `initialize`. It has no value and no URL.
-  2. When the provider approves, the server shall get the values of the keys from the wrapped
+  2. When the provider approves, the server shall get the values of the keys from its key-value
      provider.
 - **Exception Flow:** The provider refuses → error; the server does not fill the form. No later
   provider gives the keys. The server logs `fill_error`. The result of the call gets the note "The
   user did not approve an action on this page." The note does not name the form fill (REQ-005).
-- **Note:** The mask of an approval provider is the mask of its wrapped provider (REQ-032).
+- **Note:** The mask of the key-value provider entry applies (REQ-032).
 
 #### REQ-037 — Fields of a page
 
-- **Basic Flow:** The server shall read the pages of the sites in `sites.json`. The key of a page is
-  a path pattern. A page has `fields` (`{ "<selector>": "<key>" }`), and optional `submit` and
-  `login` arrays. A `login` selector is not a field (REQ-030a). A selector is CSS, or a label or
-  role locator of Playwright. The key is the key of a provider (REQ-031). The case of the key has
-  no effect.
-  1. A site covers its host and each subdomain of it.
-  2. In a path pattern, `*` matches each sequence of characters, also `/`. `/*` matches each path.
-  3. Scheme, port, query and fragment have no effect.
-- **Alternative Flow:** More pages match → all apply. For a selector in more pages, the more
-  specific page (the longer host and path) wins.
+- **Basic Flow:** The server shall read the sites of `sites.json` as a tree:
+  1. A key of `sites` is a root domain: the registrable domain of the Public Suffix List, also for
+     private suffixes. An IP address or a host without a registrable domain is its own root domain.
+  2. A node has optional `access`, `provider-config`, `pages` and `subdomains`. A key of
+     `subdomains` is the full host name of a subdomain of the node.
+  3. The node of a host is the deepest node that covers it. A node covers its host and each
+     subdomain of it.
+  4. `access` and `provider-config` go down the tree. The nearest value wins: the node of the host,
+     then its parents. For `provider-config`, this applies to each provider type separately.
+  5. `provider-config` has one object for each provider type, e.g.
+     `"vault": { "vault": "<vault>", "entry": "<system>" }`.
+  6. `pages` apply only to the node with the exact host. The key of a page is a path pattern. A page
+     has `fields` (`{ "<selector>": "<key>" }`), and optional `submit`, `login` and
+     `provider-config`. The `provider-config` of a page wins over the host, only for that page.
+  7. A `login` selector is not a field (REQ-030a). A selector is CSS, or a label or role locator of
+     Playwright. The key is the key of a provider (REQ-031). The case of the key has no effect.
+  8. In a path pattern, `*` matches each sequence of characters, also `/`. `/*` matches each path.
+  9. Scheme, port, query and fragment have no effect.
+- **Alternative Flow:** More pages of the host match → all apply. For a selector in more pages, the
+  more specific page (the longer path) wins.
+- **Exception Flow:** A key of `sites` is not a root domain, a key of `subdomains` is not a
+  subdomain of its node, a node or page has `credentials`, or a `vault` config has no `vault` or
+  `entry` → the server gives an error.
 
 #### REQ-030a — Login link
 
 - **Pre-condition:** The page matches a page of `sites.json` with `login` selectors (REQ-037), and
-  a provider has a system for the page (the vault provider: `credentials`, REQ-034).
+  a provider has a system for the page (the vault provider: a vault config, REQ-034).
 - **Trigger:** A result of upstream shows a page URL.
 - **Basic Flow:**
   1. Before the fill of REQ-030, the server shall click the first visible `login` selector.
@@ -444,10 +460,11 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Trigger:** A click of a button or a submit (REQ-039), a navigation of the page, or the close of
   the lane.
 - **Basic Flow:**
-  1. The server shall read `sites.json` again. The site is the host of the page. The page key is
-     its path pattern.
+  1. The server shall read `sites.json` again. The node is the node of the exact host of the page
+     (REQ-037). A missing node goes into `subdomains` of the nearest node that covers the host,
+     else it is a new root domain. The page key is its path pattern.
   2. For each field that the user filled, it shall get the key of the value (`match`) from the
-     key-value providers and the wrapped providers of approval providers (REQ-031), in their order.
+     key-value providers (REQ-031), in their order.
      The first key wins. It shall write `"<selector>": "<key>"` into `fields`.
   3. It shall write the button that the user clicked into `submit`, if the user or the form fill
      filled a field of the page.
@@ -473,10 +490,10 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-040 — Check before a page opens
 
 - **Trigger:** The client calls `browser_navigate`, or `browser_tabs` with `action = new` and a URL.
-- **Basic Flow:** The server shall check the host of the URL with the sites of `sites.json`:
-  1. A site that covers the host and has `"access": "deny"` → blocked. Deny wins over each other
-     site.
-  2. Else the most specific site with an `access` decides.
+- **Basic Flow:** The server shall check the host of the URL with the tree of `sites.json` (REQ-037):
+  1. The node of the host or one of its parents has `"access": "deny"` → blocked. A deny wins also
+     over an `"allow"` below it.
+  2. Else the nearest node with an `access` decides.
   3. Else `defaultAccess` decides.
 - **Alternative Flow:** The URL has no host (e.g. `about:blank`) → the server allows it.
 - **Exception Flow:** The host is blocked → the server forwards nothing. It gives an error result
@@ -493,8 +510,8 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 - **Pre-condition:** DISCOVER is `1`.
 - **Trigger:** A page of an allowed host loaded: by a call, or by the user in the browser.
-- **Basic Flow:** The server shall add the host as a site with `"access": "allow"` to `sites.json`
-  at once. An access that the file has stays.
+- **Basic Flow:** The server shall add the root domain of the host (REQ-037) with
+  `"access": "allow"` to `sites.json` at once. An access that the file has stays.
 - **Alternative Flow:** DISCOVER is not `1` → the server records nothing.
 
 #### REQ-043 — Config files in the config folder
@@ -629,7 +646,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 ### UI-03 — Dialog of the approval provider
 
-- **Purpose:** The user approves a fill with values of a wrapped provider, e.g. a login.
+- **Purpose:** The user approves a fill with values of a key-value provider, e.g. a login.
 - **Shows:** The host of the page, the keys, and the client name. It shows no value and no URL.
 - **Actions:** Approve and accept → the server fills the values (REQ-036c). Decline, cancel or no
   approval → the server does not fill the form.

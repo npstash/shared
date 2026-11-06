@@ -1,6 +1,7 @@
 // Vault provider (key-value): secrets from the vault (shared/tools/auth), through its run.sh / run.bat.
-// The vault name is "vault" of its entry in server.json. The vault system of a page is the
-// "credentials" of its site or page in sites.json (src/sites.js). The provider does not search the vault.
+// The vault name is "vault" of its entry in server.json. The vault system of a page is "entry" of the
+// nearest "provider-config"."vault" in sites.json (src/sites.js), if its "vault" is the vault name of
+// this provider. The provider does not search the vault.
 // The key of sites.json is the secret name, e.g. username, password, token. The case has no effect.
 // match(): compares a value with each secret of the system; the values are not kept.
 import { execFile } from 'node:child_process';
@@ -23,8 +24,12 @@ export default class VaultProvider extends KeyValueProvider {
     this.secretNames = new Map();
   }
 
-  async vault(args) {
+  requireVaultName() {
     if (!this.vaultName) throw new FillError('the vault provider needs "vault": "vault-<name>" in server.json');
+  }
+
+  async vault(args) {
+    this.requireVaultName();
     const [command, prefix] = process.platform === 'win32' ? ['cmd', ['/c', this.tool]] : [this.tool, []];
     try {
       const { stdout } = await run(command, [...prefix, '--vault', this.vaultName, ...args], { maxBuffer: 1024 * 1024, windowsHide: true });
@@ -37,7 +42,8 @@ export default class VaultProvider extends KeyValueProvider {
 
   // The vault system of the page (sites.json), or undefined.
   system(ctx) {
-    return ctx.url ? this.sites?.vaultSystem(ctx.url) : undefined;
+    const config = ctx.url ? this.sites?.providerConfig(ctx.url, 'vault') : undefined;
+    return config && config.vault === this.vaultName ? config.entry : undefined;
   }
 
   // The secret names of a system, from get-system: "name<TAB>url<TAB>secret,secret".
@@ -56,6 +62,7 @@ export default class VaultProvider extends KeyValueProvider {
 
   // The secret name of the system for the key, or undefined.
   async secretName(key, ctx) {
+    this.requireVaultName();
     const system = this.system(ctx);
     if (!system) return undefined;
     const wanted = String(key).toLowerCase();
@@ -78,6 +85,7 @@ export default class VaultProvider extends KeyValueProvider {
   }
 
   async match(value, ctx) {
+    this.requireVaultName();
     const system = this.system(ctx);
     if (!system) return undefined;
     for (const name of await this.secrets(system)) {

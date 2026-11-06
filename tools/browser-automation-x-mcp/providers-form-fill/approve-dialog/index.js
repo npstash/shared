@@ -1,6 +1,6 @@
 // Approval dialog provider (approval): asks the user to approve a fill through MCP elicitation (a
-// dialog of the client), then gives the values of the wrapped provider ("provider" of its entry in
-// server.json). Without a dialog, it refuses. The dialog shows the host, the keys and the client,
+// dialog of the client), then gives the values of its key-value provider (the entry in server.json
+// that has this provider as "approval"). Without a dialog, it refuses. The dialog shows the host, the keys and the client,
 // never a value or the URL (UI-03 of sdd/SRS.md).
 import { APPROVAL_TIMEOUT, ApprovalProvider } from '../../src/fill/provider.js';
 

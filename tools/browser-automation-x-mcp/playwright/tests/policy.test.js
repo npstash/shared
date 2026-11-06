@@ -110,7 +110,7 @@ describe('host access', () => {
       await call(mcp.client, 'browser_navigate', { url: `${site.otherUrl}/` });
       const found = await waitFor(() => mcp.sites.sites, (sites) => sites.localhost?.access === 'allow');
       assert.equal(found['127.0.0.1'].access, 'allow');
-      assert.deepEqual(found.localhost, { credentials: { vault: 'Fixture other' }, access: 'allow' });
+      assert.deepEqual(found.localhost, { 'provider-config': { vault: { vault: 'vault-test', entry: 'Fixture other' } }, access: 'allow' });
     } finally {
       await mcp.close();
     }
@@ -213,7 +213,7 @@ describe('form fill without dialogs', () => {
 describe('approval', () => {
   const sites = { '127.0.0.1': { pages: { '/login*': { fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } } } } };
   const providers = () => [
-    { type: 'approve-dialog', enabled: true, provider: { type: 'vault', mask: true, vault: 'vault-test' } },
+    { type: 'vault', enabled: true, mask: true, vault: 'vault-test', approval: { type: 'approve-dialog' } },
     { type: 'values', enabled: true, mask: false, values: { password: 'not-this' } },
   ];
 
@@ -300,6 +300,24 @@ describe('discovery', () => {
       for (const text of [fs.readFileSync(mcp.logFile, 'utf8'), fs.readFileSync(mcp.sitesFile, 'utf8')]) {
         assert.ok(!text.includes(PASSWORD) && !text.includes(USERNAME), 'a value is visible');
       }
+    } finally {
+      await mcp.close();
+    }
+  });
+
+  test('a subdomain: the root domain gets the access; the pages go into "subdomains"; the vault config of the parent applies', async () => {
+    const vault = { vault: { vault: 'vault-test', entry: 'Fixture site' } };
+    const mcp = await startServerClient({ name: 'policy-discover-subdomain', env: DISCOVER, config: { sites: { 'a.localhost': { 'provider-config': vault } } } });
+    try {
+      const url = site.url.replace('127.0.0.1', 'www.a.localhost');
+      await call(mcp.client, 'browser_navigate', { url: `${url}/signin.html?user=1` });
+      const root = await waitFor(() => mcp.sites.sites['a.localhost'], (s) => s?.subdomains?.['www.a.localhost']?.pages?.['/login.html']?.submit);
+      assert.equal(root.access, 'allow');
+      assert.deepEqual(root['provider-config'], vault);
+      assert.deepEqual(root.subdomains['www.a.localhost'].pages['/login.html'].fields,
+        { 'input[autocomplete="username"]': 'username', 'input[name="pass"]': 'password' });
+      assert.equal(root.pages, undefined, 'the pages of a subdomain do not go into the root domain');
+      assert.equal(mcp.sites.sites['www.a.localhost'], undefined, 'no site for the subdomain');
     } finally {
       await mcp.close();
     }
@@ -433,7 +451,7 @@ describe('login link', () => {
     },
   };
 
-  test('a visible login link of a site with credentials gets one click; the login page gets the fill', async () => {
+  test('a visible login link of a site with a vault config gets one click; the login page gets the fill', async () => {
     const mcp = await startServerClient({ name: 'policy-login', config: { sites } });
     try {
       const before = site.submissions.length;
@@ -453,12 +471,12 @@ describe('login link', () => {
     }
   });
 
-  test('no click when the link text shows the login, or when the site has no credentials', async () => {
-    for (const [name, url, credentials] of [
+  test('no click when the link text shows the login, or when the site has no vault config', async () => {
+    for (const [name, url, providerConfig] of [
       ['policy-login-in', `${site.url}/signin.html?in=1`, true],
       ['policy-login-novault', `${site.url}/signin.html`, false],
     ]) {
-      const mcp = await startServerClient({ name, config: { sites, credentials } });
+      const mcp = await startServerClient({ name, config: { sites, providerConfig } });
       try {
         const text = await call(mcp.client, 'browser_navigate', { url });
         assert.match(text, /Page Title: Shop home/, name);

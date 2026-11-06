@@ -1,8 +1,9 @@
-// Approval HTTPS provider (approval): asks an approval service, then gives the values of the
-// wrapped provider ("provider" of its entry in server.json). See REQ-036b of sdd/SRS.md.
+// Approval HTTPS provider (approval): asks an approval service, then gives the values of its
+// key-value provider (the entry in server.json that has this provider as "approval"). See REQ-036b
+// of sdd/SRS.md.
 //
-//   { "type": "approve-https", "enabled": true, "address": "https://127.0.0.1:8743",
-//     "fingerprint": "<SHA-256 of the certificate of the service>", "provider": { ... } }
+//   "approval": { "type": "approve-https", "address": "https://127.0.0.1:8743",
+//                 "fingerprint": "<SHA-256 of the certificate of the service>" }
 //
 // The provider pins the certificate: it sends nothing until the fingerprint is equal. It sends no
 // authentication, and no value or URL: only { host, keys, client }. An empty address or
