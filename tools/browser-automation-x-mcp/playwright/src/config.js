@@ -14,9 +14,6 @@ export const SYSLIBS_DIR = path.join(ASSETS_DIR, 'syslibs', PLATFORM);
 export const STATE_DIR = ASSETS_DIR;
 const LIB_TRIPLETS = { x64: 'x86_64-linux-gnu', arm64: 'aarch64-linux-gnu' };
 
-// The tool switches of the server: tools.ini in the config folder. See src/paths.js.
-export const TOOLS_CONFIG = 'tools.ini';
-export const TOOLS_TEMPLATE = path.join(PLAYWRIGHT_DIR, 'config', 'tools.template.ini');
 
 // Read the arguments. The server takes only --config-dir DIR. A relative path is relative to cwd.
 // Each other argument is an error.

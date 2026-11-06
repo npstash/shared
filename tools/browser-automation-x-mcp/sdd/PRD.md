@@ -45,7 +45,9 @@ table of section 7. They have no GitHub Issues yet.
   libraries, all in the tool folder.
 - Tool switches in a committed config file.
 - An automatic fill and submit of the fields of configured pages, with values from providers:
-  vault, INI file, the user (dialog). A discovery mode that proposes the fields of a page.
+  vault, a JSON object, the user (dialog). An approval of a fill by the user (dialog or approval
+  service). A discovery mode that writes the fields that the user fills into the config, with the
+  keys of the provider values.
 - Texts for the agent that do not name Playwright or the form fill.
 - A deny-list and an allow-list of hosts in one file of the config folder, with the record of opened hosts.
 - A JSON Lines log of each call.
@@ -81,3 +83,5 @@ See [SRS.md](SRS.md).
 | 5 | As a user, I block hosts and keep a list of the opened hosts. | REQ-040–REQ-043 | v2 | done | MISSING: issue |
 | 6 | As a user, I read a log of each call without secrets. | REQ-050, REQ-051 | v1 | done | MISSING: issue |
 | 7 | As a user, I run a headed browser on a server without a display, and sites that block a headless browser accept it. | REQ-015, REQ-017, REQ-018 | v2 | done | MISSING: issue |
+| 8 | As a user, I fill a form one time in the discovery mode; the server writes the fields with the keys of my values, and later runs fill the form without a manual config. | REQ-031, REQ-039, REQ-039a, REQ-042 | v4 | done | MISSING: issue |
+| 9 | As a user, I approve a fill with values of the vault before the server fills the form. | REQ-036a–REQ-036c | v4 | done | MISSING: issue |

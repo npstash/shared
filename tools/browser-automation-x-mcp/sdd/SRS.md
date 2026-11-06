@@ -117,8 +117,8 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 #### REQ-014 — Files only in the tool folder
 
-- **Basic Flow:** The server shall keep STATE_FILE, the log, DISCOVERED_FILE, temp files and the
-  browser registry (Linux) in the tool folder. It shall keep the output files (snapshots,
+- **Basic Flow:** The server shall keep STATE_FILE, the log, temp files and the browser registry
+  (Linux) in the tool folder. It shall keep the output files (snapshots,
   screenshots) in OUTPUT_DIR of the working folder: the agent reads them.
 - **Alternative Flow:**
   - The user gives `PLAYWRIGHT_BROWSERS_PATH` → the server keeps it.
@@ -177,11 +177,14 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 #### REQ-016 — No bubbles of the browser
 
-- **Trigger:** The browser starts (REQ-065).
-- **Basic Flow:** The server shall start Chromium with `--deny-permission-prompts`.
-- **Post-condition:** No bubble of the browser covers the page. Each lane starts with an empty
-  profile: no "restore pages" bubble. The default switches of Playwright stop the translate bar.
-  A test on Xvfb shows no password bubble and no address bubble in a lane.
+- **Trigger:** The Chromium of a lane starts (REQ-065).
+- **Basic Flow:**
+  1. Before the start, the server shall write settings into `Default/Preferences` of the lane
+     profile. The settings stop the password manager, its leak check, the translate bar, the
+     "restore pages" bubble and autofill prompts.
+  2. The server shall start Chromium with `--deny-permission-prompts`.
+- **Post-condition:** No bubble of the browser covers the page. A test on Xvfb shows no translate
+  bubble on a Polish page.
 
 ## 3. Tool switches
 
@@ -189,8 +192,13 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 - **Trigger:** The server starts.
 - **Basic Flow:** The server shall read its config files from the folder that `--config-dir DIR`
-  gives. A relative path is relative to the working folder. The files are in
-  [DESIGN.md](DESIGN.md#data-model).
+  gives. A relative path is relative to the working folder. The files are JSON:
+  1. `server.json`: the providers (an array, in the order that the server asks them) and the tool
+     switches.
+  2. `sites.json`: `defaultAccess`, and the sites: for each host its access, its credentials and
+     its pages.
+  The schemas are in [DESIGN.md](DESIGN.md#data-model). Only the discovery mode writes
+  `sites.json` (REQ-039).
 - **Alternative Flow:** A config file is missing → the server shall copy its template from the
   tool folder.
 - **Exception Flow:** `--config-dir` is missing → the server does not start. It writes the error
@@ -199,13 +207,13 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 #### REQ-020 — Tool list in the config
 
 - **Trigger:** The server starts.
-- **Basic Flow:** The server shall add a line `<tool> = enabled|disabled` to `tools.ini` for
-  each tool that the file does not list. The default is `disabled` for the tools in
-  DANGEROUS_TOOLS and `enabled` for the others.
+- **Basic Flow:** The server shall add `"<tool>": { "enabled": true|false }` to `tools` of
+  `server.json` for each tool that the file does not list. The default is `false` for the tools
+  in DANGEROUS_TOOLS and `true` for the others. The other keys of the file shall stay.
 - **Alternative Flow:**
-  - A value is not `enabled` or `disabled` → the server treats the tool as disabled and logs it.
+  - `enabled` is not `true` or `false` → the server treats the tool as disabled and logs it.
   - The user changes the file → the server uses the new values at the next call.
-- **Post-condition:** `tools.ini` lists each tool of the server, sorted.
+- **Post-condition:** `tools` lists each tool of the server, sorted.
 
 #### REQ-021 — Call of a disabled tool
 
@@ -217,13 +225,13 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 ## 4. Form fill
 
-The agent does not fill credentials or personal data. The server fills the fields of
-`fields.ini` and submits the form. The agent gets the page after the submit.
+The agent does not fill credentials or personal data. The server fills the fields of the pages of
+`sites.json` and submits the form. The agent gets the page after the submit.
 
 #### REQ-030 — Fill after a call
 
-- **Trigger:** A result of upstream shows a page URL, and the URL matches a section of
-  `fields.ini` (REQ-037).
+- **Trigger:** A result of upstream shows a page URL, and the URL matches a page of `sites.json`
+  with fields (REQ-037).
 - **Basic Flow:**
   1. The server shall wait a maximum of FILL_WAIT (10000 ms) for a visible field of the section,
      in each frame of the page.
@@ -240,19 +248,36 @@ The agent does not fill credentials or personal data. The server fills the field
     result of upstream.
   - The host of the page after a submit is blocked → the server stops the fill. It opens
     `about:blank` and gives the error of REQ-041.
+  - DISCOVER is `1` → the server fills the fields, but it does not submit. It does steps 1–3 one
+    time. The client gets the result of upstream.
 - **Exception Flow:** A provider or the page code fails → the server logs the error and does
   nothing. The client gets the result of upstream. The error is not visible to the client.
 
-#### REQ-031 — Provider order
+#### REQ-031 — Provider kinds and order
 
-- **Basic Flow:** The server shall ask the providers in the order of `[fill] providers` in
-  `server.ini`. The first provider that has a value gives it.
-- **Alternative Flow:** A provider has no value → the server asks the next provider.
+- **Basic Flow:** Each provider has one kind:
+  1. A key-value provider has keys and values. It can give the key of a value (REQ-039a). Types:
+     `vault`, `values`.
+  2. A value provider gives a value for a key, but it has no list of keys. Type: `ask`.
+  3. An approval provider wraps one key-value provider: the entry in its `provider` key. It gets
+     the approval of the user, then gives the values of the wrapped provider (REQ-036c). Types:
+     `approve-dialog`, `approve-https`.
+  The server shall ask the providers of `providers` in `server.json` in the order of the array. The
+  first provider that has the key gives the value.
+- **Alternative Flow:**
+  - A provider does not have the key → the server asks the next provider.
+  - A provider has `"enabled": false` → the server does not use it.
+  - DISCOVER is `1` → the server does not use the value providers. An approval provider gives the
+    values of its wrapped provider without an approval.
+- **Exception Flow:**
+  - A provider has no `type`, or its type has no folder in `providers-form-fill/` → the server does
+    not start.
+  - An approval provider has no `provider`, or its `provider` is not a key-value provider → the
+    server does not start.
 
 #### REQ-032 — Mask of filled values
 
-- **Pre-condition:** The provider of the value is masked: `[mask] <provider>` in `server.ini` is
-  not `false`.
+- **Pre-condition:** The provider of the value is masked: its `mask` in `server.json` is not `false`.
 - **Basic Flow:** The server shall replace the value with MASK (`***`) in each later result, for
   the time of the session.
 - **Alternative Flow:** Upstream writes a text file in a call → the server shall replace the values
@@ -275,28 +300,31 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-034 — Vault provider
 
 - **Basic Flow:**
-  1. The provider shall select the line of `[systems]` in `provider-vault.ini` whose host is the
-     host of the page, or a parent domain of it. The line gives the exact name of a vault system.
-  2. It shall give the secret whose name is the field name, through the vault tool, from the
-     vault that `[vault] vault` gives.
-  3. It shall not search the vault for systems.
-- **Alternative Flow:**
-  - More lines match → the line whose URL prefix is the longest prefix of the page URL wins.
-  - No line matches, or the system has no such secret → the provider has no value.
+  1. The provider shall take the vault system of the page from `sites.json`: the `credentials` of
+     the most specific page that has them, else of the most specific site that has them. It gives
+     the exact name of a vault system.
+  2. It shall give the secret whose name is the key, through the vault tool, from the vault that
+     `vault` of its entry in `server.json` gives. The case of the key has no effect.
+  3. To give the key of a value, it shall compare the value with each secret of the system, in the
+     order of `get-system`. It gives the name of the first equal secret.
+  4. It shall not search the vault for systems.
+- **Alternative Flow:** No site or page has credentials, or the system has no such secret → the
+  provider has no value and no key.
 - **Exception Flow:**
-  - Two lines match equally → error with the keys of the lines.
-  - `[vault] vault` is empty → error.
+  - `vault` is empty → error.
   - The vault tool fails → error with its message.
 
-#### REQ-035 — INI provider
+#### REQ-035 — Values provider
 
-- **Basic Flow:** The provider shall give the value of the field name from `[values]` of
-  `provider-ini.ini`.
+- **Basic Flow:**
+  1. The provider shall give the value of the key from `values` of its entry in `server.json`. The
+     case of the key has no effect.
+  2. To give the key of a value, it shall give the first key of `values` with an equal value.
 
 #### REQ-036 — Ask provider
 
-- **Pre-condition:** The client declared the elicitation capability. The field name is in
-  `[ask] fields` of `provider-ask.ini`.
+- **Pre-condition:** The client declared the elicitation capability. The key is in `fields` of its
+  entry in `server.json`. DISCOVER is not `1`.
 - **Basic Flow:** The provider shall show a dialog to the user (UI-01) and give the answer.
 - **Alternative Flow:** The user gave the value for this host and field name before in the
   session → the provider gives it without a dialog.
@@ -304,79 +332,155 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   - The user declines or cancels → error; the server does not fill the form.
   - No answer in ASK_TIMEOUT (300000 ms) → error; the server does not fill the form.
 
+#### REQ-036a — Approval dialog (`approve-dialog`)
+
+- **Pre-condition:** The client declared the elicitation capability.
+- **Basic Flow:** The provider shall show a dialog to the user (UI-03). It shall give `true` when the
+  user accepts with the approval.
+- **Alternative Flow:** The client cannot show dialogs → the provider refuses.
+- **Exception Flow:** The user declines, cancels, or gives no answer in APPROVAL_TIMEOUT (15000 ms)
+  → the provider refuses.
+
+#### REQ-036b — Approval service (`approve-https`)
+
+- **Basic Flow:**
+  1. The provider shall connect to `address` of its entry in `server.json` with TLS.
+  2. It shall compare the SHA-256 fingerprint of the certificate of the service with `fingerprint`
+     of its entry. Case and `:` have no effect.
+  3. It shall send `POST <address>/approve` with the JSON `{ "host", "keys", "client" }`. It sends
+     no authentication.
+  4. It shall give `true` when the answer is `200` with `{ "approved": true }`.
+- **Alternative Flow:** `address` or `fingerprint` is empty → the provider refuses, and does not
+  connect.
+- **Exception Flow:** The fingerprint is not equal, the connection fails, the answer is an other
+  answer, or no answer comes in APPROVAL_TIMEOUT (15000 ms) → the provider refuses. It sends nothing
+  after a wrong fingerprint.
+
+#### REQ-036c — Approval of a fill
+
+- **Pre-condition:** DISCOVER is not `1`.
+- **Trigger:** The fill of one form needs keys that the first provider with the key is an approval
+  provider (REQ-031).
+- **Basic Flow:**
+  1. The server shall ask each approval provider one time for each fill of a form. The request has
+     all keys of the fill that the provider gives, the host of the page, and the client name of
+     MCP `initialize`. It has no value and no URL.
+  2. When the provider approves, the server shall get the values of the keys from the wrapped
+     provider.
+- **Exception Flow:** The provider refuses → error; the server does not fill the form. No later
+  provider gives the keys. The server logs `fill_error`. The result of the call gets the note "The
+  user did not approve an action on this page." The note does not name the form fill (REQ-005).
+- **Note:** The mask of an approval provider is the mask of its wrapped provider (REQ-032).
+
 #### REQ-037 — Fields of a page
 
-- **Basic Flow:** The server shall read `fields.ini` of the config folder. Each section is a URL
-  pattern. Each line is `<field name> = <selector>`. Lines `submit = <selector>` are optional; a
-  section can have more of them. A selector is CSS, or a label or role locator of Playwright.
-  1. A URL pattern is `host/path`. The host part is a host pattern (REQ-040).
-  2. In the path, `*` matches each sequence of characters, also `/`.
-  3. A pattern without a path matches each path. Scheme, port, query and fragment have no effect.
-- **Alternative Flow:** More sections match → all apply. For a field name in more sections, the
-  longer pattern wins.
+- **Basic Flow:** The server shall read the pages of the sites in `sites.json`. The key of a page is
+  a path pattern. A page has `fields` (`{ "<selector>": "<key>" }`), and optional `submit` and
+  `login` arrays. A `login` selector is not a field (REQ-030a). A selector is CSS, or a label or
+  role locator of Playwright. The key is the key of a provider (REQ-031). The case of the key has
+  no effect.
+  1. A site covers its host and each subdomain of it.
+  2. In a path pattern, `*` matches each sequence of characters, also `/`. `/*` matches each path.
+  3. Scheme, port, query and fragment have no effect.
+- **Alternative Flow:** More pages match → all apply. For a selector in more pages, the more
+  specific page (the longer host and path) wins.
+
+#### REQ-030a — Login link
+
+- **Pre-condition:** The page matches a page of `sites.json` with `login` selectors (REQ-037), and
+  a provider has a system for the page (the vault provider: `credentials`, REQ-034).
+- **Trigger:** A result of upstream shows a page URL.
+- **Basic Flow:**
+  1. Before the fill of REQ-030, the server shall click the first visible `login` selector.
+  2. It shall wait SUBMIT_WAIT (10000 ms) for the next page, then check its host (REQ-041).
+  3. It shall log `login_clicked`, and continue with REQ-030 on the next page. The click is not a
+     round of FILL_ROUNDS.
+- **Alternative Flow:**
+  - No `login` selector is visible, e.g. because the link has an other text after the login → the
+    server does not click.
+  - The server clicked a login link of the host in this lane before → it does not click again.
+- **Note:** A login link is a role locator with the visible text, e.g.
+  `internal:role=link[name="zaloguj się"i]`: it matches only before the login.
 
 #### REQ-038 — Submit and loop guard
 
 - **Basic Flow:**
-  1. The server shall click the first visible element of the `submit` lines: the lines of the
-     longer pattern first, each section in file order. Else it shall call `requestSubmit()` of the
-     form of the last filled field. Else it shall press Enter in it.
+  1. The server shall use the first `submit` entry that applies: the more specific page first, each
+     page in file order. A selector applies when its element is visible: the server clicks it.
+     The entry `enter` always applies: the server presses Enter in the last filled field. Without
+     such an entry, it shall call `requestSubmit()` of the form of the last filled field. Else it
+     shall press Enter in it.
   2. It shall wait a maximum of SUBMIT_WAIT (10000 ms) for the load of the page, then for the
      end of the network requests.
   3. It shall fill each set of visible fields of a form one time only.
 - **Alternative Flow:** The same fields of the same form are visible again, e.g. after a wrong
   password → the server does not fill them. It logs `fill_failed`.
-- **Post-condition:** The guard is reset when a page does not match `fields.ini`.
+- **Post-condition:** The guard is reset when a page does not match a page of `sites.json`.
 
-#### REQ-039 — Discovery mode
+#### REQ-039 — Discovery mode: record
 
 - **Pre-condition:** DISCOVER is `1`.
-- **Trigger:** A result of upstream shows a page URL, or the form fill submitted a page.
+- **Trigger:** A fill of a field, a click of a button, a click of a link to an other page, or a
+  submit without a button, in a page of a lane. A script in each frame watches the page.
 - **Basic Flow:**
-  1. The server shall find the visible input fields and the buttons that can submit, in each frame
-     of the page. A button can submit if it is a submit button, an image input, a button without a
-     type in a form, or an other button whose parent (up to 4 levels) holds a visible field.
-  2. For each field, it shall make a selector that is unique in its frame: `autocomplete`, then
-     `name`, then an `id` that does not look generated, then the type, `aria-label`, `placeholder`.
-     Else a label locator of Playwright. For each button: an `id` that does not look generated,
-     then `name`, then the type. Else a role locator of Playwright with the name of the button.
-     A locator of Playwright must find one element.
-  3. It shall propose a field name: `username`, `password`, `email`, `otp`, else the `name`. A
-     button gets `submit`.
-  4. It shall add each field and button whose selector is not in the section to DISCOVERED_FILE,
-     in the format of `fields.ini`. The section is the URL pattern of the page. A path segment that
-     looks like an ID becomes `*`. It shall not remove a line.
+  1. For a field, the script shall make a selector that is unique in its frame: `autocomplete`,
+     then `name`, then an `id` that does not look generated, then the type, `aria-label`,
+     `placeholder`. Else a label locator of Playwright. For a button: an `id` that does not look
+     generated, then `name`, then the type. Else a role locator of Playwright with the name of the
+     button. For a link: a role locator with its visible text, case-insensitive. A locator of
+     Playwright must find one element.
+  2. At a click of a button or a submit, the script shall give the values of the fields of the
+     form that were filled since the last submit, and not filled by the form fill.
+  3. It shall report each record to the server at once.
+  4. The server shall give each record to the form fill (an element that the form fill touched), to
+     the agent (in the time of its call), else to the user.
+  5. It shall log the records of the user and of the agent: `<who>_filled`, `<who>_pressed`,
+     `<who>_submitted`, `<who>_followed`, each with the time of the event in the browser (`at`).
+     The log has no value.
+
+#### REQ-039a — Discovery mode: write sites.json
+
+- **Pre-condition:** DISCOVER is `1`.
+- **Trigger:** A click of a button or a submit (REQ-039), a navigation of the page, or the close of
+  the lane.
+- **Basic Flow:**
+  1. The server shall read `sites.json` again. The site is the host of the page. The page key is
+     its path pattern.
+  2. For each field that the user filled, it shall get the key of the value (`match`) from the
+     key-value providers and the wrapped providers of approval providers (REQ-031), in their order.
+     The first key wins. It shall write `"<selector>": "<key>"` into `fields`.
+  3. It shall write the button that the user clicked into `submit`, if the user or the form fill
+     filled a field of the page.
+  4. For a submit without a button, it shall write the first visible submit button of the form into
+     `submit`. If the form has no such button, it shall write `enter`.
+  5. At a submit with fields of the user, it shall write the last link that the user followed
+     before into `login` of the page of the link. Then it forgets the link.
+  6. It shall discard the values. It shall not log or write a value.
+  7. It shall change only these entries. The other entries of the file stay.
 - **Alternative Flow:**
-  - The page was submitted by the form fill or by the user → the server waits a maximum of
-    DISCOVER_WAIT (5000 ms) for a field or a button.
-  - The page has no field and no button → the server writes nothing.
-- **Note:** An ID segment has only digits, is a UUID, or has more than 16 characters of hex or
-  base64url with a digit and a letter.
+  - No provider has a key for the value, or the trigger has no values (a navigation, the close of
+    the lane) → the server writes the name from the attributes of the field: `username`,
+    `password`, `email`, `otp`, else its `name`. It does this only if the selector has no key.
+  - The value is empty → the server does not get a key.
+  - The agent or the form fill filled the field → the server does not write it.
+  - The value is equal to a value of a masked provider → the server adds it to the masked values
+    (REQ-032).
+- **Note:** A path segment that is an ID becomes `*`. An ID segment has only digits, is a UUID, or
+  has more than 16 characters of hex or base64url with a digit and a letter.
 
-#### REQ-039a — Record of the used fields and buttons
-
-- **Pre-condition:** DISCOVER is `1`.
-- **Basic Flow:**
-  1. The server shall record each fill of a field, each click of a button and each submit without a
-     button in the browser. It shall record the selector of REQ-039 and not the value.
-  2. It shall get the records after each call of the agent and at shutdown.
-  3. It shall give each record to the auto-fill (an element that the form fill touched), to the
-     agent (in the time of its call), else to the user.
-  4. It shall log the records of the user and of the agent: `<who>_filled`, `<who>_pressed`,
-     `<who>_submitted`.
-  5. It shall write `; used: filled by <who>` or `; used: pressed by <who>` above the entry in
-     DISCOVERED_FILE, one time for each text. A missing entry is added first.
-
-## 5. Host lists
+## 5. Host access
 
 #### REQ-040 — Check before a page opens
 
 - **Trigger:** The client calls `browser_navigate`, or `browser_tabs` with `action = new` and a URL.
-- **Basic Flow:** The server shall check the host of the URL: first `[deny]`, then the allow
-  provider (default: `[allow]` of `host-policy.ini`).
+- **Basic Flow:** The server shall check the host of the URL with the sites of `sites.json`:
+  1. A site that covers the host and has `"access": "deny"` → blocked. Deny wins over each other
+     site.
+  2. Else the most specific site with an `access` decides.
+  3. Else `defaultAccess` decides.
 - **Alternative Flow:** The URL has no host (e.g. `about:blank`) → the server allows it.
 - **Exception Flow:** The host is blocked → the server forwards nothing. It gives an error result
-  with the URL and the list (UI-02).
+  with the URL and the reason (UI-02).
 
 #### REQ-041 — Check after each call
 
@@ -387,18 +491,17 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 #### REQ-042 — Record the opened hosts
 
-- **Pre-condition:** `[hosts] record` in `server.ini` is not `false`.
-- **Trigger:** A page of an allowed host opened.
-- **Basic Flow:** The default allow provider shall add the exact host to `[allow]`, also if a
-  pattern covers it. It shall keep each section of `host-policy.ini` sorted and unique, and keep the
-  comment lines at the top.
-- **Alternative Flow:** The host is in `[deny]` → the provider does not add it.
+- **Pre-condition:** DISCOVER is `1`.
+- **Trigger:** A page of an allowed host loaded: by a call, or by the user in the browser.
+- **Basic Flow:** The server shall add the host as a site with `"access": "allow"` to `sites.json`
+  at once. An access that the file has stays.
+- **Alternative Flow:** DISCOVER is not `1` → the server records nothing.
 
-#### REQ-043 — Host list in the config folder
+#### REQ-043 — Config files in the config folder
 
-- **Trigger:** The server reads the host list, and `host-policy.ini` is missing in the config folder.
-- **Basic Flow:** The server shall copy `config/host-policy.template.ini` to it (REQ-019).
-- **Alternative Flow:** The template is missing → the server shall write `[deny]` empty and `[allow] *`.
+- **Trigger:** The server starts, and `server.json` or `sites.json` is missing in the config folder.
+- **Basic Flow:** The server shall copy `config/server.template.json` or `config/sites.template.json`
+  to it (REQ-019).
 
 ## 6. Logging
 
@@ -406,7 +509,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 - **Basic Flow:** The server shall write each event into two files in LOG_DIR/`<client>`/:
   start, client, tool call, result (duration, error flag, size of the content), opened page,
-  filled field, submit, failed fill, discovered fields, records of REQ-039a, blocked host, upstream
+  filled field, submit, failed fill, records of REQ-039, written fields of REQ-039a, blocked host, upstream
   stderr, shutdown. `<client>` is the client name of MCP `initialize`, in lowercase with only
   `a-z`, `0-9` and `-`.
   1. The file name is the start time and the process ID: `mm-dd_hhmmss_<pid>`.
@@ -464,8 +567,9 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-062 — Open a lane
 
 - **Basic Flow:**
-  1. The server shall start the browser if it does not run (REQ-065).
-  2. It shall read STATE_FILE and open a new browser context with this state.
+  1. The server shall make the lane profile in LANES_DIR/`<pid>-<lane id>` with the settings of
+     REQ-016, and start a Chromium with it (REQ-065).
+  2. It shall read STATE_FILE and give this state to the context of the Chromium.
   3. It shall make a new upstream connection with this context.
 - **Alternative Flow:** STATE_FILE is missing or damaged → the lane starts without logins.
 
@@ -474,18 +578,19 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Trigger:** `browser_lane_close`, `browser_close`, LANE_IDLE (10 min) without a call
   (REQ-066), or the shutdown (REQ-003).
 - **Basic Flow:**
-  1. In the discovery mode, the server shall get the records of the recorder (REQ-039a).
+  1. In the discovery mode, the server shall write the records that wait (REQ-039a).
   2. It shall save the storage state of the lane (REQ-064).
-  3. It shall close the upstream connection and the context.
-  4. It shall stop the browser when no lane is open (REQ-065).
+  3. It shall close the upstream connection and the Chromium of the lane, and delete the lane
+     profile.
+  4. It shall stop Xvfb when no lane is open (REQ-065).
 - **Post-condition:** The log has `lane_closed` with the reason.
 
 #### REQ-064 — Storage state
 
+- **Trigger:** A page of the lane loads (also after a login of the user), or the lane closes.
 - **Basic Flow:**
-  1. The server shall get the cookies and the localStorage of the lane. It shall also get the
-     IndexedDB if `[storage] indexeddb` of `server.ini` lists a host.
-  2. It shall remove the IndexedDB of each origin whose host is not in the list.
+  1. The server shall get the cookies, the localStorage and the IndexedDB of the lane.
+  2. It shall remove the IndexedDB of each origin whose host no site of `sites.json` covers.
   3. It shall merge the state into STATE_FILE. An entry is a cookie (name, domain and path) or an
      origin. An entry that the lane changed or added wins. An entry that the lane did not change
      keeps the value of the file. An entry that the lane removed goes away, if the file did not
@@ -497,14 +602,18 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 #### REQ-065 — Browser of the lanes
 
 - **Basic Flow:**
-  1. All lanes of the server shall use one Chromium, in the render mode of REQ-015.
-  2. The server shall start Chromium with the first lane, and stop it when the last lane closes.
+  1. Each lane shall have its own Chromium, in the render mode of REQ-015.
+  2. In `HEADED_INVISIBLE`, all lanes of the server shall use one Xvfb. The server shall start it
+     with the first lane, and stop it when the last lane closes.
+  3. At each start, the server shall delete the lane profiles of servers that do not run.
 - **Exception Flow:** Chromium does not start → `browser_lane_open` fails with the error.
 
 #### REQ-066 — Idle lanes
 
-- **Basic Flow:** Each IDLE_CHECK (30000 ms), the server shall close each lane without a call for
-  LANE_IDLE (10 min). A lane with a call that runs is not idle.
+- **Basic Flow:** Each IDLE_CHECK (30000 ms), the server shall close each lane without activity
+  for LANE_IDLE (10 min). Activity is a call of the agent, or a key press, click, scroll or input
+  of the user in the browser. A page script reports the input of the user at most each
+  ACTIVITY_INTERVAL (5000 ms). A lane with a call that runs is not idle.
 
 ## User interface
 
@@ -517,6 +626,15 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   server does not fill the form.
 - **Feedback:** The agent gets the page after the submit, with MASK in place of the value.
 - **Realization:** An MCP elicitation form of the client, e.g. a dialog of Claude Code.
+
+### UI-03 — Dialog of the approval provider
+
+- **Purpose:** The user approves a fill with values of a wrapped provider, e.g. a login.
+- **Shows:** The host of the page, the keys, and the client name. It shows no value and no URL.
+- **Actions:** Approve and accept → the server fills the values (REQ-036c). Decline, cancel or no
+  approval → the server does not fill the form.
+- **Feedback:** The agent gets the page after the submit, with MASK in place of masked values.
+- **Realization:** An MCP elicitation form of the client with one checkbox `approve`.
 
 ### UI-02 — Error results to the agent
 
@@ -535,6 +653,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | Name | Default | Unit | Configuration key | Meaning |
 | --- | --- | --- | --- | --- |
 | ASK_TIMEOUT | 300000 | ms | — | Maximum time of a dialog of the ask provider |
+| APPROVAL_TIMEOUT | 15000 | ms | — | Maximum time of one approval of an approval provider |
 | TOOL_TIMEOUT | 600000 | ms | — | Maximum time of one call without progress |
 | NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` / `run.bat` | Pinned Node.js runtime |
 | RENDER_MODE | DEFAULT | — | `RENDER_MODE` | `DEFAULT`, `HEADED`, `HEADED_INVISIBLE` or `HEADLESS` (REQ-015) |
@@ -560,12 +679,12 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | MAX_TABS_PER_LANE | 5 | tabs | — | Maximum tabs of one lane |
 | LANE_IDLE | 10 | min | — | Time without a call, after which a lane closes |
 | IDLE_CHECK | 30000 | ms | — | Interval of the check for idle lanes |
+| LANES_DIR | `.local_assets/lanes/` | — | — | Profiles of the open lanes: `<pid>-<lane id>` |
+| ACTIVITY_INTERVAL | 5000 | ms | — | Minimum time between two reports of the input of the user |
 | STATE_FILE | `.local_assets/storage-state-<hash of the working folder>.json` | — | `BROWSER_AUTOMATION_X_MCP_STORAGE_STATE` | Storage state of the lanes of one workspace (REQ-064) |
 | FILL_WAIT | 10000 | ms | — | Maximum wait for the fields of a page |
 | SUBMIT_WAIT | 10000 | ms | — | Maximum wait for the load and for the network after a submit |
 | FILL_ROUNDS | 3 | rounds | — | Maximum fill and submit rounds in one call |
 | MASK | `***` | — | — | Replacement of a masked value |
 | DISCOVER | unset | — | `BROWSER_AUTOMATION_X_MCP_DISCOVER` | `1` turns on the discovery mode |
-| DISCOVERED_FILE | `.local_assets/discovered-fields.ini` | — | — | Fields and buttons that the discovery mode found |
-| DISCOVER_WAIT | 5000 | ms | — | Maximum wait for a field or a button after a submit |
 | DEBUG_TEXT_MAX | 20000 | characters | — | Result text in a debug entry |

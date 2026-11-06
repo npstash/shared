@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Enter</title></head>
+<body>
+  <h1>Search</h1>
+  <!-- The page acts as the user: it fills a field and submits without a button click (as Enter). -->
+  <form id="plain" method="post" action="/submit">
+    <label for="code">Code</label>
+    <input id="code" name="code">
+  </form>
+  <form id="withbutton" method="post" action="/submit">
+    <label for="token">Token</label>
+    <input id="token" name="token">
+    <button type="submit" id="go">Go</button>
+  </form>
+  <script>
+    const mode = new URLSearchParams(location.search).get('user');
+    if (mode) {
+      setTimeout(() => {
+        const [form, field, value] = mode === 'button'
+          ? [document.getElementById('withbutton'), document.getElementById('token'), 'other-token']
+          : [document.getElementById('plain'), document.getElementById('code'), 'typed-code'];
+        field.value = value;
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        form.requestSubmit();
+      }, 1500);
+    }
+  </script>
+</body>
+</html>

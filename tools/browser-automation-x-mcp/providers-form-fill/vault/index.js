@@ -1,14 +1,12 @@
-// Vault provider: secrets from the vault (shared/tools/auth), through its run.sh / run.bat.
-// The provider uses only the systems in [systems] of provider-vault.ini: "<host or URL prefix> =
-// <exact system name>". It does not search the vault. A host matches the page host and its
-// subdomains. If more lines match, the URL prefix of the page URL wins, the longest first.
-// The field name of fields.ini is the secret name, e.g. username, password, token.
+// Vault provider (key-value): secrets from the vault (shared/tools/auth), through its run.sh / run.bat.
+// The vault name is "vault" of its entry in server.json. The vault system of a page is the
+// "credentials" of its site or page in sites.json (src/sites.js). The provider does not search the vault.
+// The key of sites.json is the secret name, e.g. username, password, token. The case has no effect.
+// match(): compares a value with each secret of the system; the values are not kept.
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { sectionValues } from '../../src/ini.js';
-import { FillError, FillProvider } from '../../src/fill/provider.js';
-import { normalizeHost } from '../../src/hosts/patterns.js';
+import { FillError, KeyValueProvider } from '../../src/fill/provider.js';
 import { TOOL_DIR } from '../../src/paths.js';
 
 const run = promisify(execFile);
@@ -16,27 +14,17 @@ const run = promisify(execFile);
 // The launcher of the vault tool beside this tool. Tests give a test double in BROWSER_AUTOMATION_X_MCP_VAULT_TOOL.
 const VAULT_TOOL = path.resolve(TOOL_DIR, '..', 'auth', 'run.sh');
 
-export default class VaultProvider extends FillProvider {
+export default class VaultProvider extends KeyValueProvider {
   constructor(options) {
     super(options);
     const tool = process.env.BROWSER_AUTOMATION_X_MCP_VAULT_TOOL || VAULT_TOOL;
     this.tool = process.platform === 'win32' ? tool.replace(/\.sh$/, '.bat') : tool;
-    this.vaultName = sectionValues(this.config, 'vault').vault;
-    this.mappings = (this.config.sections.get('systems') ?? []).filter((line) => line.value).map(({ key, value }) => {
-      const url = key.includes('://') ? key : undefined;
-      let host;
-      try {
-        host = normalizeHost(url ? new URL(url).hostname : key);
-      } catch {
-        host = undefined;
-      }
-      return { key, url, host, system: value };
-    });
+    this.vaultName = this.settings.vault;
     this.secretNames = new Map();
   }
 
   async vault(args) {
-    if (!this.vaultName) throw new FillError(`the vault provider needs "vault = vault-<name>" in ${this.configFile}`);
+    if (!this.vaultName) throw new FillError('the vault provider needs "vault": "vault-<name>" in server.json');
     const [command, prefix] = process.platform === 'win32' ? ['cmd', ['/c', this.tool]] : [this.tool, []];
     try {
       const { stdout } = await run(command, [...prefix, '--vault', this.vaultName, ...args], { maxBuffer: 1024 * 1024, windowsHide: true });
@@ -47,14 +35,9 @@ export default class VaultProvider extends FillProvider {
     }
   }
 
-  // The system name for the page, undefined if none, or { ambiguous } if two lines match equally well.
+  // The vault system of the page (sites.json), or undefined.
   system(ctx) {
-    if (!ctx.host) return undefined;
-    const matching = this.mappings.filter(({ host }) => host && (ctx.host === host || ctx.host.endsWith(`.${host}`)));
-    if (matching.length <= 1) return matching[0]?.system;
-    const prefixes = matching.filter(({ url }) => url && ctx.url?.startsWith(url)).sort((a, b) => b.url.length - a.url.length);
-    if (prefixes.length && (prefixes.length === 1 || prefixes[0].url.length > prefixes[1].url.length)) return prefixes[0].system;
-    return { ambiguous: matching.map(({ key }) => key) };
+    return ctx.url ? this.sites?.vaultSystem(ctx.url) : undefined;
   }
 
   // The secret names of a system, from get-system: "name<TAB>url<TAB>secret,secret".
@@ -71,15 +54,35 @@ export default class VaultProvider extends FillProvider {
     return this.secretNames.get(system);
   }
 
-  async resolve(name, ctx) {
+  // The secret name of the system for the key, or undefined.
+  async secretName(key, ctx) {
     const system = this.system(ctx);
     if (!system) return undefined;
-    if (system.ambiguous) {
-      throw new FillError(`more lines of [systems] in ${this.configFile} match the host ${ctx.host}: `
-        + `${system.ambiguous.join('; ')}. Give each a more specific URL prefix.`);
-    }
-    if (!(await this.secrets(system)).includes(name)) return undefined;
+    const wanted = String(key).toLowerCase();
+    const name = (await this.secrets(system)).find((each) => each.toLowerCase() === wanted);
+    return name === undefined ? undefined : { system, name };
+  }
+
+  async get(system, name) {
     const stdout = await this.vault(['get-secret', system, name]);
     return stdout.replace(/\r?\n$/, '');
+  }
+
+  async has(key, ctx) {
+    return (await this.secretName(key, ctx)) !== undefined;
+  }
+
+  async resolve(key, ctx) {
+    const secret = await this.secretName(key, ctx);
+    return secret ? this.get(secret.system, secret.name) : undefined;
+  }
+
+  async match(value, ctx) {
+    const system = this.system(ctx);
+    if (!system) return undefined;
+    for (const name of await this.secrets(system)) {
+      if (await this.get(system, name) === value) return name;
+    }
+    return undefined;
   }
 }

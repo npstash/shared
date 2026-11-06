@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { TOOL_DIR } from '../../src/paths.js';
-import { outputDir } from '../src/config.js';
+import { outputDir, processEnv, tmpDirForChromium } from '../src/config.js';
 import { callText, startServerClient, startSite } from './helpers.js';
 
 function readLog(file) {
@@ -35,7 +35,7 @@ describe('lanes', () => {
 
   before(async () => {
     site = await startSite();
-    mcp = await startServerClient({ name: 'lanes', config: { tools: '[tools]\nbrowser_evaluate = enabled\nbrowser_network_request = enabled\n' } });
+    mcp = await startServerClient({ name: 'lanes', config: { tools: { browser_network_request: true } } });
     raw = mcp.client.raw;
   });
 
@@ -134,6 +134,23 @@ describe('lanes', () => {
     }
   });
 
+  test('the logins of a lane go into the storage state at each page load, before the lane closes', async () => {
+    const lane = await open();
+    try {
+      await inLane(lane, 'browser_navigate', { url: `${site.url}/` });
+      await inLane(lane, 'browser_evaluate', { function: `() => { document.cookie = 'loaded=yes; max-age=3600'; return true; }` });
+      await inLane(lane, 'browser_navigate', { url: `${site.url}/form.html` });
+      let names = [];
+      for (let i = 0; i < 30 && !names.includes('loaded'); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        names = fs.existsSync(mcp.stateFile) ? JSON.parse(fs.readFileSync(mcp.stateFile, 'utf8')).cookies.map((cookie) => cookie.name) : [];
+      }
+      assert.ok(names.includes('loaded'), 'the cookie is in the storage state while the lane is open');
+    } finally {
+      await closeAll();
+    }
+  });
+
   test('a file name must be in the output folder', async () => {
     const lane = await open();
     try {
@@ -165,5 +182,45 @@ describe('lanes', () => {
     } finally {
       await closeAll();
     }
+  });
+});
+
+describe('lane process', () => {
+  const logger = { info() {}, debug() {}, error() {} };
+
+  test('a click or a key press of the user keeps the lane open; the profile folder goes away at close', async () => {
+    // The test runs Playwright in this process: set its environment first, as server.js does.
+    Object.assign(process.env, processEnv(process.env, await tmpDirForChromium()));
+    const { Lanes } = await import('../src/lanes.js');
+    const site = await startSite();
+    const lanes = new Lanes({ mode: 'HEADLESS', logger, stateFile: path.join(TOOL_DIR, '.local_assets', 'test-state', 'process.json'), roots: async () => ({ roots: [] }), idle: 3000 });
+    clearInterval(lanes.timer);
+    try {
+      const lane = await lanes.open();
+      assert.ok(fs.existsSync(path.join(lane.dir, 'Default', 'Preferences')));
+      const page = lane.context.pages()[0] ?? await lane.context.newPage();
+      await page.goto(`${site.url}/`);
+      lane.lastUsed = 0;
+      await page.mouse.click(5, 5);
+      for (let i = 0; i < 20 && !lane.lastUsed; i++) await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.ok(lane.lastUsed > 0, 'the click counts as activity');
+      await lanes.closeIdle(lane.lastUsed + 1000);
+      assert.equal(lanes.size, 1);
+      await lanes.closeIdle(lane.lastUsed + 3000);
+      assert.equal(lanes.size, 0);
+      assert.ok(!fs.existsSync(lane.dir));
+    } finally {
+      await lanes.closeAll('test');
+      await site.close();
+    }
+  });
+
+  test('deletes the lane folders of servers that do not run', async () => {
+    const { cleanStaleLanes } = await import('../src/lanes.js');
+    const dir = path.join(TOOL_DIR, '.local_assets', 'test-unit', 'lanes');
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const name of ['999999-lane-aaaa', `${process.pid}-lane-bbbb`]) fs.mkdirSync(path.join(dir, name), { recursive: true });
+    cleanStaleLanes(logger, dir);
+    assert.deepEqual(fs.readdirSync(dir), [`${process.pid}-lane-bbbb`]);
   });
 });

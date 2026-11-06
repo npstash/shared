@@ -1,0 +1,10 @@
+{
+  "providers": [
+    { "type": "vault", "enabled": true, "mask": true, "vault": "" },
+    { "type": "values", "enabled": true, "mask": false, "values": {} },
+    { "type": "ask", "enabled": true, "mask": true, "fields": [] },
+    { "type": "approve-dialog", "enabled": false, "provider": { "type": "vault", "mask": true, "vault": "" } },
+    { "type": "approve-https", "enabled": false, "address": "", "fingerprint": "", "provider": { "type": "vault", "mask": true, "vault": "" } }
+  ],
+  "tools": {}
+}

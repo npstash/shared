@@ -1,5 +1,5 @@
 // The storage-state file: the logins of all lanes and sessions of one workspace.
-// It holds cookies, localStorage and the IndexedDB of the listed origins (Playwright format).
+// It holds cookies, localStorage and the IndexedDB of the sites in sites.json (Playwright format).
 // The file never goes into a result, a log or the output folder. Mode 0600.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,13 +20,14 @@ export function loadState(file) {
   }
 }
 
-// Remove the IndexedDB of each origin that is not in the list (hosts, e.g. web.whatsapp.com).
-export function filterIndexedDb(state, hosts) {
-  const keep = new Set(hosts);
+// Remove the IndexedDB of each origin whose host does not pass keep(host), e.g. a host without a
+// site in sites.json.
+export function filterIndexedDb(state, keep) {
   return {
     cookies: state.cookies,
     origins: state.origins.map((entry) => {
-      if (!entry.indexedDB || keep.has(hostOfUrl(entry.origin))) return entry;
+      const host = hostOfUrl(entry.origin);
+      if (!entry.indexedDB || (host && keep(host))) return entry;
       const { indexedDB, ...rest } = entry;
       return rest;
     }),

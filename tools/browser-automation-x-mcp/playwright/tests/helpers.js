@@ -80,19 +80,28 @@ function html(res, body) {
 }
 
 // Make a config folder for one test (see src/paths.js). The config of the repository stays unchanged.
-// browser_evaluate is enabled because the tests read the page with it.
-export function makeConfig(name, { server, hosts, tools, fields, ini, ask, vault } = {}) {
+// sites: the "sites" of sites.json, merged into the default sites: 127.0.0.1 and localhost with
+// the systems of the fake vault. tools: { <tool>: true | false }; browser_evaluate is on because the
+// tests read the page with it. values, ask, vault: the settings of the providers.
+export function makeConfig(name, { sites = {}, defaultAccess = 'allow', tools = {}, values = {}, ask = ['phone'], vault = 'vault-test', credentials = true, providers } = {}) {
   const root = path.join(TEST_CONFIG_DIR, name);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
-  const write = (file, text) => fs.writeFileSync(path.join(root, file), text);
-  write('server.ini', server ?? '[fill]\nproviders = vault, ini, ask\n\n[mask]\nini = false\n\n[hosts]\nrecord = true\n');
-  write('fields.ini', fields ?? '');
-  write('host-policy.ini', hosts ?? '[deny]\n\n[allow]\n*\n');
-  write('tools.ini', tools ?? '[tools]\nbrowser_evaluate = enabled\n');
-  write('provider-ini.ini', ini ?? '[values]\n');
-  write('provider-ask.ini', ask ?? '[ask]\nfields = phone\n');
-  write('provider-vault.ini', vault ?? '[vault]\nvault = vault-test\n\n[systems]\n127.0.0.1 = Fixture site\nlocalhost = Fixture other\n');
+  const write = (file, data) => fs.writeFileSync(path.join(root, file), `${JSON.stringify(data, null, 2)}\n`);
+  write('server.json', {
+    providers: providers ?? [
+      { type: 'vault', enabled: true, mask: true, vault },
+      { type: 'values', enabled: true, mask: false, values },
+      { type: 'ask', enabled: true, mask: true, fields: ask },
+    ],
+    tools: Object.fromEntries(Object.entries({ browser_evaluate: true, ...tools }).map(([tool, enabled]) => [tool, { enabled }])),
+  });
+  const base = credentials
+    ? { '127.0.0.1': { credentials: { vault: 'Fixture site' } }, localhost: { credentials: { vault: 'Fixture other' } } }
+    : {};
+  const merged = { ...base };
+  for (const [host, site] of Object.entries(sites)) merged[host] = { ...base[host], ...site };
+  write('sites.json', { defaultAccess, sites: merged });
   return {
     configDir: root,
     env: { BROWSER_AUTOMATION_X_MCP_VAULT_TOOL: path.join(FAKE_VAULT, 'run.sh') },
@@ -154,6 +163,9 @@ export async function startServerClient({ name, args = [], env = {}, config = {}
     client: laneClient(client),
     logDir,
     stateFile,
+    sitesFile: path.join(testConfig.configDir, 'sites.json'),
+    // sites.json of the test config as an object: the discovery mode writes it.
+    get sites() { return JSON.parse(fs.readFileSync(path.join(testConfig.configDir, 'sites.json'), 'utf8')); },
     get logFile() { return findLog(logDir, '.log.json'); },
     get textLogFile() { return findLog(logDir, '.log'); },
     config: testConfig,

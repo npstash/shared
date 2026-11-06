@@ -1,17 +1,18 @@
-// Ask provider: asks the user for a value through MCP elicitation (a dialog of the client).
-// It works only if the client can show such a dialog, and only for the fields in its config.
+// Ask provider (value): asks the user for a value through MCP elicitation (a dialog of the client).
+// It works only if the client can show such a dialog, and only for the names in "fields" of its
+// entry in server.json.
 // The answer is kept for the session (host + field name), never written to a file.
-import { listValue, sectionValues } from '../../src/ini.js';
 import { FillError, FillProvider } from '../../src/fill/provider.js';
 
 export default class AskProvider extends FillProvider {
   constructor(options) {
     super(options);
-    this.fields = listValue(sectionValues(this.config, 'ask').fields).map((name) => name.toLowerCase());
+    this.fields = (this.settings.fields ?? []).map((name) => String(name).toLowerCase());
     this.answers = new Map();
   }
 
-  async resolve(name, ctx) {
+  async resolve(field, ctx) {
+    const name = String(field).toLowerCase();
     if (!ctx.elicit || !this.fields.includes(name)) return undefined;
     const key = `${ctx.host ?? ''}\n${name}`;
     if (this.answers.has(key)) return this.answers.get(key);

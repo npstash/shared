@@ -1,14 +1,19 @@
-// Lanes: one browser context for one agent. All lanes of the server use one Chromium.
-// Chromium starts with the first lane and stops when the last lane closes.
+// Lanes: one browser for one agent. Each lane has its own Chromium with a persistent profile in
+// LANES_DIR/<pid>-<lane id>: the server writes the Chrome settings into it before the start, and
+// deletes it when the lane closes. Xvfb starts with the first lane and stops after the last lane.
 // Each lane has its own Playwright MCP connection in this process: its own tabs and current tab.
 //
-//   lane client <-> in-memory transport <-> Playwright MCP (createConnection) -> browser context
+//   lane client <-> in-memory transport <-> Playwright MCP (createConnection) -> lane context
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createConnection } from '@playwright/mcp';
+import { ASSETS_DIR } from '../../src/paths.js';
+import { writeChromePrefs } from './chrome-prefs.js';
 import { filterIndexedDb, loadState, mergeState, writeState } from './storage-state.js';
 
 // Playwright from the folder of @playwright/mcp: the same copy that createConnection uses.
@@ -23,67 +28,81 @@ export const MAX_TABS_PER_LANE = 5;
 // A lane without a call for this time closes.
 export const LANE_IDLE = 10 * 60 * 1000;
 // The interval of the idle check.
-const IDLE_CHECK = 30 * 1000;
+export const IDLE_CHECK = 30 * 1000;
+// The profile folders of the lanes.
+export const LANES_DIR = path.join(ASSETS_DIR, 'lanes');
+// The page script reports a key press, a click or a scroll of the user at most this often.
+const ACTIVITY_INTERVAL = 5000;
+
+// Page script: report the input of the user to the binding __baxActivity.
+const ACTIVITY_SCRIPT = `(() => {
+  if (window.__baxActivityOn || typeof window.__baxActivity !== 'function') return;
+  window.__baxActivityOn = true;
+  let last = 0;
+  const report = (event) => {
+    if (!event.isTrusted) return;
+    const now = Date.now();
+    if (now - last < ${ACTIVITY_INTERVAL}) return;
+    last = now;
+    try { window.__baxActivity(); } catch {}
+  };
+  for (const type of ['keydown', 'mousedown', 'wheel', 'input']) document.addEventListener(type, report, true);
+})()`;
+
+// Delete the lane folders of servers that do not run.
+export function cleanStaleLanes(logger, dir = LANES_DIR) {
+  if (!fs.existsSync(dir)) return;
+  for (const name of fs.readdirSync(dir)) {
+    const pid = Number(name.split('-')[0]);
+    if (pid === process.pid || (pid && running(pid))) continue;
+    fs.rmSync(path.join(dir, name), { recursive: true, force: true });
+    logger.info('lane_folder_removed', { folder: name });
+  }
+}
+
+function running(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+}
 
 // Chromium shows no permission prompt: it denies the request.
 const CHROMIUM_ARGS = ['--deny-permission-prompts'];
 
 export class Lanes {
   // mode: HEADED, HEADED_INVISIBLE or HEADLESS. stateFile: the storage-state file.
-  // indexedDbHosts: the hosts that keep their IndexedDB. roots: gives the roots of the client.
-  // beforeClose(lane): runs before a lane closes.
-  constructor({ mode, logger, outputDir, stateFile, indexedDbHosts = [], roots, beforeClose, launchEnv = {}, maxLanes = MAX_LANES, maxTabs = MAX_TABS_PER_LANE, idle = LANE_IDLE }) {
-    Object.assign(this, { mode, logger, outputDir, stateFile, indexedDbHosts, roots, beforeClose, launchEnv, maxLanes, maxTabs, idle });
+  // keepIndexedDb(host): true for a host that keeps its IndexedDB (a site of sites.json).
+  // roots: gives the roots of the client. afterOpen(lane) and beforeClose(lane): run after a lane
+  // opened and before a lane closes.
+  constructor({ mode, logger, outputDir, stateFile, keepIndexedDb = () => false, roots, afterOpen, beforeClose, launchEnv = {}, maxLanes = MAX_LANES, maxTabs = MAX_TABS_PER_LANE, idle = LANE_IDLE }) {
+    Object.assign(this, { mode, logger, outputDir, stateFile, keepIndexedDb, roots, afterOpen, beforeClose, launchEnv, maxLanes, maxTabs, idle });
     this.lanes = new Map();
-    this.browser = undefined;
-    this.browserStart = undefined;
     this.xvfb = undefined;
+    this.xvfbStart = undefined;
     this.timer = setInterval(() => this.closeIdle(), IDLE_CHECK);
     this.timer.unref();
   }
 
-  // The headless flag and the viewport as Playwright MCP sets them for its own browser.
   get headless() { return this.mode === 'HEADLESS'; }
 
-  // Start Chromium (and Xvfb) if it does not run.
-  async ensureBrowser() {
-    if (this.browser) return this.browser;
-    this.browserStart ??= (async () => {
-      const env = { ...process.env, ...this.launchEnv };
-      if (this.mode === 'HEADED_INVISIBLE') {
-        this.xvfb = await startXvfb({ logger: this.logger });
-        env.DISPLAY = this.xvfb.display;
-        delete env.WAYLAND_DISPLAY;
+  // The environment of a Chromium: with the Xvfb display in HEADED_INVISIBLE. Starts Xvfb if necessary.
+  async browserEnv() {
+    const env = { ...process.env, ...this.launchEnv };
+    if (this.mode === 'HEADED_INVISIBLE') {
+      if (!this.xvfb) {
+        this.xvfbStart ??= startXvfb({ logger: this.logger }).finally(() => { this.xvfbStart = undefined; });
+        this.xvfb = await this.xvfbStart;
       }
-      try {
-        const browser = await chromium.launch({
-          headless: this.headless,
-          chromiumSandbox: process.platform !== 'linux',
-          args: CHROMIUM_ARGS,
-          env,
-        });
-        browser.on('disconnected', () => {
-          if (this.browser === browser) this.browser = undefined;
-        });
-        this.logger.info('browser_started', { mode: this.mode, display: env.DISPLAY, version: browser.version() });
-        this.browser = browser;
-        return browser;
-      } catch (error) {
-        this.xvfb?.stop();
-        this.xvfb = undefined;
-        throw error;
-      }
-    })().finally(() => { this.browserStart = undefined; });
-    return this.browserStart;
+      env.DISPLAY = this.xvfb.display;
+      delete env.WAYLAND_DISPLAY;
+    }
+    return env;
   }
 
-  async stopBrowser() {
-    const browser = this.browser;
-    this.browser = undefined;
-    if (browser) {
-      await browser.close().catch((error) => this.logger.error('browser_close_failed', { message: error.message }));
-      this.logger.info('browser_stopped', {});
-    }
+  stopXvfb() {
     this.xvfb?.stop();
     this.xvfb = undefined;
   }
@@ -92,28 +111,44 @@ export class Lanes {
 
   get(id) { return this.lanes.get(id); }
 
-  // Open a lane. Give undefined if all lanes are in use.
+  // Open a lane: its own Chromium with the logins of the storage state. Give undefined if all
+  // lanes are in use.
   async open() {
     if (this.lanes.size >= this.maxLanes) return undefined;
     let id;
     do id = `lane-${crypto.randomBytes(2).toString('hex')}`; while (this.lanes.has(id));
-    const lane = { id, opened: Date.now(), lastUsed: Date.now(), busy: 0, context: undefined, notes: [], base: undefined };
+    const lane = { id, opened: Date.now(), lastUsed: Date.now(), busy: 0, context: undefined, notes: [], base: undefined, dir: path.join(LANES_DIR, `${process.pid}-${id}`) };
     this.lanes.set(id, lane);
     try {
-      const browser = await this.ensureBrowser();
-      lane.base = loadState(this.stateFile);
-      lane.context = await browser.newContext({
+      fs.rmSync(lane.dir, { recursive: true, force: true });
+      writeChromePrefs(lane.dir);
+      const env = await this.browserEnv();
+      lane.context = await chromium.launchPersistentContext(lane.dir, {
+        headless: this.headless,
+        chromiumSandbox: process.platform !== 'linux',
+        args: CHROMIUM_ARGS,
+        env,
         viewport: this.headless ? { width: 1280, height: 720 } : null,
-        storageState: lane.base,
       });
+      lane.base = loadState(this.stateFile);
+      await lane.context.setStorageState(lane.base);
+      await lane.context.exposeBinding('__baxActivity', () => { lane.lastUsed = Date.now(); });
+      await lane.context.addInitScript({ content: ACTIVITY_SCRIPT });
       lane.context.on('page', (page) => this.onPage(lane, page));
+      // The logins of the lane go into the storage state at each page load, e.g. after a login.
+      const watch = (page) => page.on('load', () => this.queueSave(lane));
+      lane.context.pages().forEach(watch);
+      lane.context.on('page', watch);
       lane.client = await this.connect(lane);
+      this.logger.info('browser_started', { lane: id, mode: this.mode, display: env.DISPLAY, version: lane.context.browser()?.version() });
     } catch (error) {
       this.lanes.delete(id);
       await lane.context?.close().catch(() => {});
-      if (!this.lanes.size) await this.stopBrowser();
+      fs.rmSync(lane.dir, { recursive: true, force: true });
+      if (!this.lanes.size) this.stopXvfb();
       throw error;
     }
+    await this.afterOpen?.(lane);
     this.logger.info('lane_opened', { lane: id, open: this.lanes.size });
     return lane;
   }
@@ -146,21 +181,34 @@ export class Lanes {
     const lane = this.lanes.get(id);
     if (!lane) return false;
     this.lanes.delete(id);
+    lane.closing = true;
     await this.beforeClose?.(lane);
+    await lane.saving;
     await this.saveState(lane);
     await lane.client?.close().catch(() => {});
     await lane.context?.close().catch(() => {});
+    fs.rmSync(lane.dir, { recursive: true, force: true });
     this.logger.info('lane_closed', { lane: id, reason, open: this.lanes.size });
-    if (!this.lanes.size) await this.stopBrowser();
+    this.logger.info('browser_stopped', { lane: id });
+    if (!this.lanes.size) this.stopXvfb();
     return true;
   }
 
+  // Save the state of the lane after the saves that run. A save at the close runs directly.
+  queueSave(lane) {
+    if (lane.closing) return;
+    lane.saving = (lane.saving ?? Promise.resolve()).then(() => (lane.closing ? undefined : this.saveState(lane)));
+  }
+
+  // Merge the state of the lane into the storage-state file. The merged state is the new base: the
+  // next save gives only the changes after it.
   async saveState(lane) {
     if (!lane.context) return;
     try {
-      const mine = filterIndexedDb(await lane.context.storageState({ indexedDB: this.indexedDbHosts.length > 0 }), this.indexedDbHosts);
+      const mine = filterIndexedDb(await lane.context.storageState({ indexedDB: true }), this.keepIndexedDb);
       const merged = mergeState(lane.base, mine, loadState(this.stateFile));
       writeState(this.stateFile, merged);
+      lane.base = mine;
       this.logger.info('state_saved', { lane: lane.id, cookies: merged.cookies.length, origins: merged.origins.length });
     } catch (error) {
       this.logger.error('state_save_failed', { lane: lane.id, message: error.message });
@@ -186,6 +234,6 @@ export class Lanes {
   async closeAll(reason) {
     clearInterval(this.timer);
     await Promise.allSettled([...this.lanes.keys()].map((id) => this.close(id, reason)));
-    await this.stopBrowser();
+    this.stopXvfb();
   }
 }

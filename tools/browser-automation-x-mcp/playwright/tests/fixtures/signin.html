@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Shop home</title></head>
+<body>
+  <h1>Shop home</h1>
+  <!-- ?in=1: the user is logged in, and the link has an other text. -->
+  <nav>
+    <a id="account" href="/login.html?from=home"><span>Hello, sign in</span> <span>Account</span></a>
+    <a href="/form.html">Registration form</a>
+  </nav>
+  <script>
+    const params = new URLSearchParams(location.search);
+    if (params.has('in')) document.querySelector('#account span').textContent = 'Hello, Anna';
+    // ?user=1: acts as the user: follows the sign-in link to a login page that acts as the user too.
+    if (params.has('user')) {
+      setTimeout(() => {
+        const link = document.getElementById('account');
+        link.href = '/login.html?from=user';
+        link.click();
+      }, 1500);
+    }
+  </script>
+</body>
+</html>

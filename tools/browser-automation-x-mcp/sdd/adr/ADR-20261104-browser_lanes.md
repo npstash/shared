@@ -113,3 +113,14 @@ These earlier decisions change:
   The tests must cover it.
 - SRS, DESIGN and README get the lanes, the tools, the limits and the storage-state file. The
   tests get lanes in parallel, the limits, the idle reclaim and the merge of the state.
+
+## Later changes
+
+- [ADL 20261104-10](../ADL.md): each lane has its own Chromium with a persistent profile, in place
+  of one Chromium for all lanes. Chromium 155 shows the translate bubble in a context of
+  `launch()`, also with `--disable-features=Translate`. Only the settings in `Default/Preferences`
+  of a persistent profile stop it, and a persistent profile has one context.
+- [ADL 20261104-11](../ADL.md): the Chrome settings in `Default/Preferences` come back, in the
+  profile of each lane.
+- [ADL 20261104-12](../ADL.md): the input of the user keeps a lane open. A lane closed while the
+  user logged in by hand.

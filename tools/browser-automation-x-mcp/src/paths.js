@@ -16,15 +16,13 @@ export const PROVIDERS_DIR = path.join(TOOL_DIR, 'providers-form-fill');
 
 // The config files are in the config folder that the argument --config-dir gives, e.g.
 // local/configs/browser-automation-x-mcp of the repository. The tool folder has a template of each file.
-//   server.ini            fill provider order, masks, host recording   config/server.template.ini
-//   fields.ini            form fields for each URL pattern             config/fields.template.ini
-//   host-policy.ini       deny-list and allow-list of hosts            config/host-policy.template.ini
-//   tools.ini             tool switches                                playwright/config/tools.template.ini
-//   provider-<name>.ini   config of one form-fill provider             providers-form-fill/<name>/config.template.ini
+//   server.json   providers and tool switches (src/server-config.js)   config/server.template.json
+//   sites.json    access, credentials and pages of sites (src/sites.js) config/sites.template.json
+export const SERVER_CONFIG = 'server.json';
+export const SITES_CONFIG = 'sites.json';
 export const CONFIG_TEMPLATES = {
-  'server.ini': path.join(TOOL_DIR, 'config', 'server.template.ini'),
-  'host-policy.ini': path.join(TOOL_DIR, 'config', 'host-policy.template.ini'),
-  'fields.ini': path.join(TOOL_DIR, 'config', 'fields.template.ini'),
+  [SERVER_CONFIG]: path.join(TOOL_DIR, 'config', 'server.template.json'),
+  [SITES_CONFIG]: path.join(TOOL_DIR, 'config', 'sites.template.json'),
 };
 
 // The path of a config file. A missing file is first a copy of its template.

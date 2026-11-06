@@ -5,11 +5,12 @@
 // A lane is one browser context for one agent (see lanes.js). Each tool, except the lane tools,
 // needs the parameter lane.
 // Each tool call goes through these steps (see callTool()):
-//   tool switch (tools.ini) → lane → file name check → host check (host-policy.ini); both in the
-//   config folder → Playwright MCP → host check of the opened page → recorder and discovery
-//   (optional; discover.js) → form fill and submit (fields.ini, providers-form-fill/; see
-//   autofill.js), with a host check of each page after a submit
+//   tool switch (server.json) → lane → file name check → host check (sites.json) → Playwright MCP
+//   → host check of the opened page → login link and form fill (sites.json, providers-form-fill/;
+//   see autofill.js), with a host check of each page after a submit
 //   → scrub of masked values and of secret headers → log
+// In the discovery mode, discover.js writes the hosts, and the fields and buttons that the user
+// used, into sites.json, without a call (see startDiscovery()).
 // Texts for the client do not name upstream, Playwright or the form fill.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -18,20 +19,17 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { createConnection } from '@playwright/mcp';
 import fs from 'node:fs';
 import path from 'node:path';
-import { FieldsConfig } from '../../src/fill/fields.js';
 import { FillRegistry } from '../../src/fill/registry.js';
-import { FileAllowProvider } from '../../src/hosts/file-allow-provider.js';
 import { HostPolicy } from '../../src/hosts/host-policy.js';
-import { HostsFile } from '../../src/hosts/hosts-file.js';
 import { hostOfUrl } from '../../src/hosts/patterns.js';
-import { listValue, readIni, sectionValues } from '../../src/ini.js';
 import { summarizeResult } from '../../src/logger.js';
-import { PROVIDERS_DIR, VERSION, configFile } from '../../src/paths.js';
-import { ToolsConfig } from '../../src/tools-config.js';
+import { PROVIDERS_DIR, SERVER_CONFIG, SITES_CONFIG, VERSION, configFile } from '../../src/paths.js';
+import { ServerConfig, ToolsConfig } from '../../src/server-config.js';
+import { Sites } from '../../src/sites.js';
 import { autofill } from './autofill.js';
-import { DISCOVER_WAIT, discover, syncRecorder } from './discover.js';
-import { TMP_DIR, TOOLS_CONFIG, TOOLS_TEMPLATE, ignoredVariables, outputDir, renderMode, stateFile } from './config.js';
-import { Lanes } from './lanes.js';
+import { startDiscovery, stopDiscovery } from './discover.js';
+import { TMP_DIR, ignoredVariables, outputDir, renderMode, stateFile } from './config.js';
+import { Lanes, cleanStaleLanes } from './lanes.js';
 import { cleanStaleXvfb } from './xvfb.js';
 
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
@@ -102,28 +100,22 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
   const downstreamReady = new Promise((resolve) => { markDownstreamReady = resolve; });
   let server;
 
-  // 1. Load the config of the server.
+  // 1. Load the config of the server: server.json and sites.json.
   logger.info('config_dir', { dir: configDir });
-  const serverIni = readIni(configFile(configDir, 'server.ini'));
-  const toolsConfig = new ToolsConfig(configFile(configDir, TOOLS_CONFIG, TOOLS_TEMPLATE), logger, DANGEROUS_TOOLS);
-  const hostsFile = new HostsFile(configFile(configDir, 'host-policy.ini'));
-  const record = sectionValues(serverIni, 'hosts').record !== 'false';
-  const hostPolicy = new HostPolicy({ hostsFile, allowProvider: new FileAllowProvider({ hostsFile, record, logger }) });
-  const fill = await FillRegistry.load({
-    names: listValue(sectionValues(serverIni, 'fill').providers),
-    providersDir: PROVIDERS_DIR,
-    configDir,
-    logger,
-    mask: sectionValues(serverIni, 'mask'),
-  });
-  const fields = new FieldsConfig(configFile(configDir, 'fields.ini'));
+  const serverConfig = new ServerConfig(configFile(configDir, SERVER_CONFIG), logger);
+  const toolsConfig = new ToolsConfig(serverConfig, logger, DANGEROUS_TOOLS);
+  const sites = new Sites(configFile(configDir, SITES_CONFIG));
+  sites.load();
   const discovery = env.BROWSER_AUTOMATION_X_MCP_DISCOVER === '1';
   if (discovery) logger.info('discovery_mode', {});
+  const hostPolicy = new HostPolicy({ sites });
+  const fill = await FillRegistry.load({ entries: serverConfig.providers(), providersDir: PROVIDERS_DIR, sites, logger });
 
   // 2. Select the render mode. The server does not use the variables of Playwright MCP.
   for (const name of ignoredVariables(env)) logger.info('ignored', { control: name, reason: 'the server does not use this variable' });
   const mode = renderMode(env);
   cleanStaleXvfb(logger);
+  cleanStaleLanes(logger);
   if (tmpDir !== TMP_DIR) logger.info('tmp_dir_fallback', { dir: tmpDir ?? 'the temp folder of the OS', reason: 'the tool folder cannot hold the socket of Chromium' });
   logger.info('render_mode', { mode, display: mode === 'HEADED_INVISIBLE' ? 'Xvfb' : env.DISPLAY });
 
@@ -141,10 +133,14 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
     logger,
     outputDir: output,
     stateFile: stateFile(env, cwd),
-    indexedDbHosts: listValue(sectionValues(serverIni, 'storage').indexeddb),
+    keepIndexedDb: (host) => sites.has(host),
     roots,
+    afterOpen: async (lane) => {
+      lane.session = laneSession(session, lane);
+      if (discovery) await startDiscovery(lane.session, lane.context);
+    },
     beforeClose: async (lane) => {
-      if (discovery && lane.session) await syncRecorder(lane.session).catch(() => {});
+      if (discovery && lane.session) await stopDiscovery(lane.session);
     },
     ...laneOptions,
   });
@@ -171,7 +167,7 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
   };
 
   const session = {
-    server, logger, toolsConfig, hostPolicy, fill, fields, discovery, cwd, lanes,
+    server, logger, toolsConfig, hostPolicy, fill, fields: sites, discovery, cwd, lanes,
     outputDir: output, upstreamTools,
   };
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -345,8 +341,9 @@ function fillContext(session, url) {
   return {
     host: hostOfUrl(url ?? ''),
     url,
+    client: server.getClientVersion()?.name,
     elicit: canAsk
-      ? (message, requestedSchema) => server.elicitInput({ message, requestedSchema }, { timeout: ASK_TIMEOUT })
+      ? (message, requestedSchema, timeout = ASK_TIMEOUT) => server.elicitInput({ message, requestedSchema }, { timeout })
       : undefined,
   };
 }
@@ -383,10 +380,9 @@ async function runSteps(session, request, extra) {
     }),
   });
 
-  // The recorder: the fills and submits in the browser since the last call (discovery mode).
+  // The end of the call: the discovery gives the events of this time to the agent.
   const call = session.agentCalls.at(-1);
   if (call) call.end = Date.now();
-  const userSubmitted = session.discovery ? await syncRecorder(session) : false;
 
   // A click, a redirect or a script can open a page of a blocked host. Close it.
   // Each page after a submit of the form fill gets the same check (see autofill.js).
@@ -401,8 +397,7 @@ async function runSteps(session, request, extra) {
     const previous = session.pageUrl;
     const check = await checkPage(opened);
     if (!check.allowed) return blockedResult(session, name, opened, check, true);
-    if (opened !== previous) logger.info('page_opened', { url: opened, via: userSubmitted ? 'user_submit' : 'tool' });
-    if (session.discovery) await discover(session, opened, { wait: userSubmitted ? DISCOVER_WAIT : 0 });
+    if (opened !== previous) logger.info('page_opened', { url: opened, via: 'tool' });
     const outcome = await autofill(session, opened, (url) => fillContext(session, url), checkPage);
     if (outcome.blocked) return blockedResult(session, name, outcome.blocked.url, outcome.blocked.check, true);
     if (outcome.submitted) {
@@ -441,7 +436,6 @@ async function laneTool(session, name, args) {
   if (name === 'browser_lane_open') {
     const lane = await lanes.open();
     if (!lane) return errorResult(`Busy: ${lanes.size} of ${lanes.maxLanes} lanes are open. Call browser_lanes later, then try again.`);
-    lane.session = laneSession(session, lane);
     return textResult(`Lane: ${lane.id}\nGive lane="${lane.id}" in each other call. Close the lane with browser_lane_close at the end.`);
   }
   // browser_lane_close, and browser_close of a lane.
@@ -459,8 +453,10 @@ function laneSession(session, lane) {
   return Object.assign(Object.create(session), {
     lane: lane.id,
     client: lane.client,
+    // The notes for the next result of the lane, e.g. a refused approval.
+    notes: lane.notes,
     pageUrl: undefined,
-    fillState: { attempts: new Set(), failed: new Set(), waitedUrl: undefined },
+    fillState: { attempts: new Set(), failed: new Set(), waitedUrl: undefined, loginClicked: new Set() },
     // The time of the recent agent calls: the recorder gives their events to the agent.
     agentCalls: [],
   });

@@ -1,22 +1,24 @@
-// Unit tests of the shared parts: INI files, host patterns and lists, tool switches, form fields, fill providers.
+// Unit tests of the shared parts: server.json, sites.json, host access, tool switches, fill providers.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
+import https from 'node:https';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ASSETS_DIR, CONFIG_TEMPLATES, TOOL_DIR, configFile } from '../src/paths.js';
-import { FillError, FillProvider } from '../src/fill/provider.js';
-import { FieldsConfig, urlMatches, urlPattern } from '../src/fill/fields.js';
+import { ASSETS_DIR, CONFIG_TEMPLATES, SERVER_CONFIG, SITES_CONFIG, TOOL_DIR, configFile } from '../src/paths.js';
+import { ApprovalProvider, FillError, FillProvider, KeyValueProvider } from '../src/fill/provider.js';
 import { FillRegistry, MASK } from '../src/fill/registry.js';
-import { FileAllowProvider } from '../src/hosts/file-allow-provider.js';
 import { HostPolicy } from '../src/hosts/host-policy.js';
-import { HostsFile } from '../src/hosts/hosts-file.js';
-import { bySpecificity, hostMatches, hostOfUrl } from '../src/hosts/patterns.js';
-import { formatIni, parseIni, readIni } from '../src/ini.js';
+import { hostOfUrl } from '../src/hosts/patterns.js';
+import { readJson } from '../src/json.js';
 import { LOG_LINE_MAX, compactUrl, createLogger, folderName, formatLine, redact } from '../src/logger.js';
-import { ToolsConfig } from '../src/tools-config.js';
+import { ServerConfig, ToolsConfig } from '../src/server-config.js';
+import { Sites, covers, pageOf, pathMatches, updateSites } from '../src/sites.js';
+import ApproveDialogProvider from '../providers-form-fill/approve-dialog/index.js';
+import ApproveHttpsProvider, { normalizeFingerprint } from '../providers-form-fill/approve-https/index.js';
 import AskProvider from '../providers-form-fill/ask/index.js';
-import IniProvider from '../providers-form-fill/ini/index.js';
+import ValuesProvider from '../providers-form-fill/values/index.js';
 import VaultProvider from '../providers-form-fill/vault/index.js';
 
 const FAKE_VAULT = path.join(TOOL_DIR, 'tests', 'fixtures', 'fake-vault');
@@ -27,55 +29,25 @@ const DANGEROUS = { browser_evaluate: 'it runs JavaScript in the web page and ca
 const TMP = path.join(ASSETS_DIR, 'test-unit');
 const logger = createLogger({ dir: path.join(ASSETS_DIR, 'test-logs', 'unit'), level: 'error' });
 
-function tmpFile(name, text) {
+function tmpFile(name, data) {
   const file = path.join(TMP, name);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  if (text === undefined) fs.rmSync(file, { force: true });
-  else fs.writeFileSync(file, text);
+  if (data === undefined) fs.rmSync(file, { force: true });
+  else fs.writeFileSync(file, typeof data === 'string' ? data : JSON.stringify(data));
   return file;
 }
 
-describe('ini', () => {
-  test('reads sections, values, plain lines and the header', () => {
-    const ini = parseIni('# head\n; more\n[a]\nk = v = w\n; skip\nplain\n[b]\n\n[a]\nx=1\n');
-    assert.deepEqual(ini.header, ['# head', '; more']);
-    assert.deepEqual(ini.sections.get('a'), [{ key: 'k', value: 'v = w' }, { key: 'plain' }, { key: 'x', value: '1' }]);
-    assert.deepEqual(ini.sections.get('b'), []);
-  });
+function sitesOf(data) {
+  return new Sites(tmpFile(`sites/${Math.random().toString(16).slice(2)}.json`, data));
+}
 
-  test('refuses a line before the first section', () => {
-    assert.throws(() => parseIni('k = v\n'), /before the first section/);
-  });
-
-  test('writes sections', () => {
-    assert.equal(formatIni(['# h'], [['a', ['x = 1']], ['b', []]]), '# h\n\n[a]\nx = 1\n\n[b]\n');
-  });
-});
-
-describe('host patterns', () => {
-  const cases = [
-    ['*', 'any.host', true],
-    ['example.com', 'example.com', true],
-    ['example.com', 'www.example.com', false],
-    ['*.example.com', 'www.example.com', true],
-    ['*.example.com', 'a.b.example.com', true],
-    ['*.example.com', 'example.com', false],
-    ['*.example.com', 'badexample.com', false],
-    ['Example.COM', 'example.com.', true],
-    ['192.168.1.*', '192.168.1.20', true],
-    ['192.168.1.*', '192.168.2.20', false],
-    ['192.168.*.*', '192.168.7.1', true],
-    ['192.168.1.*', 'example.com', false],
-    ['::1', '[::1]', true],
-  ];
-  for (const [pattern, host, expected] of cases) {
-    test(`${pattern} ${expected ? 'matches' : 'does not match'} ${host}`, () => {
-      assert.equal(hostMatches(pattern, host), expected);
-    });
-  }
-
-  test('sorts by specificity', () => {
-    assert.deepEqual(['*', '*.com', 'a.example.com', '*.example.com'].sort(bySpecificity), ['a.example.com', '*.example.com', '*.com', '*']);
+describe('hosts', () => {
+  test('a site covers its host and its subdomains', () => {
+    assert.equal(covers('example.com', 'example.com'), true);
+    assert.equal(covers('example.com', 'a.b.example.com'), true);
+    assert.equal(covers('Example.COM', 'www.example.com.'), true);
+    assert.equal(covers('example.com', 'badexample.com'), false);
+    assert.equal(covers('www.example.com', 'example.com'), false);
   });
 
   test('gives no host for pages without one', () => {
@@ -84,148 +56,191 @@ describe('host patterns', () => {
   });
 });
 
-describe('host-policy.ini', () => {
-  test('a missing file is a copy of the template', () => {
-    const template = tmpFile('hosts/template.ini', '# my template\n[deny]\na.evil\n[allow]\n*\n');
-    const file = tmpFile('hosts/from-template.ini');
-    const hosts = new HostsFile(file, template);
-    hosts.load();
-    assert.deepEqual(hosts.deny, ['a.evil']);
-    assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(template, 'utf8'));
+describe('sites.json: access', () => {
+  test('a denied site wins over each other site; else the most specific site; else defaultAccess', async () => {
+    const sites = sitesOf({ defaultAccess: 'deny', sites: { 'evil.example': { access: 'deny' }, 'www.evil.example': { access: 'allow' }, 'good.example': { access: 'allow' }, 'pages.example': {} } });
+    assert.deepEqual(sites.access('www.evil.example'), { allowed: false, reason: 'the host www.evil.example is denied', site: 'evil.example' });
+    assert.equal(sites.access('a.good.example').allowed, true);
+    assert.deepEqual(sites.access('other.org'), { allowed: false, reason: 'the host other.org is not allowed' });
+    assert.equal(sites.access('pages.example').allowed, false, 'a site without access gets defaultAccess');
   });
 
-  test('a missing file without a template gets "[allow] *"', () => {
-    const file = tmpFile('hosts/missing.ini');
-    const hosts = new HostsFile(file);
-    hosts.load();
-    assert.deepEqual(hosts.allow, ['*']);
-    assert.match(fs.readFileSync(file, 'utf8'), /^# Hosts of browser-automation-x-mcp\. Deny wins over allow\./);
+  test('a missing file allows each host; a wrong defaultAccess is an error', () => {
+    assert.equal(new Sites(tmpFile('sites/missing.json')).access('a.example').allowed, true);
+    assert.throws(() => sitesOf({ defaultAccess: 'maybe' }).load(), /defaultAccess must be "allow" or "deny"/);
   });
 
-  test('recording adds the exact host, keeps the sections sorted and the header', () => {
-    const file = tmpFile('hosts/record.ini', '# my note\n[deny]\nz.evil\na.evil\n[allow]\n*\nm.example\n');
-    const hosts = new HostsFile(file);
-    const provider = new FileAllowProvider({ hostsFile: hosts, record: true, logger });
-    return (async () => {
-      await provider.recordOpened('b.example');
-      await provider.recordOpened('b.example');
-      assert.equal(fs.readFileSync(file, 'utf8'), '# my note\n\n[deny]\na.evil\nz.evil\n\n[allow]\n*\nb.example\nm.example\n');
-    })();
-  });
-
-  test('record = false does not change the file', async () => {
-    const text = '[deny]\n\n[allow]\n*\n';
-    const file = tmpFile('hosts/norecord.ini', text);
-    const provider = new FileAllowProvider({ hostsFile: new HostsFile(file), record: false, logger });
-    await provider.recordOpened('b.example');
-    assert.equal(fs.readFileSync(file, 'utf8'), text);
-  });
-
-  test('deny wins over allow', async () => {
-    const hostsFile = new HostsFile(tmpFile('hosts/policy.ini', '[deny]\n*.evil.example\n[allow]\n*\n'));
-    const policy = new HostPolicy({ hostsFile, allowProvider: new FileAllowProvider({ hostsFile, record: true, logger }) });
-    const denied = await policy.check('https://www.evil.example/x', {});
-    assert.equal(denied.allowed, false);
-    assert.equal(denied.reason, 'the host www.evil.example is on the deny list');
-    assert.equal(denied.pattern, '*.evil.example');
-    assert.equal((await policy.check('https://good.example/', {})).allowed, true);
-    assert.equal((await policy.check('about:blank', {})).allowed, true);
-    await policy.opened('https://www.evil.example/', {});
-    hostsFile.load();
-    assert.ok(!hostsFile.allow.includes('www.evil.example'));
-  });
-
-  test('a host that is not in [allow] is blocked', async () => {
-    const hostsFile = new HostsFile(tmpFile('hosts/allowonly.ini', '[deny]\n[allow]\n*.example.com\n'));
-    const policy = new HostPolicy({ hostsFile, allowProvider: new FileAllowProvider({ hostsFile, record: true, logger }) });
-    assert.equal((await policy.check('https://www.example.com/', {})).allowed, true);
-    assert.equal((await policy.check('https://other.org/', {})).reason, 'the host other.org is not on the allow list');
+  test('the host policy checks the access; only the discovery records an opened host', async () => {
+    const recorded = [];
+    const sites = sitesOf({ sites: { 'evil.example': { access: 'deny' } } });
+    const policy = new HostPolicy({ sites, onOpened: (host) => recorded.push(host) });
+    assert.equal((await policy.check('https://www.evil.example/x')).reason, 'the host www.evil.example is denied');
+    assert.equal((await policy.check('https://good.example/')).allowed, true);
+    assert.equal((await policy.check('about:blank')).allowed, true);
+    await policy.opened('https://www.evil.example/');
+    await policy.opened('https://good.example/');
+    assert.deepEqual(recorded, ['good.example']);
+    await new HostPolicy({ sites }).opened('https://good.example/');
   });
 });
 
-describe('tools.ini', () => {
-  test('adds the missing tools with defaults and keeps the user values', () => {
-    const file = tmpFile('tools/tools.ini', '[tools]\nbrowser_click = disabled\n');
-    const tools = new ToolsConfig(file, logger, DANGEROUS);
+describe('sites.json: pages', () => {
+  test('the page of a URL: the host and the path, each ID segment replaced with *', () => {
+    assert.deepEqual(pageOf('https://Login.Example.com/u/login/identifier?state=x'), { host: 'login.example.com', path: '/u/login/identifier' });
+    assert.deepEqual(pageOf('https://a.example/t/12345/user/0f8fad5b-d9cb-469f-a165-70867728950e/x'), { host: 'a.example', path: '/t/*/user/*/x' });
+    assert.deepEqual(pageOf('https://a.example/'), { host: 'a.example', path: '/' });
+  });
+
+  test('a path pattern: * is each sequence of characters, also /', () => {
+    assert.equal(pathMatches('/u/*/login', '/u/abc/def/login'), true);
+    assert.equal(pathMatches('/u/*/login', '/u/abc/login/next'), false);
+    assert.equal(pathMatches('/*', '/any/path'), true);
+    assert.equal(pathMatches('/', '/x'), false);
+  });
+
+  test('all matching pages apply; the more specific page wins; submit and login keep their order; login is not a field', () => {
+    const sites = sitesOf({
+      sites: {
+        'example.com': { pages: { '/*': { fields: { '#user': 'username', '#pass': 'password' }, submit: ['#generic'] } } },
+        'login.example.com': { pages: { '/admin/*': { fields: { '#pass': 'Secret', 'input[name="admin-pass"]': 'Password' }, submit: ['#next', 'enter'], login: ['#signin'] } } },
+        'other.example': { pages: {} },
+      },
+    });
+    assert.deepEqual(sites.match('https://login.example.com/admin/login'), {
+      key: 'example.com/* login.example.com/admin/*',
+      fields: [{ name: 'username', selector: '#user' }, { name: 'secret', selector: '#pass' }, { name: 'password', selector: 'input[name="admin-pass"]' }],
+      submits: ['#next', 'enter', '#generic'],
+      logins: ['#signin'],
+    });
+    assert.equal(sites.match('https://other.example/'), undefined);
+    assert.equal(sites.match('https://unknown.example/'), undefined);
+    assert.deepEqual(sitesOf({ sites: { 'shop.example': { pages: { '/': { login: ['a'] } } } } }).match('https://shop.example/'),
+      { key: 'shop.example/', fields: [], submits: [], logins: ['a'] });
+  });
+
+  test('the vault system: of the most specific page with credentials, else of the most specific site', () => {
+    const sites = sitesOf({
+      sites: {
+        'example.com': { credentials: { vault: 'Example' }, pages: { '/a/*': { credentials: { vault: 'Example A' } } } },
+        'b.example.com': { credentials: { vault: 'Example B' } },
+      },
+    });
+    assert.equal(sites.vaultSystem('https://www.example.com/'), 'Example');
+    assert.equal(sites.vaultSystem('https://example.com/a/x'), 'Example A');
+    assert.equal(sites.vaultSystem('https://b.example.com/a/x'), 'Example A');
+    assert.equal(sites.vaultSystem('https://b.example.com/'), 'Example B');
+    assert.equal(sites.vaultSystem('https://other.example/'), undefined);
+  });
+
+  test('updateSites reads the file again, keeps the other entries, and writes only on a change', () => {
+    const file = tmpFile('sites/update.json', { defaultAccess: 'deny', sites: { 'a.example': { access: 'allow', note: 'mine' } } });
+    const sites = new Sites(file);
+    assert.equal(sites.access('b.example').allowed, false);
+    const before = fs.statSync(file).mtimeMs;
+    assert.equal(updateSites(file, () => false), false);
+    assert.equal(fs.statSync(file).mtimeMs, before);
+    updateSites(file, (data) => { data.sites['b.example'] = { access: 'allow' }; return true; });
+    assert.deepEqual(readJson(file), { defaultAccess: 'deny', sites: { 'a.example': { access: 'allow', note: 'mine' }, 'b.example': { access: 'allow' } } });
+    fs.utimesSync(file, new Date(), new Date(Date.now() + 5000));
+    assert.equal(sites.access('b.example').allowed, true, 'the Sites object reads the file again');
+  });
+});
+
+describe('server.json', () => {
+  test('the providers that are on, in the order of the file; a provider without mask is masked', () => {
+    const config = new ServerConfig(tmpFile('server/providers.json', { providers: [
+      { type: 'values', mask: false, values: { a: 1 } }, { type: 'vault', enabled: false }, { type: 'ask', fields: ['phone'] },
+    ] }), logger);
+    assert.deepEqual(config.providers().map(({ type, mask }) => [type, mask]), [['values', false], ['ask', true]]);
+    assert.deepEqual(config.providers()[0].settings.values, { a: 1 });
+  });
+
+  test('providers must be an array; each provider needs a type', () => {
+    assert.throws(() => new ServerConfig(tmpFile('server/object.json', { providers: {} }), logger).providers(), /"providers" must be an array/);
+    assert.throws(() => new ServerConfig(tmpFile('server/notype.json', { providers: [{}] }), logger).providers(), /needs a "type"/);
+  });
+
+  test('adds the missing tools with defaults; keeps the user values and the other keys', () => {
+    const file = tmpFile('server/tools.json', { providers: [{ type: 'ask' }], tools: { browser_click: { enabled: false } } });
+    const tools = new ToolsConfig(new ServerConfig(file, logger), logger, DANGEROUS);
     tools.addMissing(['browser_click', 'browser_navigate', 'browser_evaluate']);
-    const values = Object.fromEntries(readIni(file).sections.get('tools').map((line) => [line.key, line.value]));
-    assert.deepEqual(values, { browser_click: 'disabled', browser_evaluate: 'disabled', browser_navigate: 'enabled' });
+    const data = readJson(file);
+    assert.deepEqual(data.tools, { browser_click: { enabled: false }, browser_evaluate: { enabled: false }, browser_navigate: { enabled: true } });
+    assert.deepEqual(data.providers, [{ type: 'ask' }]);
     assert.equal(tools.isEnabled('browser_navigate'), true);
     assert.equal(tools.isEnabled('browser_click'), false);
   });
 
-  test('an unknown value disables the tool', () => {
-    const tools = new ToolsConfig(tmpFile('tools/bad.ini', '[tools]\nbrowser_click = maybe\n'), logger, DANGEROUS);
+  test('a value that is not true or false disables the tool', () => {
+    const tools = new ToolsConfig(new ServerConfig(tmpFile('server/bad.json', { tools: { browser_click: { enabled: 'yes' } } }), logger), logger, DANGEROUS);
     assert.equal(tools.isEnabled('browser_click'), false);
   });
 
   test('a disabled tool gets a note and an error with the reason', () => {
-    const tools = new ToolsConfig(tmpFile('tools/reason.ini', '[tools]\nbrowser_evaluate = disabled\n'), logger, DANGEROUS);
+    const tools = new ToolsConfig(new ServerConfig(tmpFile('server/reason.json', { tools: { browser_evaluate: { enabled: false } } }), logger), logger, DANGEROUS);
     assert.equal(tools.describe({ name: 'browser_evaluate', description: 'Evaluate.' }).description,
       'DISABLED: this tool is turned off in the configuration. Reason: it runs JavaScript in the web page and can read all data of the page. Evaluate.');
     const result = tools.disabledResult('browser_evaluate');
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /^### Error\nThe tool browser_evaluate did not run: this tool is turned off in the configuration\./);
-    assert.doesNotMatch(result.content[0].text, /upstream|\.ini/);
+    assert.doesNotMatch(result.content[0].text, /upstream|\.json/);
   });
 });
 
-class StubProvider extends FillProvider {
-  constructor(name, values) {
-    super({ name, config: { sections: new Map() } });
+// A key-value provider with fixed values. reads: the keys that it gave.
+class StubProvider extends KeyValueProvider {
+  constructor(name, values, masked = false) {
+    super({ name });
     this.values = values;
+    this.masked = masked;
+    this.reads = [];
+  }
+
+  async has(name) {
+    return Object.hasOwn(this.values, name);
   }
 
   async resolve(name) {
     if (this.values[name] instanceof Error) throw this.values[name];
+    if (Object.hasOwn(this.values, name)) this.reads.push(name);
+    return this.values[name];
+  }
+
+  async match(value) {
+    return Object.keys(this.values).find((key) => this.values[key] === value);
+  }
+}
+
+class StubValueProvider extends FillProvider {
+  constructor(name, values) {
+    super({ name });
+    this.values = values;
+  }
+
+  async resolve(name) {
     return this.values[name];
   }
 }
 
-describe('form fields', () => {
-  const cases = [
-    ['login.example.com', 'https://login.example.com/any/path?x=1', true],
-    ['login.example.com/u/*/login', 'https://login.example.com/u/abc/def/login', true],
-    ['login.example.com/u/*/login', 'https://login.example.com/u/abc/login/next', false],
-    ['*.example.com/login', 'http://a.example.com:8080/login#top', true],
-    ['*.example.com/login', 'https://example.com/login', false],
-    ['example.com/', 'https://example.com/', true],
-    ['example.com/', 'https://example.com/a', false],
-    ['example.com/a.b', 'https://example.com/aXb', false],
-    ['example.com', 'about:blank', false],
-  ];
-  for (const [pattern, url, expected] of cases) {
-    test(`${pattern} ${expected ? 'matches' : 'does not match'} ${url}`, () => {
-      assert.equal(urlMatches(pattern, url), expected);
-    });
+// An approval provider that gives the answer and records each request.
+class StubApproval extends ApprovalProvider {
+  constructor(inner, answer) {
+    super({ name: 'approve', inner });
+    this.masked = inner.masked;
+    this.answer = answer;
+    this.requests = [];
   }
 
-  test('the pattern of a page replaces ID segments with *', () => {
-    assert.equal(urlPattern('https://Login.Example.com/u/login/identifier?state=x'), 'login.example.com/u/login/identifier');
-    assert.equal(urlPattern('https://a.example/t/12345/user/0f8fad5b-d9cb-469f-a165-70867728950e/x'), 'a.example/t/*/user/*/x');
-    assert.equal(urlPattern('https://a.example/s/aB3dE5fG7hJ9kL1mN/authorization-code-flow'), 'a.example/s/*/authorization-code-flow');
-    assert.equal(urlPattern('https://a.example/'), 'a.example/');
-  });
-
-  test('all matching sections apply; the longer pattern wins; submits keep their order', () => {
-    const fields = new FieldsConfig(tmpFile('fields/fields.ini', '[example.com]\nusername = #user\npassword = #pass\nsubmit = #generic\n'
-      + '[example.com/admin/*]\npassword = input[name="admin-pass"]\nsubmit = #next\nsubmit = button[type=submit]\n[other.example]\n; comment\n'));
-    assert.deepEqual(fields.match('https://example.com/admin/login'), {
-      key: 'example.com example.com/admin/*',
-      fields: [{ name: 'username', selector: '#user' }, { name: 'password', selector: 'input[name="admin-pass"]' }],
-      submits: ['#next', 'button[type=submit]', '#generic'],
-    });
-    assert.deepEqual(fields.match('https://example.com/').fields.map(({ name }) => name), ['username', 'password']);
-    assert.equal(fields.match('https://other.example/'), undefined);
-    assert.equal(fields.match('https://unknown.example/'), undefined);
-  });
-});
+  async approve(request) {
+    this.requests.push(request);
+    return this.answer;
+  }
+}
 
 describe('fill registry', () => {
   const registry = () => new FillRegistry({
-    providers: [new StubProvider('first', { email: 'a@first.example' }), new StubProvider('second', { email: 'b@second', name: 'Anna' })],
+    providers: [new StubProvider('first', { email: 'a@first.example' }, true), new StubProvider('second', { email: 'b@second', name: 'Anna' })],
     logger,
-    masked: new Set(['first']),
   });
 
   test('the first provider with a value wins; no value gives undefined', async () => {
@@ -235,6 +250,52 @@ describe('fill registry', () => {
     assert.equal(await r.resolve('phone', { host: 'h' }), undefined);
   });
 
+  test('the provider kinds', () => {
+    assert.equal(new StubProvider('a', {}).kind, 'key-value');
+    assert.equal(new StubValueProvider('a', {}).kind, 'value');
+    assert.equal(new StubApproval(new StubProvider('a', {}), true).kind, 'approval');
+  });
+
+  test('one approval for all keys of an approval provider in one fill; the values come after it', async () => {
+    const vault = new StubProvider('vault', { username: 'u', password: 'p' }, true);
+    const approval = new StubApproval(vault, true);
+    const r = new FillRegistry({ providers: [approval, new StubProvider('values', { name: 'Anna', password: 'other' })], logger });
+    const values = await r.resolveAll(['username', 'password', 'name'], { host: 'a.example', url: 'https://a.example/x', client: 'claude-code' });
+    assert.deepEqual([...values], [['name', 'Anna'], ['username', 'u'], ['password', 'p']]);
+    assert.deepEqual(approval.requests, [{ host: 'a.example', keys: ['username', 'password'], client: 'claude-code' }]);
+    assert.equal(r.clean('u p Anna'), `${MASK} ${MASK} Anna`);
+  });
+
+  test('a refused approval stops the fill; no later provider gives the keys; no value is read', async () => {
+    const vault = new StubProvider('vault', { password: 'p' });
+    const later = new StubProvider('values', { password: 'other' });
+    const r = new FillRegistry({ providers: [new StubApproval(vault, false), later], logger });
+    await assert.rejects(r.resolveAll(['password'], { host: 'a.example' }), /was not approved/);
+    assert.deepEqual(vault.reads, []);
+    assert.deepEqual(later.reads, []);
+  });
+
+  test('the discovery mode: no value providers, no approvals', async () => {
+    const approval = new StubApproval(new StubProvider('vault', { password: 'p' }), false);
+    const r = new FillRegistry({ providers: [new StubValueProvider('ask', { phone: '1' }), approval], logger });
+    assert.deepEqual([...await r.resolveAll(['phone', 'password'], {}, { discovery: true })], [['password', 'p']]);
+    assert.deepEqual(approval.requests, []);
+    assert.equal(await r.resolve('phone', {}), '1');
+  });
+
+  test('match: the first key-value provider with the value gives its first key; a masked value goes into the scrub', async () => {
+    const vault = new StubProvider('vault', { login: 'anna@x', email: 'anna@x', password: 'p' }, true);
+    const r = new FillRegistry({
+      providers: [new StubValueProvider('ask', { phone: 'anna@x' }), new StubProvider('values', { name: 'Anna' }), new StubApproval(vault, false)],
+      logger,
+    });
+    assert.equal(await r.match('anna@x', {}), 'login');
+    assert.equal(await r.match('Anna', {}), 'name');
+    assert.equal(await r.match('nothing', {}), undefined);
+    assert.equal(await r.match('', {}), undefined);
+    assert.equal(r.clean('anna@x Anna'), `${MASK} Anna`);
+  });
+
   test('a provider error stops the fill', async () => {
     const r = new FillRegistry({ providers: [new StubProvider('bad', { email: new FillError('declined') })], logger });
     await assert.rejects(r.resolve('email', {}), /declined/);
@@ -242,27 +303,58 @@ describe('fill registry', () => {
 
   test('scrubs only the values of masked providers', async () => {
     const r = registry();
-    await r.resolve('email', {});
-    await r.resolve('name', {});
+    await r.resolveAll(['email', 'name'], {});
     const result = r.scrub({ content: [{ type: 'text', text: '- textbox "Name": Anna a@first.example' }, { type: 'image', data: 'a@first.example' }] });
     assert.equal(result.content[0].text, `- textbox "Name": Anna ${MASK}`);
     assert.equal(result.content[1].data, 'a@first.example');
   });
 
-  test('a provider without a [mask] line is masked', async () => {
-    const r = await FillRegistry.load({ names: ['ini', 'ask'], providersDir: path.join(TOOL_DIR, 'providers-form-fill'), configDir: path.join(TMP, 'mask'), logger, mask: { ini: 'false' } });
-    assert.deepEqual([...r.masked], ['ask']);
+  test('can log in only with a provider that has a system for the page', () => {
+    const vault = new StubProvider('vault', {});
+    vault.system = (ctx) => ({ 'a.example': 'System A' })[ctx.host];
+    const r = new FillRegistry({ providers: [new StubProvider('values', {}), vault], logger });
+    assert.equal(r.canLogIn({ host: 'a.example' }), true);
+    assert.equal(r.canLogIn({ host: 'c.example' }), false);
+    assert.equal(new FillRegistry({ providers: [new StubProvider('values', {})], logger }).canLogIn({ host: 'a.example' }), false);
+  });
+
+  test('loads the providers of server.json; the masked ones; an unknown type is an error', async () => {
+    const providersDir = path.join(TOOL_DIR, 'providers-form-fill');
+    const r = await FillRegistry.load({ entries: [{ type: 'values', mask: false, settings: {} }, { type: 'ask', mask: true, settings: {} }], providersDir, logger });
+    assert.deepEqual(r.providers.map((provider) => provider.name), ['values', 'ask']);
+    assert.deepEqual(r.providers.map((provider) => provider.masked), [false, true]);
+    await assert.rejects(FillRegistry.load({ entries: [{ type: 'nope', mask: true, settings: {} }], providersDir, logger }), /the provider type "nope"/);
+  });
+
+  test('loads an approval provider with its wrapped key-value provider; the mask of the wrapped entry applies', async () => {
+    const providersDir = path.join(TOOL_DIR, 'providers-form-fill');
+    const load = (settings, mask = true) => FillRegistry.load({ entries: [{ type: settings.type, mask, settings }], providersDir, logger });
+    const r = await load({ type: 'approve-https', mask: true, address: '', provider: { type: 'values', mask: false, values: { a: '1' } } });
+    assert.equal(r.providers[0].kind, 'approval');
+    assert.equal(r.providers[0].inner.name, 'values');
+    assert.equal(r.providers[0].masked, false);
+    await assert.rejects(load({ type: 'approve-dialog' }), /needs "provider"/);
+    await assert.rejects(load({ type: 'approve-dialog', provider: { type: 'ask' } }), /can wrap only a key-value provider/);
+    await assert.rejects(load({ type: 'values', provider: { type: 'values' } }), /is not an approval provider/);
   });
 });
 
-describe('ini provider', () => {
-  const provider = new IniProvider({ name: 'ini', config: parseIni('[values]\nName = Anna\nemail = anna@x\n[other]\nphone = 1\n') });
+describe('values provider', () => {
+  const provider = new ValuesProvider({ name: 'values', settings: { values: { Name: 'Anna', email: 'anna@x', age: 30 } } });
 
-  test('gives the values of [values]', async () => {
+  test('gives the values of "values"', async () => {
     assert.equal(await provider.resolve('name', { host: 'a.example' }), 'Anna');
     assert.equal(await provider.resolve('email', {}), 'anna@x');
+    assert.equal(await provider.resolve('age', {}), '30');
     assert.equal(await provider.resolve('phone', {}), undefined);
     assert.equal(await provider.resolve('constructor', {}), undefined);
+    assert.equal(await provider.resolve('NAME', {}), 'Anna');
+  });
+
+  test('gives the first key of a value', async () => {
+    assert.equal(await provider.match('anna@x'), 'email');
+    assert.equal(await provider.match('30'), 'age');
+    assert.equal(await provider.match('nobody'), undefined);
   });
 });
 
@@ -270,29 +362,27 @@ describe('config folder', () => {
   test('a missing config file is a copy of its template; an existing file stays', () => {
     const dir = path.join(TMP, 'config-folder');
     fs.rmSync(dir, { recursive: true, force: true });
-    const file = configFile(dir, 'server.ini');
-    assert.equal(file, path.join(dir, 'server.ini'));
-    assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(CONFIG_TEMPLATES['server.ini'], 'utf8'));
-    fs.writeFileSync(file, '[fill]\nproviders = ini\n');
-    assert.equal(fs.readFileSync(configFile(dir, 'server.ini'), 'utf8'), '[fill]\nproviders = ini\n');
-    assert.equal(fs.existsSync(configFile(dir, 'other.ini')), false);   // no template: no file
+    for (const name of [SERVER_CONFIG, SITES_CONFIG]) {
+      const file = configFile(dir, name);
+      assert.equal(file, path.join(dir, name));
+      assert.equal(fs.readFileSync(file, 'utf8'), fs.readFileSync(CONFIG_TEMPLATES[name], 'utf8'));
+      readJson(file);
+    }
+    fs.writeFileSync(path.join(dir, SITES_CONFIG), '{}\n');
+    assert.equal(fs.readFileSync(configFile(dir, SITES_CONFIG), 'utf8'), '{}\n');
+    assert.equal(fs.existsSync(configFile(dir, 'other.json')), false);   // no template: no file
   });
 
-  test('each provider has a template', () => {
-    for (const name of fs.readdirSync(path.join(TOOL_DIR, 'providers-form-fill'))) {
-      assert.ok(fs.existsSync(path.join(TOOL_DIR, 'providers-form-fill', name, 'config.template.ini')), name);
-    }
+  test('the server template has a provider for each provider folder', () => {
+    const types = readJson(CONFIG_TEMPLATES[SERVER_CONFIG]).providers.map(({ type }) => type).sort();
+    assert.deepEqual(types, fs.readdirSync(path.join(TOOL_DIR, 'providers-form-fill')).sort());
   });
 });
 
 describe('vault provider', () => {
   const callLog = path.join(TMP, 'vault-calls.log');
-  const make = (systems = '127.0.0.1 = Fixture site\nexample.com = Example C\nhttps://example.com/a = Example A\n'
-    + 'https://example.com/a/b = Example B\n', vault = 'vault-test') => new VaultProvider({
-    name: 'vault',
-    configFile: path.join(TMP, 'provider-vault.ini'),
-    config: parseIni(`[vault]\nvault = ${vault}\n\n[systems]\n${systems}`),
-  });
+  const sites = sitesOf({ sites: { '127.0.0.1': { credentials: { vault: 'Fixture site' } }, 'missing.example': { credentials: { vault: 'Missing' } } } });
+  const make = (vault = 'vault-test') => new VaultProvider({ name: 'vault', settings: { vault }, sites });
   const calls = async (action) => {
     fs.rmSync(callLog, { force: true });
     process.env.FAKE_VAULT_LOG = callLog;
@@ -306,7 +396,7 @@ describe('vault provider', () => {
   before(() => { process.env.BROWSER_AUTOMATION_X_MCP_VAULT_TOOL = path.join(FAKE_VAULT, 'run.sh'); });
   after(() => { delete process.env.BROWSER_AUTOMATION_X_MCP_VAULT_TOOL; });
 
-  test('selects the system by the host in [systems]', async () => {
+  test('selects the system by the credentials of the site', async () => {
     const provider = make();
     assert.equal(await provider.resolve('password', { host: '127.0.0.1', url: 'http://127.0.0.1:8080/login' }), 'Fixture-Pa55-word');
     assert.equal(await provider.resolve('username', { host: '127.0.0.1', url: 'http://127.0.0.1:8080/' }), 'fixture-user');
@@ -315,29 +405,32 @@ describe('vault provider', () => {
     assert.equal(await provider.resolve('password', {}), undefined);
   });
 
-  test('a host matches its subdomains; the longest url prefix wins; an equal match is an error', async () => {
-    const provider = make();
-    assert.equal(await provider.resolve('password', { host: 'example.com', url: 'https://example.com/a/b/c' }), 'pass-b');
-    assert.equal(await provider.resolve('password', { host: 'example.com', url: 'https://example.com/a/x' }), 'pass-a');
-    assert.equal(await provider.resolve('password', { host: 'www.example.com', url: 'https://www.example.com/' }).catch((e) => e.message),
-      `more lines of [systems] in ${path.join(TMP, 'provider-vault.ini')} match the host www.example.com: `
-      + 'example.com; https://example.com/a; https://example.com/a/b. Give each a more specific URL prefix.');
-  });
-
-  test('asks the vault only for the systems in [systems], with the vault name', async () => {
+  test('asks the vault only for the system of the site, with the vault name', async () => {
     const log = await calls(async () => {
       const provider = make();
-      await provider.resolve('password', { host: '127.0.0.1' });
-      await provider.resolve('password', { host: 'other.example' });
+      await provider.resolve('password', { host: '127.0.0.1', url: 'http://127.0.0.1/' });
+      await provider.resolve('password', { host: 'other.example', url: 'https://other.example/' });
     });
     assert.deepEqual(log, [['--vault', 'vault-test', 'get-system', 'Fixture site'],
       ['--vault', 'vault-test', 'get-secret', 'Fixture site', 'password']]);
   });
 
+  test('gives the first secret name with the value, only in the system of the site; the key has no case', async () => {
+    const provider = make();
+    const ctx = { host: '127.0.0.1', url: 'http://127.0.0.1/' };
+    assert.equal(await provider.match('Fixture-Pa55-word', ctx), 'password');
+    assert.equal(await provider.match('fixture-user', ctx), 'username');
+    assert.equal(await provider.match('other-token', ctx), undefined);
+    assert.equal(await provider.match('fixture-user', { host: 'other.example', url: 'https://other.example/' }), undefined);
+    assert.equal(await provider.resolve('PassWord', ctx), 'Fixture-Pa55-word');
+    assert.equal(await provider.has('USERNAME', ctx), true);
+    assert.equal(await provider.has('token', ctx), false);
+  });
+
   test('needs the vault name; an unknown system is an error of the vault tool', async () => {
-    assert.match(await make('127.0.0.1 = Fixture site\n', '').resolve('password', { host: '127.0.0.1' }).catch((e) => e.message),
-      /the vault provider needs "vault = vault-<name>"/);
-    assert.match(await make('127.0.0.1 = Missing\n').resolve('password', { host: '127.0.0.1' }).catch((e) => e.message),
+    assert.match(await make('').resolve('password', { host: '127.0.0.1', url: 'http://127.0.0.1/' }).catch((e) => e.message),
+      /the vault provider needs "vault": "vault-<name>"/);
+    assert.match(await make().resolve('password', { host: 'missing.example', url: 'https://missing.example/' }).catch((e) => e.message),
       /the vault tool failed \(get-system\): error: unknown system 'Missing'/);
   });
 });
@@ -362,7 +455,7 @@ describe('vault tool contract', () => {
 });
 
 describe('ask provider', () => {
-  const make = () => new AskProvider({ name: 'ask', config: parseIni('[ask]\nfields = phone, Name\n') });
+  const make = () => new AskProvider({ name: 'ask', settings: { fields: ['phone', 'Name'] } });
 
   test('asks once for each host and field, and only for the listed fields', async () => {
     const provider = make();
@@ -383,6 +476,103 @@ describe('ask provider', () => {
     const provider = make();
     assert.equal(await provider.resolve('phone', { host: 'a.example' }), undefined);
     await assert.rejects(provider.resolve('phone', { host: 'a.example', elicit: async () => ({ action: 'decline' }) }), /did not give phone \(decline\)/);
+  });
+});
+
+describe('approve-dialog provider', () => {
+  const make = () => new ApproveDialogProvider({ name: 'approve-dialog', inner: new StubProvider('vault', {}), logger });
+  const request = { host: 'a.example', keys: ['username', 'password'], client: 'claude-code' };
+
+  test('shows the host, the keys and the client, with the approval timeout; approves only an accepted approval', async () => {
+    const asked = [];
+    const elicit = (answer) => async (message, schema, timeout) => {
+      asked.push({ message, schema, timeout });
+      return answer;
+    };
+    assert.equal(await make().approve(request, { elicit: elicit({ action: 'accept', content: { approve: true } }) }), true);
+    assert.match(asked[0].message, /fills username, password on a\.example for claude-code/);
+    assert.deepEqual(asked[0].schema.required, ['approve']);
+    assert.equal(asked[0].timeout, 15000);
+    assert.equal(await make().approve(request, { elicit: elicit({ action: 'accept', content: { approve: false } }) }), false);
+    assert.equal(await make().approve(request, { elicit: elicit({ action: 'decline' }) }), false);
+    assert.equal(await make().approve(request, { elicit: async () => { throw new Error('timeout'); } }), false);
+  });
+
+  test('refuses without dialogs', async () => {
+    assert.equal(await make().approve(request, {}), false);
+  });
+});
+
+describe('approve-https provider', () => {
+  const hasOpenssl = (() => {
+    try {
+      execFileSync('openssl', ['version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const dir = path.join(TMP, 'approve-https');
+  let server;
+  let address;
+  let fingerprint;
+  const requests = [];
+  let answer = { approved: true };
+
+  before(async () => {
+    if (!hasOpenssl) return;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    const key = path.join(dir, 'key.pem');
+    const cert = path.join(dir, 'cert.pem');
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-keyout', key, '-out', cert,
+      '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore' });
+    fingerprint = new crypto.X509Certificate(fs.readFileSync(cert)).fingerprint256;
+    server = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (req, res) => {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', () => {
+        requests.push({ method: req.method, url: req.url, body: JSON.parse(body || 'null'), auth: req.headers.authorization });
+        if (answer === 'hang') return;
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(answer));
+      });
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    address = `https://127.0.0.1:${server.address().port}`;
+  });
+  after(async () => {
+    server?.closeAllConnections();
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve()));
+  });
+
+  const make = (settings, options = {}) => new ApproveHttpsProvider({ name: 'approve-https', settings, inner: new StubProvider('vault', {}), logger, ...options });
+  const request = { host: 'a.example', keys: ['password'], client: 'claude-code' };
+
+  test('refuses with an empty address or fingerprint, without a connection', async () => {
+    assert.equal(await make({ address: '', fingerprint: 'AB' }).approve(request), false);
+    assert.equal(await make({ address: 'https://127.0.0.1:1', fingerprint: '' }).approve(request), false);
+    assert.equal(await make({ address: 'http://127.0.0.1:1', fingerprint: 'AB' }).approve(request), false);
+    assert.equal(normalizeFingerprint('ab:cd:0F'), 'ABCD0F');
+  });
+
+  test('sends host, keys and client to /approve with the pinned certificate; no authentication', { skip: !hasOpenssl && 'no openssl' }, async () => {
+    requests.length = 0;
+    answer = { approved: true };
+    assert.equal(await make({ address, fingerprint: fingerprint.toLowerCase() }).approve(request), true);
+    assert.deepEqual(requests, [{ method: 'POST', url: '/approve', body: request, auth: undefined }]);
+    answer = { approved: false };
+    assert.equal(await make({ address: `${address}/`, fingerprint }).approve(request), false);
+  });
+
+  test('sends nothing to an other certificate; refuses without an answer in time', { skip: !hasOpenssl && 'no openssl' }, async () => {
+    requests.length = 0;
+    answer = { approved: true };
+    assert.equal(await make({ address, fingerprint: 'AA'.repeat(32) }).approve(request), false);
+    assert.deepEqual(requests, []);
+    answer = 'hang';
+    const started = Date.now();
+    assert.equal(await make({ address, fingerprint }, { timeout: 300 }).approve(request), false);
+    assert.ok(Date.now() - started < 2000);
   });
 });
 

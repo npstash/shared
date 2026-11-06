@@ -123,3 +123,35 @@ The log of the decisions that change the design. Format and rules:
 - 20261104-07 Nestor 598b2ac53d38 Put the temp files of Chromium into .local_assets/tmp of the tool, then into .local_assets/tmp of the first folder with .git above the tool, then into the temp folder of the OS
 - 20261104-08 Nestor 598b2ac53d38 Accept a filename of the agent only in the output folder; resolve a relative name against the output folder
 - 20261104-09 Nestor 598b2ac53d38 Mask the values of the Cookie, Set-Cookie, Authorization and Proxy-Authorization headers in the results and in the output files
+- 20261104-10 Nestor a5ea4caf7298 Give each lane its own Chromium with a persistent profile in .local_assets/lanes/<pid>-<lane id>: written with the Chrome settings before the start, deleted at the close; load the logins with setStorageState; one Xvfb for each server, from the first lane to the last lane
+- 20261104-11 Nestor a5ea4caf7298 Stop the bubbles of Chrome with the settings in Default/Preferences of the lane profile, and the permission prompts with --deny-permission-prompts
+- 20261104-12 Nestor a5ea4caf7298 A key press, click, scroll or input of the user in a lane is activity for LANE_IDLE
+- 20261104-13 Nestor a5ea4caf7298 A login = <locator> line of fields.ini is the login link of a page; before the fill, the server clicks the first visible one, one time for each lane and host, if a provider has a system for the host
+- 20261104-14 Nestor a5ea4caf7298 A login link is a role locator with the visible text of the link, case-insensitive, so that it does not match after the login
+- 20261104-15 Nestor a5ea4caf7298 The discovery mode records each click of the user or the agent on a link to an other page, and writes login = <locator> with the text and the target of the link into the section of the page
+- 20261104-16 Nestor a5ea4caf7298 The log of a recorded event gives the time of the event in the browser
+- 20261104-17 Nestor a5ea4caf7298 The config folder holds two JSON files: server.json (providers and tool switches) and sites.json (default access and sites); they replace server.ini, tools.ini, provider-<name>.ini, host-policy.ini and fields.ini
+- 20261104-18 Nestor a5ea4caf7298 server.json: providers is an array of { type, enabled, mask, <settings> } in the order of the fill; a provider without mask is masked; tools is { <tool>: { enabled } }
+- 20261104-19 Nestor a5ea4caf7298 sites.json: a site key is a host and covers each subdomain; a site has access, credentials (the vault system) and pages; a page key is a path pattern with fields, submit, login and optional credentials that win over the site
+- 20261104-20 Nestor a5ea4caf7298 Host access: a site with access deny wins over each other site, else the most specific site with an access, else defaultAccess
+- 20261104-21 Nestor a5ea4caf7298 Rename the ini provider to values
+- 20261104-22 Nestor a5ea4caf7298 The server never writes sites.json; only the discovery mode records opened hosts, into the discovery file
+- 20261104-23 Nestor a5ea4caf7298 Keep the IndexedDB of the sites of sites.json in the storage state
+- 20261104-24 Nestor a5ea4caf7298 The discovery file discovered-sites.json has the schema of sites.json, and found with the description and the used marks of each item
+- 20261104-25 Nestor a5ea4caf7298 Discovery writes the fields and buttons of a page at once when the page is ready and when a new one shows, without a call of the agent; the used marks go into the file at a submit, a click, a navigation or the close of the lane
+- 20261104-26 Nestor a5ea4caf7298 Save the storage state of a lane at each page load and at the close
+- 20261106-01 Nestor a5ea4caf7298 A provider has one kind: key-value (vault, values) with match(value), value (ask), or approval (approve-dialog, approve-https) that wraps one key-value provider in its "provider" key
+- 20261106-02 Nestor a5ea4caf7298 The first provider in the order of server.json that has the key gives the value; the mask of an approval provider is the mask of its wrapped entry
+- 20261106-03 Nestor a5ea4caf7298 Discovery writes only sites.json; remove the discovery file, found and the used marks
+- 20261106-04 Nestor a5ea4caf7298 Discovery writes each loaded host of an allowed site into sites.json at once, with "access": "allow"
+- 20261106-05 Nestor a5ea4caf7298 At a click or a submit, the page code gives the values of the fields of the user; the server gets the first key from the key-value providers in their order, then discards the values
+- 20261106-06 Nestor a5ea4caf7298 The vault provider matches a value only in the system of credentials.vault of the site or page
+- 20261106-07 Nestor a5ea4caf7298 A field of the user without a match gets the name from its attributes only if its selector has no key; only a new match changes a key
+- 20261106-08 Nestor a5ea4caf7298 The fields of a page in sites.json are { "<selector>": "<key>" }
+- 20261106-09 Nestor a5ea4caf7298 Discovery writes the button that the user clicks into submit; a submit without a button writes the submit button of the form, else "enter"; "enter" presses Enter in the last field
+- 20261106-10 Nestor a5ea4caf7298 At a submit with fields of the user, discovery writes the last link that the user followed into login of the page of the link
+- 20261106-11 Nestor a5ea4caf7298 The server reads sites.json again before each match and each write, and changes only its own entries
+- 20261106-12 Nestor a5ea4caf7298 In the discovery mode, the key-value providers and the wrapped providers of approval providers fill without approval, value providers do not fill, and the server does not submit
+- 20261106-13 Nestor a5ea4caf7298 One approval covers all keys of an approval provider in one fill; the request has the host, the keys and the client name, and no value and no URL
+- 20261106-14 Nestor a5ea4caf7298 A refusal, or no answer in APPROVAL_TIMEOUT, stops the fill; no later provider gives the keys
+- 20261106-15 Nestor a5ea4caf7298 approve-dialog asks through MCP elicitation; approve-https sends POST <address>/approve, pins the SHA-256 fingerprint of the certificate, sends no authentication, and refuses with an empty address or fingerprint

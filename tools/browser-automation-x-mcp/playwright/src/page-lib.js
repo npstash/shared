@@ -1,12 +1,14 @@
-// Code that runs in each frame of the browser page. Discovery and the recorder use the same code, so
-// that both give the same selector for the same element. The function must not use outer names:
-// the server sends its text to the page (see discover.js).
+// Code that runs in each frame of the browser page: the recorder of the discovery mode. It reports
+// to the binding __baxRecord of the server at once (see discover.js). The function must not use
+// outer names: the server sends its text to the page (see discover.js).
 //
 // Selector of a field: autocomplete, name, an id that does not look generated, the type (password,
 // email), aria-label, placeholder: the first that is unique in the frame. Else a label locator of
 // Playwright: internal:label="<label>"s.
 // Selector of a button: an id that does not look generated, name, the type: the first that is
 // unique in the frame. Else a role locator of Playwright: internal:role=button[name="<name>"s].
+// Selector of a link: a role locator of Playwright with its visible text, case-insensitive:
+// internal:role=link[name="<text>"i]. Text that shows only before the login makes a login link.
 // discover.js checks each Playwright locator: it must find one element.
 export function pageLib() {
   const SKIP = new Set(['hidden', 'submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'range', 'color']);
@@ -61,56 +63,67 @@ export function pageLib() {
     return { kind: 'button', tag, type, id: el.id ?? '', text, selector, css: Boolean(css) };
   }
 
-  // A button that can submit a form: a submit button, an image input, a button without a type in a
-  // form, or an other button near a visible field (its parent, up to 4 levels, holds the field).
-  function submitLike(el) {
-    const tag = el.tagName.toLowerCase();
-    const type = typeOf(el);
-    if (type === 'submit' || type === 'image' || (tag === 'button' && !type && el.form)) return true;
-    let parent = el.parentElement;
-    for (let level = 0; parent && level < 4; level++, parent = parent.parentElement) {
-      if ([...parent.querySelectorAll('input, textarea, select')].some((field) => isField(field) && visible(field))) return true;
-    }
-    return false;
+  function linkInfo(el) {
+    const text = clean(el.getAttribute('aria-label') || el.innerText);
+    const selector = text ? `internal:role=link[name=${JSON.stringify(text)}i]` : undefined;
+    return { kind: 'link', tag: 'a', text, href: el.href, selector };
   }
 
-  // The visible fields, then the visible buttons that can submit, of this frame.
-  function discover() {
-    const fields = [...document.querySelectorAll('input, textarea, select')].filter((el) => isField(el) && visible(el)).map(fieldInfo);
-    const buttons = [...document.querySelectorAll(BUTTONS)].filter((el) => visible(el) && submitLike(el)).map(buttonInfo);
-    return [...fields, ...buttons];
+  // The first visible submit button of a form, or undefined.
+  function submitButton(form) {
+    const el = [...form.querySelectorAll('button, input[type="submit"], input[type="image"]')]
+      .find((each) => visible(each) && (['submit', 'image'].includes(typeOf(each)) || (each.tagName === 'BUTTON' && !typeOf(each))));
+    return el ? buttonInfo(el) : undefined;
   }
 
-  // Report the fills, button clicks and submits of this frame to the binding __baxRecord. No values.
+  // Report the fills, button clicks, link clicks to an other page and submits of this frame to the
+  // binding __baxRecord.
+  // A fill is reported one time for each field until the next submit, without its value. A button
+  // click and a submit give the values of the fields that were filled since the last submit, and
+  // not by the form fill (REQ-039 of sdd/SRS.md). The server discards the values.
   // An element that the form fill of the server touched has __baxAuto.
   function installRecorder() {
     if (window.__baxRecorderOn || typeof window.__baxRecord !== 'function') return;
     window.__baxRecorderOn = true;
-    const reported = new WeakSet();
+    const filled = new Set();
+    const autoOf = (el) => Boolean(el.__baxAuto || el.form?.__baxAuto);
     const send = (event, el) => {
       try {
-        window.__baxRecord({ ...event, ts: Date.now(), auto: Boolean(el.__baxAuto || el.form?.__baxAuto) });
+        window.__baxRecord({ ...event, ts: Date.now(), auto: autoOf(el) });
       } catch {
         // The page closed.
       }
     };
+    const values = (form) => [...filled]
+      .filter((el) => el.isConnected && !autoOf(el) && (!form || el.form === form))
+      .map((el) => ({ selector: fieldInfo(el).selector, value: String(el.value ?? '') }))
+      .filter((item) => item.selector);
     const onFill = (e) => {
       const el = e.target;
-      if (!isField(el) || reported.has(el)) return;
-      reported.add(el);
+      if (!isField(el) || filled.has(el)) return;
+      filled.add(el);
       send({ action: 'fill', ...fieldInfo(el) }, el);
     };
     document.addEventListener('input', onFill, true);
     document.addEventListener('change', onFill, true);
     document.addEventListener('click', (e) => {
       const el = e.target?.closest?.(BUTTONS);
-      if (el) send({ action: 'press', ...buttonInfo(el) }, el);
+      if (el) {
+        send({ action: 'press', ...buttonInfo(el), values: values() }, el);
+        return;
+      }
+      const link = e.target?.closest?.('a[href]');
+      if (link && /^https?:/.test(link.href) && link.href.split('#')[0] !== location.href.split('#')[0]) {
+        send({ action: 'link', ...linkInfo(link) }, link);
+      }
     }, true);
     document.addEventListener('submit', (e) => {
-      // A submit with a button is a click of the button. Report only a submit without a button (Enter).
-      if (!e.submitter) send({ action: 'submit', kind: 'form' }, e.target);
+      const form = e.target;
+      const button = e.submitter ? buttonInfo(e.submitter) : submitButton(form);
+      send({ action: 'submit', kind: 'form', button: button ?? null, enter: !e.submitter, values: values(form) }, form);
+      for (const el of [...filled]) if (el.form === form || !el.isConnected) filled.delete(el);
     }, true);
   }
 
-  return { discover, installRecorder };
+  return { installRecorder };
 }
