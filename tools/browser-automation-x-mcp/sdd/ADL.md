@@ -166,3 +166,12 @@ The log of the decisions that change the design. Format and rules:
 - 20261106-24 Nestor 29c0c2f718c6 A refused approval adds the note "The user did not approve an action on this page." to the result of the call; the note does not name the form fill
 - 20261106-25 Nestor a514839531b7 browser_lane_open needs browserSession: normal loads and saves the storage state, fresh starts without it and merges its logins into it without a removal, isolated starts without it and saves nothing
 - 20261106-26 Nestor a514839531b7 The result of browser_lane_open and browser_lanes give the browser session; the agent tells the user the browser session; a "session" of the browser that the user asks for is the browser session
+- 20261107-01 Nestor fc2c70a7e4a7 A form of sites.json has no path: it applies on each page of its hosts where one of its fields is visible
+- 20261107-02 Nestor fc2c70a7e4a7 A node of sites.json has "forms" (each with "fields" and "submit") and "login"; "pages" and a form with "provider-config" are load errors
+- 20261107-03 Nestor fc2c70a7e4a7 "forms" and "login" go down the domain tree; the discovery writes them into the nearest node with a provider-config, else into the root domain
+- 20261107-04 Nestor fc2c70a7e4a7 The login link is clicked on each page of the host where it is visible, one time for each lane and host; after the fill, the server opens again the URL of the click, also after a failed login
+- 20261107-05 Nestor fc2c70a7e4a7 The server fills the form with the most visible fields; on a tie, the first form of the host, then of its parents, in file order
+- 20261107-06 Nestor fc2c70a7e4a7 The discovery adds the selectors of a new form to the recorded form that has one of its selectors; else it adds a new form
+- 20261107-07 Nestor fc2c70a7e4a7 The server waits FLOW_WAIT for a form field after a login click or a submit, else PEEK_WAIT one time for each URL
+- 20261107-08 Nestor fc2c70a7e4a7 A login flow that ends on a page without a visible form field logs fill_no_field with the URL, the wait and the selectors
+- 20261107-09 Nestor fc2c70a7e4a7 In the discovery mode, the server does not open again the URL of the login click

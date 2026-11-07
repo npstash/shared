@@ -99,7 +99,7 @@ flowchart TD
   folder.
 - **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). It holds
   `server.json` (providers, tool switches) and `sites.json` (a tree of sites with access,
-  provider config and pages). A missing file is a copy of its template in the tool folder. The server adds missing
+  provider config, forms and login links). A missing file is a copy of its template in the tool folder. The server adds missing
   tools to `server.json`. Only the discovery mode writes `sites.json` (REQ-039a of SRS).
 - **Log:** two files for each server start in LOG_DIR/`<client>`/: `.log` for a person and
   `.log.json` with all fields (REQ-050 of SRS); gitignored.
@@ -171,16 +171,20 @@ flowchart TD
   of Playwright MCP; adds missing tools; gives the error of a disabled tool.
 - **Sites:** `src/sites.js` reads `sites.json` as a tree: root domains with `subdomains`
   (REQ-037 of SRS). It checks the tree at each load. It gives the chain of nodes of a host, the
-  access of a host (a deny in the chain wins, else the nearest node, else `defaultAccess`), the form
-  of a URL (the matching pages of the node of the exact host) and the provider config of a URL (the
-  page, else the nearest node, for each provider type) (REQ-034, REQ-040 of SRS). The root domain
+  access of a host (a deny in the chain wins, else the nearest node, else `defaultAccess`), the forms
+  and login links of a URL (the nodes of the chain, the host first) and the provider config of a URL
+  (the nearest node, for each provider type) (REQ-034, REQ-040 of SRS). The root domain
   comes from the Public Suffix List (`tldts`).
 - **Host policy:** `src/hosts/host-policy.js` checks the access of the sites.
 - **Form fill:** `playwright/src/autofill.js`. It runs page code through `browser_run_code_unsafe`
-  of upstream: find the fields, fill them, submit, wait (REQ-030, REQ-038 of SRS). The tool switch
+  of upstream: find the visible fields of the forms of the host, select the form with the most
+  visible fields, fill it, submit, wait (REQ-030, REQ-038 of SRS). It waits FLOW_WAIT in a login
+  flow, else PEEK_WAIT one time for each URL. It logs `fill_no_field` when a login flow ends on a
+  page without a visible field. The tool switch
   of the agent does not apply to these calls. Their results never go to the agent. It keeps the
   loop guard of the lane. Before the fill, it clicks a visible login link of `sites.json`, one time
-  for each lane and host, if the vault provider has a system for the host (REQ-030a). It marks the
+  for each lane and host, if the vault provider has a system for the host (REQ-030a). After the
+  fill, it opens again the URL of the click, but not in the discovery mode. It marks the
   elements that it touches with `__baxAuto` for the recorder. A blocked page after a submit stops
   the fill (REQ-030). In the discovery mode, it fills one time and does not submit.
 - **Discovery:** `playwright/src/discover.js` (REQ-039, REQ-039a, REQ-042 of SRS). When a lane
@@ -294,8 +298,8 @@ sequenceDiagram
     Agent->>Server: tools/call browser_navigate login.example/u/login
     Server->>Playwright MCP: browser_navigate
     Playwright MCP-->>Server: result, Page URL: login.example/u/login
-    Server->>Server: host check; sites.json: page /u/* of login.example
-    Server->>Playwright MCP: browser_run_code_unsafe: wait for the fields (FILL_WAIT)
+    Server->>Server: host check; sites.json: forms of login.example
+    Server->>Playwright MCP: browser_run_code_unsafe: wait for the fields (PEEK_WAIT)
     Server->>Vault provider: resolve("password", host)
     Vault provider->>Vault tool: get-secret "System" password
     Vault tool-->>Vault provider: secret
@@ -369,7 +373,7 @@ sequenceDiagram
 | File | Committed | Format | Written by |
 | --- | --- | --- | --- |
 | `<config>/server.json` | yes | `providers`: array of `{ type, enabled, mask, <settings> }` (vault: `vault`; values: `values`; ask: `fields`; optional `approval` of a key-value provider: `{ type, enabled, <settings> }`; approve-https: `address`, `fingerprint`); `tools`: `{ <tool>: { enabled } }`, sorted | user; server adds missing tools |
-| `<config>/sites.json` | yes | `defaultAccess`; `sites`: `{ <root domain>: <node> }`; node: `{ access, "provider-config": { <type>: { ... } }, pages: { <path pattern>: { fields: { <selector>: <key> }, submit: [<selector> or "enter"], login: [], "provider-config" } }, subdomains: { <host>: <node> } }`; vault config: `{ vault, entry }` (REQ-037, REQ-040 of SRS) | user; discovery mode (REQ-039a, REQ-042) |
+| `<config>/sites.json` | yes | `defaultAccess`; `sites`: `{ <root domain>: <node> }`; node: `{ access, "provider-config": { <type>: { ... } }, forms: [{ fields: { <selector>: <key> }, submit: [<selector> or "enter"] }], login: [<selector>], subdomains: { <host>: <node> } }`; vault config: `{ vault, entry }` (REQ-037, REQ-040 of SRS) | user; discovery mode (REQ-039a, REQ-042) |
 | `config/server.template.json`, `config/sites.template.json` | yes | the first content of each file above | user; server copies a template to a missing file |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log.json` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log` | no | `HH:MM:SS <event> <url> <key>=<value> ...`, a maximum of LOG_LINE_MAX characters | server |
@@ -380,11 +384,8 @@ sequenceDiagram
 | `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `shared/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
 
 Sites: a site key is a root domain; a `subdomains` key is a full host name under its node. A node
-covers its host and each subdomain of it. `access` and `provider-config` go down the tree; `pages`
-do not. No case. A URL without a host passes.
-
-Path patterns: the keys of `pages`. `*` matches each sequence of characters, also `/`. `/*` matches
-each path.
+covers its host and each subdomain of it. `access`, `provider-config`, `forms` and `login` go down
+the tree. A form has no path. No case. A URL without a host passes.
 
 `<config>` is the config folder that `--config-dir` gives, e.g. `local/configs/browser-automation-x-mcp`
 of the repository.

@@ -198,7 +198,7 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   1. `server.json`: the providers (an array, in the order that the server asks them) and the tool
      switches.
   2. `sites.json`: `defaultAccess`, and the sites: a tree of root domains and their subdomains,
-     each with its access, its provider config and its pages (REQ-037).
+     each with its access, its provider config, its forms and its login links (REQ-037).
   The schemas are in [DESIGN.md](DESIGN.md#data-model). Only the discovery mode writes
   `sites.json` (REQ-039).
 - **Alternative Flow:** A config file is missing → the server shall copy its template from the
@@ -227,27 +227,32 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 ## 4. Form fill
 
-The agent does not fill credentials or personal data. The server fills the fields of the pages of
+The agent does not fill credentials or personal data. The server fills the fields of the forms of
 `sites.json` and submits the form. The agent gets the page after the submit.
 
 #### REQ-030 — Fill after a call
 
-- **Trigger:** A result of upstream shows a page URL, and the URL matches a page of `sites.json`
-  with fields (REQ-037).
+- **Trigger:** A result of upstream shows a page URL, and the host has forms in `sites.json`
+  (REQ-037).
 - **Basic Flow:**
-  1. The server shall wait a maximum of FILL_WAIT (10000 ms) for a visible field of the section,
-     in each frame of the page.
-  2. It shall get the value of each visible field from the providers (REQ-031).
-  3. It shall fill the fields that have a value, and submit the form (REQ-038).
+  1. The server shall wait for a visible field of the forms of the host, in each frame of the
+     page. In a login flow (after a login click or a submit), it waits a maximum of
+     FLOW_WAIT (3000 ms). Else it waits a maximum of PEEK_WAIT (3000 ms).
+  2. It shall select the form with the most visible fields. On a tie, the first form wins: the
+     forms of the host first, then the forms of its parents, each node in file order.
+  3. It shall get the value of each visible field of the form from the providers (REQ-031), fill
+     the fields that have a value, and submit the form (REQ-038).
   4. It shall check the host of the page after the submit (REQ-041) before each other step.
   5. It shall repeat steps 1–4 on the new page, a maximum of FILL_ROUNDS (3) rounds.
   6. It shall give the client a snapshot of the page after the last submit, in place of the
      result of upstream.
 - **Alternative Flow:**
-  - The server waited for this URL before, and the page did not change by a submit → it does not
-    wait. It checks the fields one time.
+  - The server waited for this URL before, and the page did not change by a submit or a login
+    click → it does not wait. It checks the fields one time.
   - No field is visible, or no provider has a value → the server does nothing. The client gets the
     result of upstream.
+  - No field is visible in a login flow → the server logs `fill_no_field` with the URL, the wait
+    and the selectors. The flow ends.
   - The host of the page after a submit is blocked → the server stops the fill. It opens
     `about:blank` and gives the error of REQ-041.
   - DISCOVER is `1` → the server fills the fields, but it does not submit. It does steps 1–3 one
@@ -382,7 +387,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Basic Flow:** The server shall read the sites of `sites.json` as a tree:
   1. A key of `sites` is a root domain: the registrable domain of the Public Suffix List, also for
      private suffixes. An IP address or a host without a registrable domain is its own root domain.
-  2. A node has optional `access`, `provider-config`, `pages` and `subdomains`. A key of
+  2. A node has optional `access`, `provider-config`, `forms`, `login` and `subdomains`. A key of
      `subdomains` is the full host name of a subdomain of the node.
   3. The node of a host is the deepest node that covers it. A node covers its host and each
      subdomain of it.
@@ -390,22 +395,19 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
      then its parents. For `provider-config`, this applies to each provider type separately.
   5. `provider-config` has one object for each provider type, e.g.
      `"vault": { "vault": "<vault>", "entry": "<system>" }`.
-  6. `pages` apply only to the node with the exact host. The key of a page is a path pattern. A page
-     has `fields` (`{ "<selector>": "<key>" }`), and optional `submit`, `login` and
-     `provider-config`. The `provider-config` of a page wins over the host, only for that page.
-  7. A `login` selector is not a field (REQ-030a). A selector is CSS, or a label or role locator of
-     Playwright. The key is the key of a provider (REQ-031). The case of the key has no effect.
-  8. In a path pattern, `*` matches each sequence of characters, also `/`. `/*` matches each path.
-  9. Scheme, port, query and fragment have no effect.
-- **Alternative Flow:** More pages of the host match → all apply. For a selector in more pages, the
-  more specific page (the longer path) wins.
+  6. `forms` is an array. A form has `fields` (`{ "<selector>": "<key>" }`) and optional `submit`.
+     `login` is an array of the selectors of login links (REQ-030a).
+  7. The forms and the login links of a node apply to its host and to its subdomains. A form has
+     no path: it applies on each page of these hosts where one of its fields is visible.
+  8. A selector is CSS, or a label or role locator of Playwright. The key is the key of a provider
+     (REQ-031). The case of the key has no effect.
 - **Exception Flow:** A key of `sites` is not a root domain, a key of `subdomains` is not a
-  subdomain of its node, a node or page has `credentials`, or a `vault` config has no `vault` or
-  `entry` → the server gives an error.
+  subdomain of its node, a node has `credentials` or `pages`, a form has no `fields` or has
+  `provider-config`, or a `vault` config has no `vault` or `entry` → the server gives an error.
 
 #### REQ-030a — Login link
 
-- **Pre-condition:** The page matches a page of `sites.json` with `login` selectors (REQ-037), and
+- **Pre-condition:** The host has `login` selectors in `sites.json` (REQ-037), and
   a provider has a system for the page (the vault provider: a vault config, REQ-034).
 - **Trigger:** A result of upstream shows a page URL.
 - **Basic Flow:**
@@ -413,18 +415,21 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   2. It shall wait SUBMIT_WAIT (10000 ms) for the next page, then check its host (REQ-041).
   3. It shall log `login_clicked`, and continue with REQ-030 on the next page. The click is not a
      round of FILL_ROUNDS.
+  4. At the end of the fill, the server shall open again the URL where it clicked, also after a
+     failed login. It shall check its host (REQ-041) and log `page_opened` with `login_return`.
 - **Alternative Flow:**
   - No `login` selector is visible, e.g. because the link has an other text after the login → the
     server does not click.
   - The server clicked a login link of the host in this lane before → it does not click again.
+  - The page at the end of the fill has the URL of the click → the server does not open it again.
+  - DISCOVER is `1` → the server does not open the URL of the click again.
 - **Note:** A login link is a role locator with the visible text, e.g.
   `internal:role=link[name="zaloguj się"i]`: it matches only before the login.
 
 #### REQ-038 — Submit and loop guard
 
 - **Basic Flow:**
-  1. The server shall use the first `submit` entry that applies: the more specific page first, each
-     page in file order. A selector applies when its element is visible: the server clicks it.
+  1. The server shall use the first `submit` entry of the form that applies. A selector applies when its element is visible: the server clicks it.
      The entry `enter` always applies: the server presses Enter in the last filled field. Without
      such an entry, it shall call `requestSubmit()` of the form of the last filled field. Else it
      shall press Enter in it.
@@ -433,7 +438,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   3. It shall fill each set of visible fields of a form one time only.
 - **Alternative Flow:** The same fields of the same form are visible again, e.g. after a wrong
   password → the server does not fill them. It logs `fill_failed`.
-- **Post-condition:** The guard is reset when a page does not match a page of `sites.json`.
+- **Post-condition:** The guard is reset on a page without a visible field of a form of the host.
 
 #### REQ-039 — Discovery mode: record
 
@@ -462,20 +467,20 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Trigger:** A click of a button or a submit (REQ-039), a navigation of the page, or the close of
   the lane.
 - **Basic Flow:**
-  1. The server shall read `sites.json` again. The node is the node of the exact host of the page
-     (REQ-037). A missing node goes into `subdomains` of the nearest node that covers the host,
-     else it is a new root domain. The page key is its path pattern.
-  2. For each field that the user filled, it shall get the key of the value (`match`) from the
+  1. The server shall read `sites.json` again. The node is the nearest node of the host with a
+     `provider-config` (REQ-037), else the root domain. A missing root domain is a new site.
+  2. The form is the form of the node that has a selector of the fields that the user or the form
+     fill filled. Else a new form goes at the end of `forms`, if the user filled a field.
+  3. For each field that the user filled, it shall get the key of the value (`match`) from the
      key-value providers (REQ-031), in their order.
-     The first key wins. It shall write `"<selector>": "<key>"` into `fields`.
-  3. It shall write the button that the user clicked into `submit`, if the user or the form fill
-     filled a field of the page.
-  4. For a submit without a button, it shall write the first visible submit button of the form into
+     The first key wins. It shall write `"<selector>": "<key>"` into `fields` of the form.
+  4. It shall write the button that the user clicked into `submit` of the form.
+  5. For a submit without a button, it shall write the first visible submit button of the form into
      `submit`. If the form has no such button, it shall write `enter`.
-  5. At a submit with fields of the user, it shall write the last link that the user followed
-     before into `login` of the page of the link. Then it forgets the link.
-  6. It shall discard the values. It shall not log or write a value.
-  7. It shall change only these entries. The other entries of the file stay.
+  6. At a submit with fields of the user, it shall write the last link that the user followed
+     before into `login` of the node of the link. Then it forgets the link.
+  7. It shall discard the values. It shall not log or write a value.
+  8. It shall change only these entries. The other entries of the file stay.
 - **Alternative Flow:**
   - No provider has a key for the value, or the trigger has no values (a navigation, the close of
     the lane) → the server writes the name from the attributes of the field: `username`,
@@ -484,8 +489,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
   - The agent or the form fill filled the field → the server does not write it.
   - The value is equal to a value of a masked provider → the server adds it to the masked values
     (REQ-032).
-- **Note:** A path segment that is an ID becomes `*`. An ID segment has only digits, is a UUID, or
-  has more than 16 characters of hex or base64url with a digit and a letter.
+  - Only the form fill filled, and no form has its selectors → the server writes nothing.
 
 ## 5. Host access
 
@@ -712,7 +716,8 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | LANES_DIR | `.local_assets/lanes/` | — | — | Profiles of the open lanes: `<pid>-<lane id>` |
 | ACTIVITY_INTERVAL | 5000 | ms | — | Minimum time between two reports of the input of the user |
 | STATE_FILE | `.local_assets/storage-state-<hash of the working folder>.json` | — | `BROWSER_AUTOMATION_X_MCP_STORAGE_STATE` | Storage state of the lanes of one workspace (REQ-064) |
-| FILL_WAIT | 10000 | ms | — | Maximum wait for the fields of a page |
+| FLOW_WAIT | 3000 | ms | — | Maximum wait for a form field in a login flow |
+| PEEK_WAIT | 3000 | ms | — | Maximum wait for a form field on an other page, one time for each URL |
 | SUBMIT_WAIT | 10000 | ms | — | Maximum wait for the load and for the network after a submit |
 | FILL_ROUNDS | 3 | rounds | — | Maximum fill and submit rounds in one call |
 | MASK | `***` | — | — | Replacement of a masked value |

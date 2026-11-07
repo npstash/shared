@@ -9,14 +9,13 @@
 //         "provider-config": {                       optional; inherited by the subdomains
 //           "<provider type>": { ... },              e.g. "vault": { "vault": "vault-main", "entry": "<system>" }
 //         },
-//         "pages": {                                 only for this host, not for the subdomains
-//           "<path pattern>": {                      "*" in the path is each sequence of characters
+//         "forms": [                                 optional; also for the subdomains
+//           {
 //             "fields": { "<selector>": "<key>" },   form fields; the key of a provider value
-//             "submit": ["<selector>" | "enter"],    optional; the first visible, or Enter
-//             "login":  ["<selector>"],              optional; the login links of the page
-//             "provider-config": { ... }             optional; only for this page
+//             "submit": ["<selector>" | "enter"]     optional; the first visible, or Enter
 //           }
-//         },
+//         ],
+//         "login": ["<selector>"],                   optional; login links; also for the subdomains
 //         "subdomains": {
 //           "<subdomain>": { ... }                   e.g. www.amazon.pl; the same keys as a site
 //         }
@@ -24,8 +23,9 @@
 //     }
 //   }
 //
-// The nearest value wins: the page, then the host, then its parent domains. For "provider-config",
-// this applies to each provider type separately. A "deny" of a parent wins over an "allow" below it.
+// A form applies on each page of the host where one of its fields is visible: no path selects it.
+// The nearest value wins: the host, then its parent domains. For "provider-config", this applies
+// to each provider type separately. A "deny" of a parent wins over an "allow" below it.
 // A selector is CSS, or a label or role locator of Playwright.
 import { mtimeOf, readJson, writeJson } from './json.js';
 import { getDomain } from 'tldts';
@@ -33,32 +33,11 @@ import { hostOfUrl, normalizeHost } from './hosts/patterns.js';
 
 export const ACCESS = ['allow', 'deny'];
 
-// A path segment that is an ID: only digits, a UUID, or more than 16 characters of hex or
-// base64url with a digit and a letter.
-const ID_SEGMENT = [
-  /^\d+$/,
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-  /^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9_-]{17,}$/,
-];
-
 // True if the site host covers the host: the same host or a subdomain.
 export function covers(siteHost, host) {
   const site = normalizeHost(siteHost);
   const h = normalizeHost(host);
   return h === site || h.endsWith(`.${site}`);
-}
-
-// True if the path pattern matches the path of a URL.
-export function pathMatches(pattern, pathname) {
-  const regex = new RegExp(`^${pattern.split('*').map(escapeRegExp).join('.*')}$`);
-  return regex.test(pathname);
-}
-
-// The host and the path pattern of a page: each ID segment of the path becomes "*".
-export function pageOf(url) {
-  const parsed = new URL(url);
-  const segments = parsed.pathname.split('/').map((segment) => (ID_SEGMENT.some((re) => re.test(segment)) ? '*' : segment));
-  return { host: parsed.hostname.toLowerCase(), path: segments.join('/') };
 }
 
 // The provider-config keys that each provider type needs (REQ-037 of sdd/SRS.md).
@@ -100,20 +79,7 @@ export class Sites {
   // The nodes of the tree that cover the host, from the root domain to the most specific node:
   // [{ host, node }]. Empty if no site covers the host.
   chainOf(host) {
-    const { sites } = this.load();
-    const h = normalizeHost(host);
-    const root = rootDomain(h);
-    const rootKey = Object.keys(sites).find((key) => normalizeHost(key) === root);
-    if (rootKey === undefined) return [];
-    const chain = [{ host: root, node: sites[rootKey] ?? {} }];
-    for (;;) {
-      const { node } = chain[chain.length - 1];
-      const next = Object.entries(node.subdomains ?? {})
-        .filter(([key]) => covers(key, h))
-        .sort(([a], [b]) => b.length - a.length)[0];
-      if (!next) return chain;
-      chain.push({ host: normalizeHost(next[0]), node: next[1] ?? {} });
-    }
+    return chainIn(this.load().sites, host);
   }
 
   // True if a site of sites.json covers the host.
@@ -133,50 +99,48 @@ export class Sites {
     return { allowed: false, reason: `the host ${host} is not allowed` };
   }
 
-  // The pages of the node of the exact host that match a URL, the most specific (longest path) first.
-  pagesOf(url) {
-    const host = hostOfUrl(url);
-    if (!host) return [];
-    const exact = this.chainOf(host).at(-1);
-    if (!exact || exact.host !== host) return [];
-    const { pathname } = new URL(url);
-    return Object.entries(exact.node.pages ?? {})
-      .filter(([pattern]) => pathMatches(pattern, pathname))
-      .map(([pattern, page]) => ({ key: `${host}${pattern}`, page: page ?? {} }))
-      .sort((a, b) => b.key.length - a.key.length);
-  }
-
-  // The form of a URL, or undefined: { key, fields: [{ name, selector }], submits, logins }.
-  // name is the key of the value, in lowercase. All matching pages apply. For a selector in more
-  // pages, the more specific page wins.
-  // submits and logins: the more specific page first, each page in file order.
-  // key: the matching pages; it identifies the form for the loop guard of the server.
+  // The forms and login links for a URL, or undefined: { forms: [{ key, fields: [{ name, selector }],
+  // submits }], logins }. name is the key of the value, in lowercase. The forms of the host come
+  // first, then the forms of its parents; each node in file order. key identifies the form in the
+  // log and in the loop guard of the server: "<node host> form <number>".
   match(url) {
-    const pages = this.pagesOf(url);
-    if (!pages.length) return undefined;
-    const fields = new Map();
-    for (const { page } of [...pages].reverse()) {
-      for (const [selector, name] of Object.entries(page.fields ?? {})) fields.set(selector, String(name).toLowerCase());
-    }
-    const list = (key) => [...new Set(pages.flatMap(({ page }) => page[key] ?? []))];
-    const logins = list('login');
-    if (!fields.size && !logins.length) return undefined;
-    return {
-      key: pages.map(({ key }) => key).reverse().join(' '),
-      fields: [...fields].map(([selector, name]) => ({ name, selector })),
-      submits: list('submit'),
-      logins,
-    };
+    const host = hostOfUrl(url);
+    if (!host) return undefined;
+    const chain = this.chainOf(host).reverse();
+    const forms = chain.flatMap(({ host: nodeHost, node }) => (node.forms ?? []).map((form, index) => ({
+      key: `${nodeHost} form ${index + 1}`,
+      fields: Object.entries(form.fields ?? {}).map(([selector, name]) => ({ name: String(name).toLowerCase(), selector })),
+      submits: form.submit ?? [],
+    }))).filter((form) => form.fields.length);
+    const logins = [...new Set(chain.flatMap(({ node }) => node.login ?? []))];
+    if (!forms.length && !logins.length) return undefined;
+    return { forms, logins };
   }
 
   // The config of a provider type for a URL, or undefined: the nearest "provider-config" with this
-  // type. The order: the matching pages (the most specific first), then the host, then its parents.
+  // type, from the host to its parents.
   providerConfig(url, type) {
     const host = hostOfUrl(url);
     if (!host) return undefined;
-    const page = this.pagesOf(url).find(({ page: p }) => p['provider-config']?.[type]);
-    if (page) return page.page['provider-config'][type];
     return this.chainOf(host).reverse().find(({ node }) => node['provider-config']?.[type])?.node['provider-config'][type];
+  }
+}
+
+// The nodes of the sites object of sites.json that cover the host, from the root domain to the
+// most specific node: [{ host, node }]. Empty if no site covers the host.
+export function chainIn(sites, host) {
+  const h = normalizeHost(host);
+  const root = rootDomain(h);
+  const rootKey = Object.keys(sites).find((key) => normalizeHost(key) === root);
+  if (rootKey === undefined) return [];
+  const chain = [{ host: root, node: sites[rootKey] ?? {} }];
+  for (;;) {
+    const { node } = chain[chain.length - 1];
+    const next = Object.entries(node.subdomains ?? {})
+      .filter(([key]) => covers(key, h))
+      .sort(([a], [b]) => b.length - a.length)[0];
+    if (!next) return chain;
+    chain.push({ host: normalizeHost(next[0]), node: next[1] ?? {} });
   }
 }
 
@@ -186,11 +150,16 @@ function checkNode(file, host, node) {
   if (node.credentials !== undefined) throw new Error(`${where} has "credentials"; use "provider-config": { "vault": { "vault": "<vault>", "entry": "<system>" } }`);
   if (node.access !== undefined && !ACCESS.includes(node.access)) throw new Error(`${where}: access must be "allow" or "deny"`);
   checkProviderConfig(where, node['provider-config']);
-  for (const [pattern, page] of Object.entries(node.pages ?? {})) {
-    const at = `${where}, page "${pattern}"`;
-    if (page?.credentials !== undefined) throw new Error(`${at} has "credentials"; use "provider-config"`);
-    checkProviderConfig(at, page?.['provider-config']);
+  if (node.pages !== undefined) throw new Error(`${where} has "pages"; use "forms" and "login"`);
+  if (node.forms !== undefined && !Array.isArray(node.forms)) throw new Error(`${where}: "forms" must be an array`);
+  for (const [index, form] of (node.forms ?? []).entries()) {
+    const at = `${where}, form ${index + 1}`;
+    if (!form || typeof form !== 'object' || Array.isArray(form)) throw new Error(`${at} must be an object`);
+    if (!form.fields || typeof form.fields !== 'object' || Array.isArray(form.fields)) throw new Error(`${at} needs "fields"`);
+    if (form.submit !== undefined && !Array.isArray(form.submit)) throw new Error(`${at}: "submit" must be an array`);
+    if (form['provider-config'] !== undefined) throw new Error(`${at} has "provider-config"; put it on the site`);
   }
+  if (node.login !== undefined && !Array.isArray(node.login)) throw new Error(`${where}: "login" must be an array`);
   for (const [sub, child] of Object.entries(node.subdomains ?? {})) {
     if (normalizeHost(sub) === normalizeHost(host) || !covers(host, sub)) throw new Error(`${where}: "${sub}" in "subdomains" is not a subdomain of "${host}"`);
     checkNode(file, sub, child ?? {});
@@ -217,8 +186,4 @@ export function updateSites(file, change) {
   const result = change(data);
   if (Array.isArray(result) ? result.length : result) writeJson(file, data);
   return result;
-}
-
-function escapeRegExp(text) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

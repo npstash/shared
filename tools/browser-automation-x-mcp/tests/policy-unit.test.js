@@ -14,7 +14,7 @@ import { hostOfUrl } from '../src/hosts/patterns.js';
 import { readJson } from '../src/json.js';
 import { LOG_LINE_MAX, compactUrl, createLogger, folderName, formatLine, redact } from '../src/logger.js';
 import { ServerConfig, ToolsConfig } from '../src/server-config.js';
-import { Sites, covers, pageOf, pathMatches, rootDomain, updateSites } from '../src/sites.js';
+import { Sites, covers, rootDomain, updateSites } from '../src/sites.js';
 import ApproveDialogProvider from '../providers-form-fill/approve-dialog/index.js';
 import ApproveHttpsProvider, { normalizeFingerprint } from '../providers-form-fill/approve-https/index.js';
 import AskProvider from '../providers-form-fill/ask/index.js';
@@ -82,7 +82,11 @@ describe('sites.json: access', () => {
     assert.throws(() => sitesOf({ sites: { 'www.amazon.pl': {} } }).load(), /"www.amazon.pl" is not a root domain; put it into "subdomains" of "amazon.pl"/);
     assert.throws(() => sitesOf({ sites: { 'amazon.pl': { subdomains: { 'www.other.pl': {} } } } }).load(), /"www.other.pl" in "subdomains" is not a subdomain of "amazon.pl"/);
     assert.throws(() => sitesOf({ sites: { 'amazon.pl': { credentials: { vault: 'A' } } } }).load(), /has "credentials"; use "provider-config"/);
-    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { pages: { '/': { credentials: { vault: 'A' } } } } } }).load(), /page "\/" has "credentials"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { pages: { '/': {} } } } }).load(), /has "pages"; use "forms" and "login"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { forms: {} } } }).load(), /"forms" must be an array/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { forms: [{ submit: ['#go'] }] } } }).load(), /form 1 needs "fields"/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { forms: [{ fields: {}, 'provider-config': {} }] } } }).load(), /form 1 has "provider-config"; put it on the site/);
+    assert.throws(() => sitesOf({ sites: { 'amazon.pl': { login: 'a' } } }).load(), /"login" must be an array/);
     assert.throws(() => sitesOf({ sites: { 'amazon.pl': { 'provider-config': { vault: { entry: 'A' } } } } }).load(), /"provider-config"."vault" needs "vault"/);
     assert.throws(() => sitesOf({ sites: { 'amazon.pl': { 'provider-config': { vault: { vault: 'vault-main' } } } } }).load(), /"provider-config"."vault" needs "entry"/);
     assert.doesNotThrow(() => sitesOf({ sites: { 'amazon.pl': { 'provider-config': { other: {} } } } }).load());
@@ -107,61 +111,51 @@ describe('sites.json: access', () => {
   });
 });
 
-describe('sites.json: pages', () => {
-  test('the page of a URL: the host and the path, each ID segment replaced with *', () => {
-    assert.deepEqual(pageOf('https://Login.Example.com/u/login/identifier?state=x'), { host: 'login.example.com', path: '/u/login/identifier' });
-    assert.deepEqual(pageOf('https://a.example/t/12345/user/0f8fad5b-d9cb-469f-a165-70867728950e/x'), { host: 'a.example', path: '/t/*/user/*/x' });
-    assert.deepEqual(pageOf('https://a.example/'), { host: 'a.example', path: '/' });
-  });
-
-  test('a path pattern: * is each sequence of characters, also /', () => {
-    assert.equal(pathMatches('/u/*/login', '/u/abc/def/login'), true);
-    assert.equal(pathMatches('/u/*/login', '/u/abc/login/next'), false);
-    assert.equal(pathMatches('/*', '/any/path'), true);
-    assert.equal(pathMatches('/', '/x'), false);
-  });
-
-  test('all matching pages of the exact host apply; the more specific page wins; submit and login keep their order', () => {
+describe('sites.json: forms', () => {
+  test('the forms of the host, then of its parents, each node in file order; the login links of the chain', () => {
     const sites = sitesOf({
       sites: {
         'example.com': {
-          pages: { '/*': { fields: { '#root': 'username' } } },
-          subdomains: { 'login.example.com': { pages: {
-            '/*': { fields: { '#user': 'username', '#pass': 'password' }, submit: ['#generic'] },
-            '/admin/*': { fields: { '#pass': 'Secret', 'input[name="admin-pass"]': 'Password' }, submit: ['#next', 'enter'], login: ['#signin'] },
-          } } },
+          forms: [{ fields: { '#root': 'Username' } }],
+          login: ['#signin', '#account'],
+          subdomains: { 'login.example.com': {
+            forms: [
+              { fields: { '#user': 'username' }, submit: ['#next', 'enter'] },
+              { fields: { '#pass': 'password' } },
+              { fields: {} },
+            ],
+            login: ['#account'],
+          } },
         },
-        'other.example': { pages: {} },
+        'other.example': { forms: [] },
       },
     });
-    assert.deepEqual(sites.match('https://login.example.com/admin/login'), {
-      key: 'login.example.com/* login.example.com/admin/*',
-      fields: [{ name: 'username', selector: '#user' }, { name: 'secret', selector: '#pass' }, { name: 'password', selector: 'input[name="admin-pass"]' }],
-      submits: ['#next', 'enter', '#generic'],
-      logins: ['#signin'],
+    assert.deepEqual(sites.match('https://login.example.com/any/path'), {
+      forms: [
+        { key: 'login.example.com form 1', fields: [{ name: 'username', selector: '#user' }], submits: ['#next', 'enter'] },
+        { key: 'login.example.com form 2', fields: [{ name: 'password', selector: '#pass' }], submits: [] },
+        { key: 'example.com form 1', fields: [{ name: 'username', selector: '#root' }], submits: [] },
+      ],
+      logins: ['#account', '#signin'],
     });
+    assert.deepEqual(sites.match('https://www.example.com/x').forms.map(({ key }) => key), ['example.com form 1'], 'the forms of a parent apply to a subdomain');
     assert.equal(sites.match('https://other.example/'), undefined);
     assert.equal(sites.match('https://unknown.example/'), undefined);
-    assert.equal(sites.match('https://www.example.com/x'), undefined, 'the pages of a parent do not apply to a subdomain');
-    assert.equal(sites.match('https://example.com/x').key, 'example.com/*');
-    assert.deepEqual(sitesOf({ sites: { 'shop.example': { pages: { '/': { login: ['a'] } } } } }).match('https://shop.example/'),
-      { key: 'shop.example/', fields: [], submits: [], logins: ['a'] });
+    assert.deepEqual(sitesOf({ sites: { 'shop.example': { login: ['a'] } } }).match('https://shop.example/'), { forms: [], logins: ['a'] });
   });
 
-  test('provider-config: the page, else the nearest node; each provider type separately; a page does not reach subdomains', () => {
+  test('provider-config: the nearest node; each provider type separately', () => {
     const vault = (entry, name = 'vault-main') => ({ vault: name, entry });
     const sites = sitesOf({
       sites: {
         'example.com': {
           'provider-config': { vault: vault('Example'), values: { set: 'root' } },
-          pages: { '/a/*': { 'provider-config': { vault: vault('Example A') } } },
           subdomains: { 'b.example.com': { 'provider-config': { vault: vault('Example B', 'vault-other') } } },
         },
       },
     });
     const config = (url, type = 'vault') => sites.providerConfig(url, type);
     assert.deepEqual(config('https://www.example.com/'), vault('Example'));
-    assert.deepEqual(config('https://example.com/a/x'), vault('Example A'));
     assert.deepEqual(config('https://b.example.com/a/x'), vault('Example B', 'vault-other'));
     assert.deepEqual(config('https://x.b.example.com/', 'values'), { set: 'root' }, 'the other provider types stay inherited');
     assert.equal(config('https://other.example/'), undefined);

@@ -24,9 +24,9 @@ async function waitFor(get, check) {
   return value;
 }
 
-// A page of sites.json of the test, or undefined.
-function sitesPage(mcp, host, pattern) {
-  return mcp.sites.sites?.[host]?.pages?.[pattern];
+// The form of a node of sites.json of the test with the selector, or undefined.
+function sitesForm(mcp, host, selector) {
+  return mcp.sites.sites?.[host]?.forms?.find((form) => form?.fields?.[selector] !== undefined);
 }
 
 describe('tool switches', () => {
@@ -124,11 +124,12 @@ const PASSWORD = 'Fixture-Pa55-word';
 describe('form fill', () => {
   const sites = {
     '127.0.0.1': {
-      pages: {
-        '/account.html': { fields: { '#username': 'username', 'input[name="password"]': 'password', '#name': 'name', '#phone': 'phone' } },
-        '/login*': { fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } },
-        '/twostep.html': { fields: { '#login-user': 'username', '#login-pass': 'password' } },
-      },
+      forms: [
+        { fields: { '#username': 'username', 'input[name="password"]': 'password', '#name': 'name', '#phone': 'phone' } },
+        { fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } },
+        { fields: { '#login-user': 'username' } },
+        { fields: { '#login-pass': 'password' } },
+      ],
     },
   };
   let mcp;
@@ -167,6 +168,9 @@ describe('form fill', () => {
       for (const secret of [USERNAME, PASSWORD, '+48 600 100 200']) assert.ok(!output.includes(secret), `"${secret}" is visible`);
     }
     assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'fill_submitted' && entry.how === 'requestSubmit'));
+    const noField = readLog(mcp.logFile).find((entry) => entry.event === 'fill_no_field');
+    assert.equal(noField?.waited, 3000, 'the page after the submit has no field');
+    assert.ok(noField.selectors.includes('#phone'));
   });
 
   test('the same form after the submit gets no second fill', async () => {
@@ -180,7 +184,7 @@ describe('form fill', () => {
     assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'fill_failed'));
   });
 
-  test('a second step on the same URL gets a fill in the same call', async () => {
+  test('a second step on the same URL with an other form gets a fill in the same call', async () => {
     const before = site.submissions.length;
     const text = await call(mcp.client, 'browser_navigate', { url: `${site.url}/twostep.html` });
     assert.equal(site.submissions.length, before + 1);
@@ -188,17 +192,18 @@ describe('form fill', () => {
     assert.match(text, /Page Title: Submitted/);
   });
 
-  test('a page without a page entry in sites.json gets no fill', async () => {
+  test('a page without a visible field of a form gets no fill; no fill_no_field outside a login flow', async () => {
     const before = site.submissions.length;
-    await call(mcp.client, 'browser_navigate', { url: `${site.url}/form.html` });
+    await call(mcp.client, 'browser_navigate', { url: `${site.url}/index.html` });
     await call(mcp.client, 'browser_navigate', { url: `${site.otherUrl}/account.html` });
     assert.equal(site.submissions.length, before);
+    assert.ok(!readLog(mcp.logFile).some((entry) => entry.event === 'fill_no_field' && entry.url.endsWith('/index.html')));
   });
 });
 
 describe('form fill without dialogs', () => {
   test('the ask provider is skipped when the client cannot show dialogs', async () => {
-    const mcp = await startServerClient({ name: 'policy-nodialog', config: { sites: { '127.0.0.1': { pages: { '/account.html': { fields: { '#phone': 'phone' } } } } } } });
+    const mcp = await startServerClient({ name: 'policy-nodialog', config: { sites: { '127.0.0.1': { forms: [{ fields: { '#phone': 'phone' } }] } } } });
     try {
       const before = site.submissions.length;
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/account.html` });
@@ -211,7 +216,7 @@ describe('form fill without dialogs', () => {
 });
 
 describe('approval', () => {
-  const sites = { '127.0.0.1': { pages: { '/login*': { fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } } } } };
+  const sites = { '127.0.0.1': { forms: [{ fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } }] } };
   const providers = () => [
     { type: 'vault', enabled: true, mask: true, vault: 'vault-test', approval: { type: 'approve-dialog' } },
     { type: 'values', enabled: true, mask: false, values: { password: 'not-this' } },
@@ -274,8 +279,9 @@ describe('discovery', () => {
       await call(mcp.client, 'browser_type', { target: ref(snapshot, 'textbox', 'Note'), element: 'Note', text: 'hello' });
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html?user=1` });
       const calls = readLog(mcp.logFile).filter((entry) => entry.event === 'tool_call').length;
-      const page = await waitFor(() => sitesPage(mcp, '127.0.0.1', '/user-step.html'), (p) => p?.submit);
-      assert.deepEqual(page, { fields: { 'input[autocomplete="username"]': 'nickname' }, submit: ['#send'] });
+      const form = await waitFor(() => sitesForm(mcp, '127.0.0.1', 'input[autocomplete="username"]'), (f) => f?.submit);
+      assert.deepEqual(mcp.sites.sites['127.0.0.1'].forms, [{ fields: { 'input[autocomplete="username"]': 'nickname' }, submit: ['#send'] }]);
+      assert.ok(form);
       const log = readLog(mcp.logFile);
       assert.equal(log.filter((entry) => entry.event === 'tool_call').length, calls, 'no call of the agent');
       for (const event of ['agent_filled', 'user_filled', 'user_pressed', 'fields_written']) assert.ok(log.some((entry) => entry.event === event), event);
@@ -291,10 +297,11 @@ describe('discovery', () => {
     try {
       // signin.html acts as the user: it follows the sign-in link; login.html fills and signs in.
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/signin.html?user=1` });
-      const login = await waitFor(() => sitesPage(mcp, '127.0.0.1', '/login.html'), (p) => p?.submit);
+      const login = await waitFor(() => sitesForm(mcp, '127.0.0.1', 'input[name="pass"]'), (f) => f?.submit);
       assert.deepEqual(login.fields, { 'input[autocomplete="username"]': 'username', 'input[name="pass"]': 'password' });
       assert.deepEqual(login.submit, ['button[type="submit"]']);
-      assert.deepEqual(sitesPage(mcp, '127.0.0.1', '/signin.html').login, ['internal:role=link[name="Hello, sign in Account"i]']);
+      assert.deepEqual(mcp.sites.sites['127.0.0.1'].login, ['internal:role=link[name="Hello, sign in Account"i]']);
+      assert.equal(mcp.sites.sites['127.0.0.1'].pages, undefined);
       const followed = readLog(mcp.logFile).find((entry) => entry.event === 'user_followed');
       assert.equal(followed.target, '127.0.0.1/login.html');
       for (const text of [fs.readFileSync(mcp.logFile, 'utf8'), fs.readFileSync(mcp.sitesFile, 'utf8')]) {
@@ -305,52 +312,55 @@ describe('discovery', () => {
     }
   });
 
-  test('a subdomain: the root domain gets the access; the pages go into "subdomains"; the vault config of the parent applies', async () => {
+  test('a subdomain: the forms and the login link go into the node with the vault config; no node for the subdomain', async () => {
     const vault = { vault: { vault: 'vault-test', entry: 'Fixture site' } };
     const mcp = await startServerClient({ name: 'policy-discover-subdomain', env: DISCOVER, config: { sites: { 'a.localhost': { 'provider-config': vault } } } });
     try {
       const url = site.url.replace('127.0.0.1', 'www.a.localhost');
       await call(mcp.client, 'browser_navigate', { url: `${url}/signin.html?user=1` });
-      const root = await waitFor(() => mcp.sites.sites['a.localhost'], (s) => s?.subdomains?.['www.a.localhost']?.pages?.['/login.html']?.submit);
+      const root = await waitFor(() => mcp.sites.sites['a.localhost'], (s) => s?.forms?.[0]?.submit);
       assert.equal(root.access, 'allow');
       assert.deepEqual(root['provider-config'], vault);
-      assert.deepEqual(root.subdomains['www.a.localhost'].pages['/login.html'].fields,
-        { 'input[autocomplete="username"]': 'username', 'input[name="pass"]': 'password' });
-      assert.equal(root.pages, undefined, 'the pages of a subdomain do not go into the root domain');
+      assert.deepEqual(root.forms, [{ fields: { 'input[autocomplete="username"]': 'username', 'input[name="pass"]': 'password' }, submit: ['button[type="submit"]'] }]);
+      assert.deepEqual(root.login, ['internal:role=link[name="Hello, sign in Account"i]']);
+      assert.equal(root.subdomains, undefined, 'no node for the subdomain');
       assert.equal(mcp.sites.sites['www.a.localhost'], undefined, 'no site for the subdomain');
     } finally {
       await mcp.close();
     }
   });
 
-  test('a submit without a button: the submit button of the form, else "enter"; a field without a key gets its name', async () => {
+  test('a submit without a button: the submit button of the form, else "enter"; a field without a key gets its name; a form without a shared selector is a new form', async () => {
     const mcp = await startServerClient({ name: 'policy-discover-enter', env: DISCOVER });
     try {
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/enter.html?user=plain` });
-      const plain = await waitFor(() => sitesPage(mcp, '127.0.0.1', '/enter.html'), (p) => p?.submit);
+      const plain = await waitFor(() => sitesForm(mcp, '127.0.0.1', 'input[name="code"]'), (f) => f?.submit);
       assert.deepEqual(plain, { fields: { 'input[name="code"]': 'code' }, submit: ['enter'] });
       // The token of localhost is a value of the vault, but 127.0.0.1 has an other vault system.
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/enter.html?user=button` });
-      const both = await waitFor(() => sitesPage(mcp, '127.0.0.1', '/enter.html'), (p) => p?.submit?.length === 2);
-      assert.deepEqual(both, { fields: { 'input[name="code"]': 'code', 'input[name="token"]': 'token' }, submit: ['enter', '#go'] });
+      await waitFor(() => sitesForm(mcp, '127.0.0.1', 'input[name="token"]'), (f) => f?.submit);
+      assert.deepEqual(mcp.sites.sites['127.0.0.1'].forms, [
+        { fields: { 'input[name="code"]': 'code' }, submit: ['enter'] },
+        { fields: { 'input[name="token"]': 'token' }, submit: ['#go'] },
+      ]);
     } finally {
       await mcp.close();
     }
   });
 
-  test('a match replaces a name; the user can change sites.json while the server runs', async () => {
+  test('a match replaces a name in the form with the selector; the user can change sites.json while the server runs', async () => {
     const mcp = await startServerClient({
       name: 'policy-discover-keep',
       env: DISCOVER,
-      config: { sites: { '127.0.0.1': { note: 'mine', pages: { '/user-step.html': { fields: { 'input[autocomplete="username"]': 'old-name' } } } } }, values: { login: 'someone' } },
+      config: { sites: { '127.0.0.1': { note: 'mine', forms: [{ fields: { 'input[autocomplete="username"]': 'old-name' } }] } }, values: { login: 'someone' } },
     });
     try {
       const sites = mcp.sites;
       sites.sites['example.org'] = { access: 'deny' };
       fs.writeFileSync(mcp.sitesFile, JSON.stringify(sites));
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html?user=1` });
-      const page = await waitFor(() => sitesPage(mcp, '127.0.0.1', '/user-step.html'), (p) => p?.submit);
-      assert.deepEqual(page.fields, { 'input[autocomplete="username"]': 'login' });
+      await waitFor(() => sitesForm(mcp, '127.0.0.1', 'input[autocomplete="username"]'), (f) => f?.submit);
+      assert.deepEqual(mcp.sites.sites['127.0.0.1'].forms, [{ fields: { 'input[autocomplete="username"]': 'login' }, submit: ['#send'] }]);
       assert.equal(mcp.sites.sites['127.0.0.1'].note, 'mine');
       assert.deepEqual(mcp.sites.sites['example.org'], { access: 'deny' });
     } finally {
@@ -362,7 +372,7 @@ describe('discovery', () => {
     const mcp = await startServerClient({
       name: 'policy-discover-fill',
       env: DISCOVER,
-      config: { sites: { '127.0.0.1': { pages: { '/account.html': { fields: { '#username': 'username', '#phone': 'phone' } } } } } },
+      config: { sites: { '127.0.0.1': { forms: [{ fields: { '#username': 'username', '#phone': 'phone' } }] } } },
       onElicit: async () => ({ action: 'accept', content: { value: '+48 600 100 200' } }),
     });
     try {
@@ -384,7 +394,7 @@ describe('label locators and submits', () => {
     const mcp = await startServerClient({
       name: 'policy-label',
       config: {
-        sites: { '127.0.0.1': { pages: { '/label.html': { fields: { 'internal:label="Nickname"s': 'nickname' }, submit: ['#missing', '#go'] } } } },
+        sites: { '127.0.0.1': { forms: [{ fields: { 'internal:label="Nickname"s': 'nickname' }, submit: ['#missing', '#go'] }] } },
         values: { nickname: 'Nick' },
       },
     });
@@ -402,7 +412,7 @@ describe('label locators and submits', () => {
   test('"enter" in submit presses Enter in the last field', async () => {
     const mcp = await startServerClient({
       name: 'policy-enter',
-      config: { sites: { '127.0.0.1': { pages: { '/enter.html': { fields: { '#code': 'code' }, submit: ['enter', '#go'] } } } }, values: { code: 'C-1' } },
+      config: { sites: { '127.0.0.1': { forms: [{ fields: { '#code': 'code' }, submit: ['enter', '#go'] }] } }, values: { code: 'C-1' } },
     });
     try {
       const count = site.submissions.length;
@@ -422,8 +432,8 @@ describe('host check after an auto-submit', () => {
       name: 'policy-hop',
       config: {
         sites: {
-          '127.0.0.1': { pages: { '/hop.html': { fields: { '#username': 'username' } } } },
-          localhost: { access: 'deny', pages: { '/password.html': { fields: { '#password': 'password' } } } },
+          '127.0.0.1': { forms: [{ fields: { '#username': 'username' } }] },
+          localhost: { access: 'deny', forms: [{ fields: { '#password': 'password' } }] },
         },
       },
     });
@@ -444,24 +454,23 @@ describe('host check after an auto-submit', () => {
 describe('login link', () => {
   const sites = {
     '127.0.0.1': {
-      pages: {
-        '/signin.html': { login: ['internal:role=link[name="sign in"i]'] },
-        '/login*': { fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } },
-      },
+      login: ['internal:role=link[name="sign in"i]'],
+      forms: [{ fields: { 'input[autocomplete="username"]': 'username', '#pass': 'password' } }],
     },
   };
 
-  test('a visible login link of a site with a vault config gets one click; the login page gets the fill', async () => {
+  test('a visible login link of a site with a vault config gets one click; the login page gets the fill; then the server opens the start URL again', async () => {
     const mcp = await startServerClient({ name: 'policy-login', config: { sites } });
     try {
       const before = site.submissions.length;
       const text = await call(mcp.client, 'browser_navigate', { url: `${site.url}/signin.html` });
       assert.equal(site.submissions.length, before + 1);
       assert.deepEqual(site.submissions.at(-1), { user: USERNAME, pass: PASSWORD });
-      assert.match(text, /Page Title: Login/);
+      assert.match(text, /Page Title: Shop home/);
       const log = readLog(mcp.logFile);
       assert.ok(log.some((entry) => entry.event === 'login_clicked' && entry.selector === 'internal:role=link[name="sign in"i]'));
       assert.ok(log.some((entry) => entry.event === 'page_opened' && entry.via === 'auto_login'));
+      assert.ok(log.some((entry) => entry.event === 'page_opened' && entry.via === 'login_return' && entry.url.endsWith('/signin.html')));
 
       // One click for each lane and host.
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/signin.html` });

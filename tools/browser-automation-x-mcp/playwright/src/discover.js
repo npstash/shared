@@ -7,12 +7,14 @@
 //
 // The server writes sites.json (updateSites() of src/sites.js):
 // - at each page load: the host, with "access": "allow";
-// - at a submit, a navigation or the close of the lane: the fields that the user filled, with the
-//   key of the value from the key-value providers ("<selector>": "<key>"), the button that the user
-//   clicked into "submit", and the link that the user followed before into "login".
+// - at a submit, a navigation or the close of the lane: a form with the fields that the user
+//   filled, with the key of the value from the key-value providers ("<selector>": "<key>"), and the
+//   button that the user clicked into "submit"; the link that the user followed before into "login".
+//   A form that has a selector of the new form gets the new selectors; else the form is added.
+//   The form and the link go into the nearest node with a "provider-config", else the root domain.
 // The values are discarded after the match. They are never logged or written.
-import { hostOfUrl, normalizeHost } from '../../src/hosts/patterns.js';
-import { covers, pageOf, rootDomain, updateSites } from '../../src/sites.js';
+import { hostOfUrl } from '../../src/hosts/patterns.js';
+import { chainIn, rootDomain, updateSites } from '../../src/sites.js';
 import { pageLib } from './page-lib.js';
 
 // An event of the agent comes in the time of its call, or this much later.
@@ -99,7 +101,7 @@ function logRecord(session, record) {
   const at = new Date(record.ts).toTimeString().slice(0, 8);
   let target;
   try {
-    target = record.href ? `${pageOf(record.href).host}${pageOf(record.href).path}` : undefined;
+    target = record.href ? `${new URL(record.href).hostname}${new URL(record.href).pathname}` : undefined;
   } catch {
     target = undefined;
   }
@@ -122,11 +124,11 @@ async function flush(session, page) {
   // The fields of the user, and the last values of each (from a click or a submit).
   const fills = new Map();
   const values = new Map();
-  let autoFilled = false;
+  const autoFilled = new Set();
   for (const record of records) {
     if (record.action === 'fill' && record.selector) {
       if (record.who === 'user') fills.set(record.selector, record);
-      if (record.who === 'auto-fill') autoFilled = true;
+      if (record.who === 'auto-fill') autoFilled.add(record.selector);
     }
     for (const [selector, value] of record.values ?? []) values.set(selector, value);
   }
@@ -136,7 +138,7 @@ async function flush(session, page) {
   const formSubmit = records.findLast((record) => record.action === 'submit' && record.who === 'user');
   if (formSubmit) submit = formSubmit.button?.selector ?? (formSubmit.enter && !formSubmit.button ? 'enter' : undefined);
   if (!submit) submit = records.findLast((record) => record.action === 'press' && record.who === 'user' && record.selector)?.selector;
-  if (!fills.size && !(autoFilled && submit)) return;
+  if (!fills.size && !(autoFilled.size && submit)) return;
 
   // The keys of the values of the user. The values are discarded after this step.
   const ctx = { host: hostOfUrl(url), url, client: session.server?.getClientVersion?.()?.name };
@@ -158,9 +160,9 @@ async function flush(session, page) {
   const link = fills.size && submit ? session.discoveryState.lastLink : undefined;
   const written = [];
   updateSites(session.fields.file, (data) => {
-    const target = pageEntry(data, url);
-    for (const [selector, { key, fallback }] of keys) {
-      target.fields ??= {};
+    // Only the form fill filled: the submit goes to its form, if there is one.
+    const target = formEntry(nodeEntry(data, url), [...keys.keys(), ...autoFilled], keys.size > 0);
+    for (const [selector, { key, fallback }] of target ? keys : []) {
       if (key !== undefined) {
         if (target.fields[selector] !== key) written.push(`${selector}=${key}`);
         target.fields[selector] = key;
@@ -169,12 +171,12 @@ async function flush(session, page) {
         written.push(`${selector}=${fallback}?`);
       }
     }
-    if (submit && !(target.submit ??= []).includes(submit)) {
+    if (target && submit && !(target.submit ??= []).includes(submit)) {
       target.submit.push(submit);
       written.push(`submit=${submit}`);
     }
     if (link) {
-      const from = pageEntry(data, link.url);
+      const from = nodeEntry(data, link.url);
       if (!(from.login ??= []).includes(link.selector)) {
         from.login.push(link.selector);
         written.push(`login=${link.selector}`);
@@ -186,27 +188,25 @@ async function flush(session, page) {
   if (written.length) session.logger.info('fields_written', { url, written });
 }
 
-// The page entry of a URL in sites.json. Make it if it is missing.
-// The page entry of a URL in the node of its exact host. A missing node goes into "subdomains" of
-// the nearest node that covers the host (REQ-039a).
-function pageEntry(data, url) {
-  const { host, path: pattern } = pageOf(url);
-  const root = rootDomain(host);
-  let node = data.sites[root] ??= {};
-  let nodeHost = root;
-  while (nodeHost !== host) {
-    const next = Object.keys(node.subdomains ?? {})
-      .filter((key) => covers(key, host))
-      .sort((a, b) => b.length - a.length)[0];
-    if (next === undefined) {
-      node = (node.subdomains ??= {})[host] = {};
-      break;
-    }
-    node = node.subdomains[next];
-    nodeHost = normalizeHost(next);
-  }
-  node.pages ??= {};
-  return node.pages[pattern] ??= {};
+// The node of sites.json for the forms and the login links of a URL: the nearest node with a
+// "provider-config", else the root domain. Make the root domain if it is missing (REQ-039a).
+function nodeEntry(data, url) {
+  const host = hostOfUrl(url);
+  const chain = chainIn(data.sites, host);
+  const configured = chain.findLast(({ node }) => node['provider-config']);
+  if (configured) return configured.node;
+  if (chain.length) return chain[0].node;
+  return data.sites[rootDomain(host)] ??= {};
+}
+
+// The form of a node with one of the selectors, else a new form at the end if create is true
+// (REQ-039a).
+function formEntry(node, selectors, create) {
+  let form = (node.forms ?? []).find((entry) => selectors.some((selector) => entry?.fields?.[selector] !== undefined));
+  if (!form && !create) return undefined;
+  if (!form) (node.forms ??= []).push(form = {});
+  form.fields ??= {};
+  return form;
 }
 
 // The name of a field without a key: username, password, email, otp, else its name.

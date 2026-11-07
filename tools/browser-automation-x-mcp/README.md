@@ -175,15 +175,11 @@ JSON files. A missing file is first a copy of its template in `config/` of this 
     "amazon.pl": {
       "access": "allow",
       "provider-config": { "vault": { "vault": "vault-main", "entry": "Amazon - Nestor" } },
-      "subdomains": {
-        "www.amazon.pl": {
-          "pages": {
-            "/":          { "login": ["internal:role=link[name=\"zaloguj się\"i]"] },
-            "/ap/signin": { "fields": { "input[name=\"email\"]": "username", "#ap_password": "password" },
-                            "submit": ["#continue", "#signInSubmit"] }
-          }
-        }
-      }
+      "login": ["internal:role=link[name=\"zaloguj się\"i]"],
+      "forms": [
+        { "fields": { "input[name=\"email\"]": "username" }, "submit": ["#continue"] },
+        { "fields": { "#ap_password": "password" }, "submit": ["#signInSubmit"] }
+      ]
     },
     "premium.pl": { "subdomains": { "sklep.premium.pl": { "access": "deny" } } }
   }
@@ -198,37 +194,41 @@ JSON files. A missing file is first a copy of its template in `config/` of this 
   nearest parent. The nearest value wins. For `provider-config`, this applies to each provider type
   separately. `access`: see [Host access](#host-access).
 - `provider-config`: the config of a provider for the site, by the provider type. `"vault"` needs
-  `"vault"` (the vault of the vault provider in `server.json`) and `"entry"` (the vault system). A
-  page can have its own `provider-config`. It wins over the host, only for that page.
-- `pages`: only for the host of their node, not for its subdomains. The key is a path pattern. `*`
-  matches each sequence of characters, also `/`. `/*` matches each path. See [Form fill](#form-fill).
-- A site key that is not a root domain, a `subdomains` key outside its parent, `credentials`, or a
-  `"vault"` config without `vault` or `entry` is a load error.
+  `"vault"` (the vault of the vault provider in `server.json`) and `"entry"` (the vault system).
+- `forms` and `login`: for the host of their node and for its subdomains. A form has no path: it
+  applies on each page where one of its fields is visible. See [Form fill](#form-fill).
+- A site key that is not a root domain, a `subdomains` key outside its parent, `credentials`,
+  `pages`, a form without `fields`, a form with `provider-config`, or a `"vault"` config without
+  `vault` or `entry` is a load error.
 
 ## Form fill
 
 The agent never fills credentials or personal data. After each call, the server checks the page.
-If a page of `sites.json` matches the URL, the server fills the fields and submits the form. The
+If a field of a form of the host is visible, the server fills the form and submits it. The
 agent gets the page after the submit. It does not know about the fill.
 
 - **Fields:** `"fields": { "<selector>": "<key>" }`. The key is the key of a provider value, e.g.
   `password`. A selector is CSS, or a label or role locator of Playwright, e.g.
-  `internal:label="Password"s`. The server looks for the selector in each frame of the page. If more
-  pages of the host match, all apply. For a selector in more pages, the more specific page (the
-  longer path) wins.
-- **Wait:** the server waits a maximum of 10 s for a visible field. It waits only one time for each
-  URL, and after each submit.
+  `internal:label="Password"s`. The server looks for the selector in each frame of the page. The
+  forms of the host and of its parent domains apply. The server fills the form with the most
+  visible fields; on a tie, the first one (the host first, then its parents, each in file order).
+- **Wait:** after a login click or a submit (a login flow), the server waits a maximum of 3 s for a
+  visible field. On other pages, it waits a maximum of 3 s one time for each URL.
+- **No field:** in a login flow, a page without a visible field ends the flow. The log gets
+  `fill_no_field` with the URL, the wait and the selectors.
 - **Values:** for each key of the visible fields, the server asks the providers of `server.json`, in
   their order. The first provider with the key gives the value. A field without a value stays
   empty. If no field has a value, the server does nothing.
 - **Submit:** `"submit": [...]`. The server uses the first entry that applies: a visible element (it
-  clicks it), or `"enter"` (it presses Enter in the last field). The more specific page comes first.
+  clicks it), or `"enter"` (it presses Enter in the last field).
   Without such an entry, it calls `requestSubmit()` of the form, else it presses Enter. Then
   it waits a maximum of 10 s for the page. A second step, e.g. the password after the username, gets
   a fill in the same call. Maximum 3 rounds.
-- **Login link:** `"login": [...]` gives the sign-in links of a page, e.g. on the start page of a
-  shop. Before the fill, the server clicks the first visible one, then fills the login page. It
-  clicks one time for each lane and host, and only for a page that has a vault config. Use a
+- **Login link:** `"login": [...]` gives the sign-in links of a site, e.g. in the header of a shop.
+  Before the fill, the server clicks the first visible one on each page of the host, then fills the
+  login pages. It clicks one time for each lane and host, and only for a page that has a vault
+  config. After the login flow, also after a failed login, the server opens again the URL where it
+  clicked. In the discovery mode, it does not. Use a
   locator with the text that shows only before the login, e.g.
   `internal:role=link[name="zaloguj się"i]`. After the login the text changes, and the server does
   not click.
@@ -236,7 +236,7 @@ agent gets the page after the submit. It does not know about the fill.
   [Host access](#host-access)).
 - **Loop guard:** the server fills each set of visible fields of a form one time. If the same fields
   come back, e.g. after a wrong password, it does not fill them again. The log gets `fill_failed`.
-  The guard is reset when a page does not match `sites.json`.
+  The guard is reset on a page without a visible field of a form.
 - **Mask:** `"mask": true` (the default) replaces the values of the provider with `***` in each
   result and in each text file of the output folder. Binary files, e.g. screenshots, stay unchanged.
 - **Errors:** a provider error or a page error goes only to the log. The agent gets the page as it
@@ -278,8 +278,9 @@ server writes into `sites.json` at once. No call of the agent is necessary.
 
 - **Hosts:** for each loaded page of an allowed host, its root domain goes into `sites.json` with
   `"access": "allow"`, e.g. `amazon.pl` for `www.amazon.pl`. An access that the file has stays.
-- **Pages:** the pages go into the node of their host. A missing subdomain node goes into
-  `subdomains` of the nearest node that covers the host.
+- **Forms:** the forms and the login links go into the nearest node of the host with a
+  `provider-config`, else into the root domain. A new form that has a selector of a recorded form
+  adds its selectors to that form. Else it is a new form.
 - **Fields:** at a click of a button or a submit, the server gets the values of the fields that the
   user filled. It asks the key-value providers for the key of each value, in their order, and writes
   `"<selector>": "<key>"`. Then it discards the values. It never logs or writes a value. A field
@@ -287,8 +288,7 @@ server writes into `sites.json` at once. No call of the agent is necessary.
   `name`), but only if the selector has no key yet. A later value provider, e.g. `ask`, can fill it.
 - **Submit:** the button that the user clicks goes into `submit`. For a submit with Enter, the submit
   button of the form goes into `submit`; without such a button, `"enter"`.
-- **Login link:** the last link that the user followed before a submit goes into `login` of the page
-  of the link.
+- **Login link:** the last link that the user followed before a submit goes into `login`.
 - **Fill:** the key-value providers fill the known fields, without an approval. Value providers do not fill. The server does not submit.
 - Only the fields of the user go into the file. The fills of the agent and of the form fill do not.
 - The log gets each record at once, without values: `user_filled`, `user_pressed`, `user_submitted`,

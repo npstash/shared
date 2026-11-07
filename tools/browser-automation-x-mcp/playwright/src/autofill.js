@@ -1,7 +1,9 @@
 // Form fill without the agent: after a call, the server fills the fields of sites.json on the page
 // and submits the form. The agent gets the page after the submit. See sdd/DESIGN.md.
-// Before the fill, the server clicks a visible login link of the page ("login" in sites.json),
-// one time for each lane and host, if a provider has a system for the host.
+// A form of sites.json applies on each page of the host where one of its fields is visible.
+// Before the fill, the server clicks a visible login link ("login" in sites.json), one time for
+// each lane and host, if a provider has a system for the host. After the login flow, the server
+// opens again the URL where it clicked the link, but not in the discovery mode.
 // The server runs the page code through browser_run_code_unsafe of upstream (see run-code.js).
 // In the discovery mode, the server fills one time and does not submit: the user submits.
 import { ApprovalError, FillError } from '../../src/fill/provider.js';
@@ -10,8 +12,11 @@ import { ApprovalError, FillError } from '../../src/fill/provider.js';
 export const REFUSED_NOTE = 'The user did not approve an action on this page.';
 import { runCode } from './run-code.js';
 
-// Maximum time to wait for the fields of a page that matches sites.json.
-export const FILL_WAIT = 10000;
+// Maximum time to wait for a form field after a login click or a submit (in a login flow).
+export const FLOW_WAIT = 3000;
+
+// Maximum time to wait for a form field on an other page, one time for each URL.
+export const PEEK_WAIT = 3000;
 
 // Maximum time to wait for the page after a submit (load, then network idle).
 export const SUBMIT_WAIT = 10000;
@@ -119,6 +124,8 @@ export async function autofill(session, url, ctx, checkPage) {
   const { client, fields, fill, logger, fillState, discovery } = session;
   let submitted = false;
   let current = url;
+  // The URL where the server clicked the login link.
+  let loginFrom;
   for (let round = 0; round < FILL_ROUNDS; round++) {
     const match = fields.match(current);
     if (!match) {
@@ -139,6 +146,7 @@ export async function autofill(session, url, ctx, checkPage) {
       if (clicked) {
         fillState.loginClicked.add(host);
         logger.info('login_clicked', { url: current, selector: clicked });
+        loginFrom = current;
         current = await runCode(client, (page) => page.url(), null).catch(() => current);
         const check = await checkPage(current);
         if (!check.allowed) return { submitted, blocked: { url: current, check } };
@@ -148,25 +156,40 @@ export async function autofill(session, url, ctx, checkPage) {
         continue;
       }
     }
-    if (!match.fields.length) break;
+    const selectors = [...new Set(match.forms.flatMap((form) => form.fields.map(({ selector }) => selector)))];
+    if (!selectors.length) break;
 
-    // Wait for the fields only once for each URL, and after each submit.
-    const wait = submitted || fillState.waitedUrl !== current ? FILL_WAIT : 0;
+    // In a login flow (after a login click or a submit), wait FLOW_WAIT. Else wait PEEK_WAIT once
+    // for each URL.
+    const wait = submitted ? FLOW_WAIT : fillState.waitedUrl !== current ? PEEK_WAIT : 0;
     fillState.waitedUrl = current;
     let found;
     try {
-      found = await runCode(client, findFields, { fields: match.fields, wait, interval: POLL_INTERVAL });
+      found = await runCode(client, findFields, { fields: selectors.map((selector) => ({ selector })), wait, interval: POLL_INTERVAL });
     } catch (error) {
       logger.error('fill_error', { url: current, step: 'find', message: error.message });
       break;
     }
-    if (!found?.length) break;
+    if (!found?.length) {
+      // The page left the forms: a later page can get a fill again.
+      fillState.attempts.clear();
+      if (submitted) logger.info('fill_no_field', { url: current, waited: wait, selectors });
+      break;
+    }
 
-    // The loop guard: each form and field set gets one fill until the page leaves the form.
-    const attempt = `${match.key}\n${[...found].sort().join(',')}`;
+    // The form with the most visible fields; on a tie, the first one.
+    const form = match.forms.reduce((best, candidate) => {
+      const count = candidate.fields.filter(({ selector }) => found.includes(selector)).length;
+      return count > best.count ? { form: candidate, count } : best;
+    }, { form: undefined, count: 0 }).form;
+    const visibleFields = form.fields.filter(({ selector }) => found.includes(selector));
+    const shown = visibleFields.map(({ selector }) => selector);
+
+    // The loop guard: each form and field set gets one fill until the page leaves the forms.
+    const attempt = `${form.key}\n${[...shown].sort().join(',')}`;
     if (fillState.attempts.has(attempt)) {
       // In the discovery mode, the server fills one time and the user submits: no failed fill.
-      if (!fillState.failed.has(attempt) && !discovery) logger.info('fill_failed', { url: current, form: match.key, fields: found });
+      if (!fillState.failed.has(attempt) && !discovery) logger.info('fill_failed', { url: current, form: form.key, fields: shown });
       fillState.failed.add(attempt);
       break;
     }
@@ -174,7 +197,6 @@ export async function autofill(session, url, ctx, checkPage) {
 
     const values = [];
     try {
-      const visibleFields = match.fields.filter(({ selector }) => found.includes(selector));
       const resolved = await fill.resolveAll([...new Set(visibleFields.map(({ name }) => name))], ctx(current), { discovery });
       for (const field of visibleFields) {
         if (resolved.has(field.name)) values.push({ name: field.name, selector: field.selector, value: resolved.get(field.name) });
@@ -186,14 +208,14 @@ export async function autofill(session, url, ctx, checkPage) {
       break;
     }
     if (!values.length) {
-      logger.info('fill_no_value', { url: current, form: match.key, fields: found });
+      logger.info('fill_no_value', { url: current, form: form.key, fields: shown });
       break;
     }
     let outcome;
     try {
       outcome = await runCode(client, fillAndSubmit, {
         fields: values.map(({ selector, value }) => ({ selector, value })),
-        submits: match.submits,
+        submits: form.submits,
         submitWait: SUBMIT_WAIT,
         submit: !discovery,
       });
@@ -201,16 +223,32 @@ export async function autofill(session, url, ctx, checkPage) {
       logger.error('fill_error', { url: current, step: 'submit', message: fill.clean(error.message) });
       break;
     }
-    if (outcome?.filled) logger.info('fill_filled', { url: current, form: match.key, fields: values.map(({ name }) => name), reason: 'discovery mode: no submit' });
+    if (outcome?.filled) logger.info('fill_filled', { url: current, form: form.key, fields: values.map(({ name }) => name), reason: 'discovery mode: no submit' });
     if (!outcome?.submitted) break;
     submitted = true;
-    logger.info('fill_submitted', { url: current, form: match.key, fields: values.map(({ name }) => name), how: outcome.how });
+    logger.info('fill_submitted', { url: current, form: form.key, fields: values.map(({ name }) => name), how: outcome.how });
 
     // The page after the submit gets the host check before each other step.
     current = await runCode(client, (page) => page.url(), null).catch(() => current);
     const check = await checkPage(current);
     if (!check.allowed) return { submitted, blocked: { url: current, check } };
     logger.info('page_opened', { url: current, via: 'auto_submit' });
+  }
+
+  // After the login flow, open again the URL of the login click, also after a failed login. Not in
+  // the discovery mode: the user submits.
+  if (loginFrom && !discovery && current !== loginFrom) {
+    try {
+      await runCode(client, async (page, { target, wait }) => {
+        await page.goto(target, { timeout: wait });
+      }, { target: loginFrom, wait: SUBMIT_WAIT });
+    } catch (error) {
+      logger.error('fill_error', { url: current, step: 'return', message: error.message });
+    }
+    current = await runCode(client, (page) => page.url(), null).catch(() => current);
+    const check = await checkPage(current);
+    if (!check.allowed) return { submitted, blocked: { url: current, check } };
+    logger.info('page_opened', { url: current, via: 'login_return' });
   }
   return { submitted };
 }
