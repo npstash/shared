@@ -70,27 +70,6 @@ its encrypted name. This needs the passphrase too, and writes a line to `access.
 - `sync` applies all files, or none.
 - To rename, use `rename-system` or `rename-secret`. To delete a system, use `delete-system`.
 
-## Aliases
-
-Give `"alias_of": "TARGET"` to a system to use the secrets of `TARGET`. The secrets of
-the alias add to the target secrets, or replace them. The alias keeps its own `url` and
-`authority_info`. `get-system` and `get-secret` show the resolved secrets.
-
-```json
-{
-  "name": "GitHub Enterprise",
-  "revision": "",
-  "url": "https://github.example.com",
-  "alias_of": "CORP LDAP",
-  "credentials": { "token": "t0ken" }
-}
-```
-
-- The target must exist and must not be an alias.
-- The entry of a target keeps the names of its aliases.
-- `set-system` refuses a secret that the alias takes from the target. Set it on the target.
-- `rename-system` and `delete-system` refuse a target that has aliases.
-
 ## Opening the vault
 
 1. A clone key: each `clone.<name>.key` in the vault home that has a

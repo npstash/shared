@@ -160,3 +160,4 @@
 - 20261104-01 Nestor 598b2ac53d38 get-system finds a system by its name, its entry ID or its encrypted name; it looks for an entry ID first, then an encrypted name, then a name
 - 20261104-02 Nestor 598b2ac53d38 get-system with an entry ID or an encrypted name needs the passphrase and writes a get-system line with the entry ID to access.log
 - 20261104-03 Nestor 598b2ac53d38 list-systems prints the name, url, secret names and authority info of each system, as get-system does
+- 20261107-01 Nestor 88a4aad0d998 Remove aliases: alias_of and aliases are unknown fields of an entry

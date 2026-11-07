@@ -71,9 +71,9 @@ def edit(home, system, passphrase=PW, **fields):
     return path
 
 
-def put(home, name, url="https://g", info=("scope line",), alias_of=None, **secrets):
+def put(home, name, url="https://g", info=("scope line",), **secrets):
     """Add or change a system as a user does: edit, then sync."""
-    edit(home, name, url=url, authority_info=list(info), alias_of=alias_of, credentials=dict(secrets))
+    edit(home, name, url=url, authority_info=list(info), credentials=dict(secrets))
     cs.Store(home, PW).sync()
 
 
@@ -240,8 +240,8 @@ def test_sync_refuses_a_changed_name_and_unknown_fields(home):
     with pytest.raises(cs.CredentialError, match="does not belong to this file; to rename a system, use rename"):
         cs.Store(home, PW).sync()
     path.unlink()
-    edit(home, SYS, aliases=["x"])
-    with pytest.raises(cs.CredentialError, match="unknown fields: aliases"):
+    edit(home, SYS, alias_of="x")
+    with pytest.raises(cs.CredentialError, match="unknown fields: alias_of"):
         cs.Store(home, PW).sync()
 
 
@@ -368,83 +368,6 @@ def test_rename_refuses_conflicts(home):
         cs.Store(home, PW).rename_secret("a", "x", "y")
 
 
-# -- aliases -----------------------------------------------------------------------------
-
-def test_alias_takes_the_secrets_of_its_target(home):
-    put(home, "LDAP", username="u", password="p")
-    put(home, "wiki", url="https://a", info=["alias scope"], alias_of="LDAP")
-    c = cs.Store(home, PW).get_credential("wiki")
-    assert (c.name, c.url, c.authority_info) == ("wiki", "https://a", ("alias scope",))
-    assert dict(c.secrets()) == {"username": "u", "password": "p"}
-    assert json.loads(cs.Store(home, PW).edit(["wiki"])[0].read_text())["credentials"] == {}
-    cs.Store(home, PW).set_system("LDAP", secrets={"password": "new"})
-    assert secrets(home, "wiki")["password"] == "new"
-
-
-def test_alias_secrets_add_to_and_replace_the_target_secrets(home):
-    put(home, "LDAP", username="u", password="p")
-    put(home, "gh", alias_of="LDAP", username="x", token="t")
-    assert secrets(home, "gh") == {"username": "x", "password": "p", "token": "t"}
-    assert secrets(home, "LDAP") == {"username": "u", "password": "p"}
-
-
-def test_alias_and_target_in_one_sync(home):
-    edit(home, "wiki", alias_of="LDAP", credentials={})
-    edit(home, "LDAP", credentials={"password": "p"})
-    cs.Store(home, PW).sync()
-    assert secrets(home, "wiki") == {"password": "p"}
-    assert cs.Store(home, PW)._get("LDAP").aliases == ("wiki",)
-
-
-@pytest.mark.parametrize("target", ["missing", "self", "alias"])
-def test_alias_target_must_exist_and_not_be_an_alias(home, target):
-    put(home, "LDAP", p="p")
-    put(home, "a", alias_of="LDAP")
-    name = "b"
-    if target == "self":
-        put(home, name, p="p")
-    edit(home, name, alias_of={"missing": "missing", "self": name, "alias": "a"}[target], credentials={})
-    with pytest.raises(cs.CredentialError, match="is an alias of"):
-        cs.Store(home, PW).sync()
-
-
-def test_a_target_with_aliases_cannot_become_an_alias(home):
-    put(home, "LDAP", p="p")
-    put(home, "AD", p="q")
-    put(home, "wiki", alias_of="LDAP")
-    edit(home, "LDAP", alias_of="AD")
-    with pytest.raises(cs.CredentialError, match="cannot be an alias: wiki are aliases of it"):
-        cs.Store(home, PW).sync()
-
-
-def test_set_refuses_an_inherited_secret_of_an_alias(home):
-    put(home, "LDAP", password="p")
-    put(home, "gh", alias_of="LDAP", token="t")
-    with pytest.raises(cs.CredentialError, match="alias of 'LDAP'; set password there"):
-        cs.Store(home, PW).set_system("gh", secrets={"password": "x"})
-    cs.Store(home, PW).set_system("gh", url="https://new", secrets={"token": "t2", "extra": "e"})
-    c = cs.Store(home, PW).get_credential("gh")
-    assert (c.url, dict(c.secrets())) == ("https://new", {"password": "p", "token": "t2", "extra": "e"})
-
-
-def test_the_target_keeps_its_aliases(home):
-    put(home, "LDAP", password="p")
-    put(home, "AD", password="q")
-    put(home, "wiki", alias_of="LDAP")
-    with pytest.raises(cs.CredentialError, match="wiki are aliases of it"):
-        cs.Store(home, PW).rename_system("LDAP", "LDAP2")
-    with pytest.raises(cs.CredentialError, match="wiki are aliases of it"):
-        cs.Store(home, PW).delete_system("LDAP")
-    cs.Store(home, PW).rename_system("wiki", "docs")
-    assert cs.Store(home, PW)._get("LDAP").aliases == ("docs",)
-    assert secrets(home, "docs")["password"] == "p"
-    put(home, "docs", alias_of="AD")                        # another target
-    assert cs.Store(home, PW)._get("LDAP").aliases == () and cs.Store(home, PW)._get("AD").aliases == ("docs",)
-    cs.Store(home, PW).delete_system("docs")
-    assert cs.Store(home, PW)._get("AD").aliases == ()
-    cs.Store(home, PW).rename_system("LDAP", "LDAP2")
-
-
 # -- errors, CLI -------------------------------------------------------------------------
 
 def test_error_messages(home):
@@ -513,14 +436,13 @@ def master_key(home):
 def test_rotate_master_key_keeps_passphrase_and_secrets(home):
     put(home, SYS, token="t")
     put(home, "LDAP", password="p")
-    put(home, "wiki", alias_of="LDAP")
     old_key, old_ids, admin = master_key(home), set(vault_doc(home)["entries"]), (home / "admin.enc.key").read_bytes()
 
     backup = cs.Store(home, PW).rotate_master_key()
 
     assert master_key(home) != old_key
     assert set(vault_doc(home)["entries"]).isdisjoint(old_ids)            # new IDs
-    assert secrets(home, SYS) == {"token": "t"} and secrets(home, "wiki") == {"password": "p"}
+    assert secrets(home, SYS) == {"token": "t"} and secrets(home, "LDAP") == {"password": "p"}
     assert (backup / "master.enc.key").read_bytes() == old_key             # old key kept
     assert cs.decrypt(old_key, PW) != cs.decrypt(master_key(home), PW)    # a genuinely new key
     assert (home / "admin.enc.key").read_bytes() == admin                  # the same admin key
