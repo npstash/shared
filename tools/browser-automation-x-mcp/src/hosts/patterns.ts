@@ -1,4 +1,4 @@
-// Hosts of pages and of sites.json. A host has no scheme, port or path. Case does not matter.
+// Hosts of pages and of hosts.json. A host has no scheme, port or path. Case does not matter.
 
 export function normalizeHost(host: string): string {
   return host.trim().toLowerCase().replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1');

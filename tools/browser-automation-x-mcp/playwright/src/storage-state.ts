@@ -1,5 +1,5 @@
 // The storage-state file: the logins of all lanes and sessions of one workspace.
-// It holds cookies, localStorage and the IndexedDB of the sites in sites.json (Playwright format).
+// It holds cookies, localStorage and the IndexedDB of the hosts in hosts.json (Playwright format).
 // The file never goes into a result, a log or the output folder. Mode 0600.
 import fs from 'node:fs';
 import path from 'node:path';
