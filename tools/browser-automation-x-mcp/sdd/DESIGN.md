@@ -184,7 +184,8 @@ the objects. No mutable state is at module level. The state of one lane for the 
   frame, gets the keys from the match-strategies and the values from the key-value-sources, fills
   the fields, and runs the submit method of the dom-classifier (REQ-030, REQ-038 of SRS). The page
   code keeps a reference of each classified element in the page; the server gets no element
-  object. It waits FLOW_WAIT in a login flow, else PEEK_WAIT one time for each URL. It logs
+  object. It waits FLOW_WAIT for a field in a login flow, else until the page settles (SETTLE_QUIET, at
+  most PEEK_WAIT) one time for each URL. It does not run after the read-only tools of REQ-030. It logs
   `fill_no_field` when a login flow ends on a page without a classified field. The tool switch of
   the agent does not apply to these calls. Their results never go to the agent. It keeps the loop
   guard of the lane. Before the fill, it clicks a visible login link of a dom-classifier, one time
@@ -197,8 +198,10 @@ the objects. No mutable state is at module level. The state of one lane for the 
   For a key-value-source with `approval`, it attaches the approval plugin. It gives the values of
   the keys of one fill, with one approval for each approval plugin (REQ-031a, REQ-036c). It
   merges the results of the dom-classifiers (REQ-031b) and asks the match-strategies in order
-  (REQ-031c). It injects the page scripts into each frame of a lane, keeps the channel to their
-  Node code, and replaces each value of a message with its keys (REQ-031d). It scrubs the values
+  (REQ-031c). The page scripts are in `playwright/src/page-scripts.ts`: it injects them into each
+  frame of a lane, keeps the channel to their Node code (binding `__baxPage`), and replaces each
+  value of a message with its keys (REQ-031d). The page code of the server (classification, fill,
+  submit, marks) is in `playwright/src/page-code.ts`. It scrubs the values
   of masked instances from the results and from the text files that upstream wrote in the call
   (REQ-032). It never gives a server object or a Playwright object to a plugin.
 - **Plugins:** `plugins/<category>/<plugin>/`. Shared plugin code is in `plugins/common/<plugin>/`.
@@ -379,8 +382,19 @@ Hosts: a host key is a root domain; a `subdomains` key is a full host name under
 covers its host and each subdomain of it. `access` goes down the tree. No case. A URL without a
 host passes. The plugin files use the same tree.
 
-Plugin APIs: **MISSING:** the typed API of each plugin category, with its input and output. They
-come after the TypeScript migration, for a review (ADR-20261108-plugin_architecture).
+Plugin APIs (`src/plugins/`, reviewed in section H of ADR-20261108-plugin_architecture). A plugin
+gets only JSON data, its `PluginContext` (`name`, `config`, `configDir`, `logger`) and, for an
+approval plugin, a `Dialog` in each call. `PageInfo` is `{ url, host, hosts }`; `hosts` is the
+host, then its parents, to the root domain.
+
+| Category | File | Operations |
+| --- | --- | --- |
+| all | `plugin.ts` | `PluginContext`, `PageInfo`, `PluginLogger`; optional `dispose()` |
+| key-value-source | `key-value-source.ts` | `keys(page)` → keys; `values(keys, page)` → `{ key: value }`; `keysOf(value, page)` → all keys; `SourceError` |
+| approval-plugin | `approval-plugin.ts` | `approve({ host, keys, client }, dialog)` → boolean; `Dialog.ask(message, form, timeout)` |
+| dom-classifier | `dom-classifier.ts` | `pageScript()` → source of a `ClassifyFunction<I>`; `pageInput(page)` → `I` or undefined. The page code gives `{ fields: [{ element, hint }], submits: [click, enter or requestSubmit, with the served elements], logins: [element] }` |
+| match-strategy | `match-strategy.ts` | `match(fields: [{ ref, hint }], keys, page)` → `[{ ref, key }]` |
+| page-script | `page-script.ts` | `pageScript()` → source of a `PageScriptFunction<M>`; `onMessage({ lane, data, identified: [{ id, keys }] }, page)`; `laneClosed(lane)`. The page code gets `PageApi<M>`: `send(data, values: [{ id, value }])`, `touchedByServer(element)` |
 
 `<config>` is the config folder that `--config-dir` gives, e.g. `local/configs/browser-automation-x-mcp`
 of the repository.
@@ -457,6 +471,11 @@ All decisions are in [ADL.md](ADL.md).
 - A site that keeps the same link text after the login needs an other sign for the login link
   (REQ-030a). Not supported.
 - A dom-classifier with an agent, which gives richer hints, is not made.
+- The fill scope without the discovery file: the `heuristic` classifier with `"fields": true` cannot
+  tell a login from a form that asks for the password to confirm an action (e.g. a deletion). It
+  fills and submits such a form on a host of the vault file.
+- Each call that can change the page costs one classification (about 0.5 s with the
+  `browser_run_code_unsafe` round trip of upstream), also on a page without fields.
 - A dom-classifier with Fathom is not made. Firefox uses Fathom in production only for new-password,
   sign-up and credit card fields; its login ruleset is a proof of concept.
 - An element that `browser_evaluate` changes has no mark: the discovery recorder records it as an

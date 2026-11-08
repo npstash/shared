@@ -95,19 +95,24 @@ function html(res: http.ServerResponse, body: string): void {
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(body);
 }
 
-// Make a config folder for one test (see src/paths.js). The config of the repository stays unchanged.
-// sites: the "sites" of sites.json, merged into the default sites: 127.0.0.1 and localhost with
-// the systems of the fake vault (providerConfig: false leaves them out). tools: { <tool>: true | false }; browser_evaluate is on because the
-// tests read the page with it. values, ask, vault: the settings of the providers.
+// Make a config folder for one test (see src/paths.ts). The config of the repository stays unchanged.
+// hosts: the "hosts" of hosts.json. forms: the "hosts" of the discovery file. vaultHosts: the
+// "hosts" of the vault file; the default maps 127.0.0.1 and localhost to the systems of the fake
+// vault; false: no system. tools: { <tool>: true | false }; browser_evaluate is on because the
+// tests read the page with it. record: the recorder (page-script "discovery") is on. sources: the
+// key-value-source instances in place of the default ones.
 export interface TestConfig {
-  readonly sites?: Record<string, Record<string, unknown>>;
+  readonly hosts?: Record<string, Record<string, unknown>>;
   readonly defaultAccess?: 'allow' | 'deny';
+  readonly forms?: Record<string, TestNode>;
+  readonly vaultHosts?: Record<string, Record<string, unknown>> | false;
   readonly tools?: Record<string, boolean>;
   readonly values?: Record<string, string>;
-  readonly ask?: readonly string[];
   readonly vault?: string;
-  readonly providerConfig?: boolean;
-  readonly providers?: readonly Record<string, unknown>[];
+  readonly record?: boolean;
+  readonly recordHosts?: boolean;
+  readonly heuristicFields?: boolean;
+  readonly sources?: readonly Record<string, unknown>[];
 }
 
 export interface TestConfigDir {
@@ -115,24 +120,39 @@ export interface TestConfigDir {
   readonly env: Record<string, string>;
 }
 
-export function makeConfig(name: string, { sites = {}, defaultAccess = 'allow', tools = {}, values = {}, ask = ['phone'], vault = 'vault-test', providerConfig = true, providers }: TestConfig = {}): TestConfigDir {
+// The default vault file of the tests: the systems of tests/fixtures/fake-vault/vault.json.
+export const TEST_VAULT_HOSTS: Readonly<Record<string, Record<string, unknown>>> = {
+  '127.0.0.1': { system: 'Fixture site' },
+  localhost: { system: 'Fixture other' },
+};
+
+export function makeConfig(name: string, { hosts = {}, defaultAccess = 'allow', forms = {}, vaultHosts = TEST_VAULT_HOSTS, tools = {}, values = {}, vault = 'vault-test', record = false, recordHosts = false, heuristicFields = false, sources }: TestConfig = {}): TestConfigDir {
   const root = path.join(TEST_CONFIG_DIR, name);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
   const write = (file: string, data: unknown): void => fs.writeFileSync(path.join(root, file), `${JSON.stringify(data, null, 2)}\n`);
+  const instance = (instanceName: string, plugin: string, config: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+    name: instanceName, plugin, description: `${plugin} of the test`, enabled: true, ...extra, config,
+  });
   write('server.json', {
-    providers: providers ?? [
-      { type: 'vault', enabled: true, mask: true, vault },
-      { type: 'values', enabled: true, mask: false, values },
-      { type: 'ask', enabled: true, mask: true, fields: ask },
-    ],
+    recordHosts,
+    plugins: {
+      'key-value-source': sources ?? [
+        instance('vault-test', 'vault', { vault, file: 'vault.json' }, { mask: true }),
+        instance('values', 'values', { values }, { mask: false }),
+      ],
+      'dom-classifier': [
+        instance('discovery', 'discovery', { file: 'discovery.json' }),
+        instance('heuristic', 'heuristic', { fields: heuristicFields }),
+      ],
+      'match-strategy': [instance('propagate', 'propagate', {})],
+      'page-script': [{ ...instance('discovery-recorder', 'discovery', { file: 'discovery.json' }), enabled: record }],
+    },
     tools: Object.fromEntries(Object.entries({ browser_evaluate: true, ...tools }).map(([tool, enabled]) => [tool, { enabled }])),
   });
-  const vaultConfig = (entry: string): Record<string, unknown> => ({ 'provider-config': { vault: { vault, entry } } });
-  const base: Record<string, Record<string, unknown>> = providerConfig ? { '127.0.0.1': vaultConfig('Fixture site'), localhost: vaultConfig('Fixture other') } : {};
-  const merged = { ...base };
-  for (const [host, site] of Object.entries(sites)) merged[host] = { ...base[host], ...site };
-  write('sites.json', { defaultAccess, sites: merged });
+  write('hosts.json', { defaultAccess, hosts });
+  write('vault.json', { hosts: vaultHosts || {} });
+  write('discovery.json', { hosts: forms });
   return {
     configDir: root,
     env: { BROWSER_AUTOMATION_X_MCP_VAULT_TOOL: path.join(FAKE_VAULT, 'run.sh') },
@@ -206,24 +226,27 @@ export interface ServerClientOptions {
   readonly keepState?: boolean;
 }
 
-// A form of sites.json in a test.
+// A matcher of the discovery file in a test.
+export type TestMatcher = string | { css: string; text: string };
+
+// A form of the discovery file in a test.
 export interface TestForm {
   fields?: Record<string, string>;
-  submit?: string[];
+  submit?: (TestMatcher | 'enter')[];
 }
 
-// A node of sites.json in a test.
+// A node of the discovery file or of hosts.json in a test.
 export interface TestNode {
   access?: string;
   forms?: TestForm[];
-  login?: string[];
+  login?: TestMatcher[];
   subdomains?: Record<string, TestNode>;
   [key: string]: unknown;
 }
 
-// sites.json in a test.
-export interface TestSitesFile {
-  sites: Record<string, TestNode>;
+// The discovery file or hosts.json in a test.
+export interface TestTreeFile {
+  hosts: Record<string, TestNode>;
   [key: string]: unknown;
 }
 
@@ -232,9 +255,11 @@ export interface ServerClient {
   readonly client: LaneClient;
   readonly logDir: string;
   readonly stateFile: string;
-  readonly sitesFile: string;
-  // sites.json of the test config as an object: the discovery mode writes it.
-  readonly sites: TestSitesFile;
+  readonly discoveryFile: string;
+  // The discovery file of the test config as an object: the recorder writes it.
+  readonly discovery: TestTreeFile;
+  // hosts.json of the test config as an object: the server records the opened hosts in it.
+  readonly hosts: TestTreeFile;
   readonly logFile: string;
   readonly textLogFile: string;
   readonly config: TestConfigDir;
@@ -243,7 +268,7 @@ export interface ServerClient {
 
 // Start the server as a child process and connect an MCP client to it. The browser is headless,
 // except when env gives an other RENDER_MODE. Each test has its own storage-state file.
-// onElicit: answers the dialogs of the ask provider; without it, the client cannot show dialogs.
+// onElicit: answers the dialogs of the server; without it, the client cannot show dialogs.
 export async function startServerClient({ name, args = [], env = {}, config = {}, onElicit, keepState = false }: ServerClientOptions): Promise<ServerClient> {
   const logDir = path.join(TEST_LOG_DIR, name);
   fs.rmSync(logDir, { recursive: true, force: true });
@@ -266,9 +291,9 @@ export async function startServerClient({ name, args = [], env = {}, config = {}
     client: laneClient(client),
     logDir,
     stateFile,
-    sitesFile: path.join(testConfig.configDir, 'sites.json'),
-    // sites.json of the test config as an object: the discovery mode writes it.
-    get sites(): ServerClient['sites'] { return JSON.parse(fs.readFileSync(path.join(testConfig.configDir, 'sites.json'), 'utf8')) as ServerClient['sites']; },
+    discoveryFile: path.join(testConfig.configDir, 'discovery.json'),
+    get discovery(): TestTreeFile { return JSON.parse(fs.readFileSync(path.join(testConfig.configDir, 'discovery.json'), 'utf8')) as TestTreeFile; },
+    get hosts(): TestTreeFile { return JSON.parse(fs.readFileSync(path.join(testConfig.configDir, 'hosts.json'), 'utf8')) as TestTreeFile; },
     get logFile(): string { return findLog(logDir, '.log.json') ?? ''; },
     get textLogFile(): string { return findLog(logDir, '.log') ?? ''; },
     config: testConfig,

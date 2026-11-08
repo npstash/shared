@@ -1,29 +1,23 @@
-// Approval HTTPS provider (approval): asks an approval service, then gives the values of its
-// key-value provider (the entry in server.json that has this provider as "approval"). See REQ-036b
-// of sdd/SRS.md.
+// Approval plugin "approve-https" (REQ-036b of sdd/SRS.md): asks an approval service.
 //
-//   "approval": { "type": "approve-https", "address": "https://127.0.0.1:8743",
-//                 "fingerprint": "<SHA-256 of the certificate of the service>" }
+//   "approval": { "plugin": "approve-https",
+//                 "config": { "address": "https://127.0.0.1:8743", "fingerprint": "<SHA-256 of the certificate>" } }
 //
-// The provider pins the certificate: it sends nothing until the fingerprint is equal. It sends no
+// The plugin pins the certificate: it sends nothing until the fingerprint is equal. It sends no
 // authentication, and no value or URL: only { host, keys, client }. An empty address or
 // fingerprint, an error, or no answer in APPROVAL_TIMEOUT refuses the fill.
+// BROWSER_AUTOMATION_X_MCP_APPROVAL_TIMEOUT: a shorter time in ms, for the tests.
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
-import type { ApprovalProviderOptions, ApprovalRequest } from '../../src/fill/provider.ts';
-import { APPROVAL_TIMEOUT, ApprovalProvider } from '../../src/fill/provider.ts';
-import { errorMessage } from '../../src/json.ts';
+import type { ApprovalPlugin, ApprovalRequest } from '../../../src/plugins/approval-plugin.ts';
+import { APPROVAL_TIMEOUT } from '../../../src/plugins/approval-plugin.ts';
+import type { PluginContext, PluginLogger } from '../../../src/plugins/plugin.ts';
 
 // The answer of the approval service.
-export interface ServiceAnswer {
+interface ServiceAnswer {
   readonly status: number | undefined;
   readonly body: string;
-}
-
-export interface ApproveHttpsOptions extends ApprovalProviderOptions {
-  // Maximum time of one approval in ms; the tests give a shorter time.
-  readonly timeout?: number;
 }
 
 // "AB:CD:..." or "abcd..." → "ABCD...".
@@ -31,20 +25,21 @@ export function normalizeFingerprint(text: unknown): string {
   return String(text ?? '').replace(/[^0-9a-f]/gi, '').toUpperCase();
 }
 
-export default class ApproveHttpsProvider extends ApprovalProvider {
-  readonly address: string;
-  readonly fingerprint: string;
-  readonly timeout: number;
+export default class ApproveHttps implements ApprovalPlugin {
+  private readonly address: string;
+  private readonly fingerprint: string;
+  private readonly timeout: number;
+  private readonly logger: PluginLogger;
 
-  constructor(options: ApproveHttpsOptions) {
-    super(options);
-    this.address = String(this.settings.address ?? '').trim();
-    this.fingerprint = normalizeFingerprint(this.settings.fingerprint);
-    this.timeout = options.timeout ?? APPROVAL_TIMEOUT;
+  constructor(context: PluginContext) {
+    this.address = String(context.config.address ?? '').trim();
+    this.fingerprint = normalizeFingerprint(context.config.fingerprint);
+    this.timeout = Number(process.env.BROWSER_AUTOMATION_X_MCP_APPROVAL_TIMEOUT) || APPROVAL_TIMEOUT;
+    this.logger = context.logger;
   }
 
   async approve(request: ApprovalRequest): Promise<boolean> {
-    if (!this.address || !this.fingerprint) return this.refuse('no address or no fingerprint in server.json');
+    if (!this.address || !this.fingerprint) return this.refuse('no address or no fingerprint in its config');
     let url: URL;
     try {
       url = new URL('approve', this.address.endsWith('/') ? this.address : `${this.address}/`);
@@ -57,17 +52,17 @@ export default class ApproveHttpsProvider extends ApprovalProvider {
       if (answer.status !== 200) return this.refuse(`the service answered ${answer.status}`);
       return (JSON.parse(answer.body) as { approved?: unknown } | null)?.approved === true || this.refuse('the service refused');
     } catch (error) {
-      return this.refuse(errorMessage(error));
+      return this.refuse(error instanceof Error ? error.message : String(error));
     }
   }
 
-  refuse(reason: string): false {
-    this.logger?.info('approval_refused', { provider: this.name, reason });
+  private refuse(reason: string): false {
+    this.logger.info('approval_refused', { reason });
     return false;
   }
 
   // POST the body after the TLS check of the fingerprint. Give { status, body }.
-  post(url: URL, body: string): Promise<ServiceAnswer> {
+  private post(url: URL, body: string): Promise<ServiceAnswer> {
     return new Promise((resolve, reject) => {
       const host = url.hostname.replace(/^\[|\]$/g, '');
       const socket = tls.connect({

@@ -1,6 +1,6 @@
 # ADR-20261108-plugin_architecture — Plugins in place of form-fill providers
 
-- ADL entry: `20261108-01`, `20261108-02` in [ADL.md](../ADL.md); the other entries come with the code of the plugins
+- ADL entry: `20261108-01` to `20261108-17` in [ADL.md](../ADL.md)
 - Name: Nestor
 - Commit: 43f592f2878e
 - Status: Accepted

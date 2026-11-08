@@ -1,19 +1,25 @@
-// Form fill without the agent: after a call, the server fills the fields of sites.json on the page
-// and submits the form. The agent gets the page after the submit. See sdd/DESIGN.md.
-// A form of sites.json applies on each page of the host where one of its fields is visible.
-// Before the fill, the server clicks a visible login link ("login" in sites.json), one time for
-// each lane and host, if a provider has a system for the host. After the login flow, the server
-// opens again the URL where it clicked the link, but not in the discovery mode.
-// The server runs the page code through browser_run_code_unsafe of upstream (see run-code.ts).
-// In the discovery mode, the server fills one time and does not submit: the user submits.
-import type { Locator, Page } from 'playwright-core';
-import type { FillContext } from '../../src/fill/provider.ts';
-import { ApprovalError, FillError } from '../../src/fill/provider.ts';
-import type { FillValues } from '../../src/fill/registry.ts';
+// Form fill without the agent (REQ-030, REQ-030a, REQ-038 of sdd/SRS.md): after a call, the server
+// runs the dom-classifiers on the page, gets the keys of the fields from the match-strategies and
+// the values from the key-value-sources, fills the fields and runs the submit method. The agent
+// gets the page after the submit. The server has no code that finds fields: the plugins do this.
+// Before the fill, the server clicks a visible login link of a dom-classifier, one time for each
+// lane and host, if a key-value-source has keys for the page. After the login flow, the server
+// opens again the URL where it clicked the link.
+// The page code runs through browser_run_code_unsafe of upstream (see page-code.ts, run-code.ts).
+import type { Page } from 'playwright-core';
 import type { HostCheck } from '../../src/hosts/host-policy.ts';
+import type { JsonValue } from '../../src/json.ts';
 import { errorMessage } from '../../src/json.ts';
 import type { Logger } from '../../src/logger.ts';
-import type { FormField, FormMatch, SiteTree } from '../../src/sites.ts';
+import type { Dialog } from '../../src/plugins/approval-plugin.ts';
+import type { DomClassifier } from '../../src/plugins/dom-classifier.ts';
+import type { Named, ValueService } from '../../src/plugins/host.ts';
+import { ApprovalError, FillError } from '../../src/plugins/host.ts';
+import type { FieldMatch, MatchStrategy } from '../../src/plugins/match-strategy.ts';
+import { pageInfo } from '../../src/plugins/page-info.ts';
+import type { PageInfo } from '../../src/plugins/plugin.ts';
+import type { ClassifierRun, PageClassification, RefField, RefSubmit } from './page-code.ts';
+import { classifyPage, clickRef, currentUrl, fillRefs } from './page-code.ts';
 import type { LaneSession } from './session.ts';
 
 // The note for the agent after a refused approval. It does not name the form fill (REQ-005).
@@ -22,8 +28,11 @@ export const REFUSED_NOTE: string = 'The user did not approve an action on this 
 // Maximum time to wait for a form field after a login click or a submit (in a login flow).
 export const FLOW_WAIT: number = 3000;
 
-// Maximum time to wait for a form field on an other page, one time for each URL.
+// Maximum time to wait until an other page settles, one time for each URL.
 export const PEEK_WAIT: number = 3000;
+
+// A page is settled after this time without a change of the DOM.
+export const SETTLE_QUIET: number = 300;
 
 // Maximum time to wait for the page after a submit (load, then network idle).
 export const SUBMIT_WAIT: number = 10000;
@@ -31,14 +40,17 @@ export const SUBMIT_WAIT: number = 10000;
 // Maximum number of fill and submit rounds in one call, e.g. a username page, then a password page.
 const FILL_ROUNDS: number = 3;
 
-// The time between two checks for the fields.
-const POLL_INTERVAL: number = 250;
+// The time between two checks for the fields or for the changes of the DOM.
+const POLL_INTERVAL: number = 100;
 
 // The check of the host of a page after a submit or a click: it records the page.
 export type CheckPage = (url: string) => Promise<HostCheck>;
 
-// The fill context of a page (see src/fill/provider.ts).
-export type ContextOf = (url: string) => FillContext;
+// The client of a fill: its name and its dialog.
+export interface FillClient {
+  readonly name: string | undefined;
+  readonly dialog: Dialog | undefined;
+}
 
 // The end of the form fill of one call.
 export interface FillOutcome {
@@ -50,164 +62,97 @@ export interface FillOutcome {
 
 // The form fill after a call.
 export interface FormFill {
-  // Fill the fields of sites.json on the page and submit, in rounds. Errors go to the log only:
-  // the agent gets the result of its call. A refused approval also adds a note to the result.
-  run(lane: LaneSession, url: string, contextOf: ContextOf, checkPage: CheckPage): Promise<FillOutcome>;
+  // Fill and submit the classified fields of the page, in rounds. Errors go to the log only: the
+  // agent gets the result of its call. A refused approval also adds a note to the result.
+  run(lane: LaneSession, url: string, client: FillClient, checkPage: CheckPage): Promise<FillOutcome>;
 }
 
-interface ClickLoginData {
-  readonly selectors: readonly string[];
-  readonly submitWait: number;
+// A field with its key.
+interface KeyedField {
+  readonly ref: string;
+  readonly key: string;
 }
 
-interface FindFieldsData {
-  readonly fields: readonly { readonly selector: string }[];
-  readonly wait: number;
-  readonly interval: number;
-}
-
-interface FillData {
-  readonly fields: readonly { readonly selector: string; readonly value: string }[];
-  readonly submits: readonly string[];
-  readonly submitWait: number;
-  readonly submit: boolean;
-}
-
-interface FillResult {
-  readonly submitted: boolean;
-  readonly filled?: boolean;
-  readonly how?: string;
-}
-
-// A field with its value.
-interface FieldValue {
-  readonly name: string;
-  readonly selector: string;
-  readonly value: string;
-}
-
-// Page code: click the first visible login link, then wait for the next page. Give its selector.
-async function clickLogin(page: Page, { selectors, submitWait }: ClickLoginData): Promise<string | null> {
-  for (const selector of selectors) {
-    const link = page.locator(selector).first();
-    if (!await link.isVisible().catch(() => false)) continue;
-    const before = page.url();
-    await link.click({ timeout: 5000 });
-    await page.waitForURL((url) => url.href !== before, { timeout: submitWait }).catch(() => {});
-    await page.waitForLoadState('load', { timeout: submitWait }).catch(() => {});
-    return selector;
-  }
-  return null;
-}
-
-// Page code: wait up to data.wait ms for a visible field. Give the selectors of the visible fields.
-async function findFields(page: Page, { fields, wait, interval }: FindFieldsData): Promise<string[]> {
-  const deadline = Date.now() + wait;
-  for (;;) {
-    const found: string[] = [];
-    for (const field of fields) {
-      for (const frame of page.frames()) {
-        if (await frame.locator(field.selector).first().isVisible().catch(() => false)) {
-          found.push(field.selector);
-          break;
-        }
-      }
-    }
-    if (found.length || Date.now() >= deadline) return found;
-    await page.waitForTimeout(interval);
-  }
-}
-
-// Page code: fill the visible fields, submit, and wait for the page.
-// Submit: the first entry of data.submits that applies: a visible element, or "enter" (Enter in the
-// last field). Else requestSubmit() of the form of the last field, else Enter in the last field.
-// data.submit false: fill only. The touched elements get __baxAuto for the recorder.
-async function fillAndSubmit(page: Page, { fields, submits, submitWait, submit }: FillData): Promise<FillResult> {
-  const visible = async (selector: string): Promise<Locator | undefined> => {
-    for (const frame of page.frames()) {
-      const locator = frame.locator(selector).first();
-      if (await locator.isVisible().catch(() => false)) return locator;
-    }
-    return undefined;
-  };
-  const markAuto = (locator: Locator): Promise<void> => locator.evaluate((el) => {
-    el.__baxAuto = true;
-    const form = 'form' in el && el.form instanceof HTMLFormElement ? el.form : undefined;
-    if (form) form.__baxAuto = true;
-  }).catch(() => {});
-  let last: Locator | undefined;
-  for (const field of fields) {
-    const locator = await visible(field.selector);
-    if (!locator) continue;
-    await markAuto(locator);
-    await locator.fill(field.value);
-    last = locator;
-  }
-  if (!last) return { submitted: false };
-  if (!submit) return { submitted: false, filled: true };
-  let how: string | undefined;
-  let button: Locator | undefined;
-  for (const selector of submits) {
-    if (selector === 'enter') {
-      how = 'enter';
-      break;
-    }
-    button = await visible(selector);
-    if (button) {
-      how = selector;
-      break;
-    }
-  }
-  if (button) {
-    await markAuto(button);
-    await button.click({ noWaitAfter: true });
-  } else if (how === 'enter') {
-    await last.press('Enter', { noWaitAfter: true });
-  } else if (await last.evaluate((el) => {
-    const form = 'form' in el && el.form instanceof HTMLFormElement ? el.form : undefined;
-    if (!form) return false;
-    form.requestSubmit();
-    return true;
-  })) {
-    how = 'requestSubmit';
-  } else {
-    await last.press('Enter', { noWaitAfter: true });
-    how = 'Enter';
-  }
-  await page.waitForTimeout(500);
-  await page.waitForLoadState('load', { timeout: submitWait }).catch(() => {});
-  await page.waitForLoadState('networkidle', { timeout: submitWait }).catch(() => {});
-  return { submitted: true, how };
-}
-
-// The URL of the current page of upstream.
-function currentUrl(page: Page): string {
-  return page.url();
+// The fields and the submit method of one fill (REQ-030 step 3).
+interface FillPlan {
+  readonly fields: readonly KeyedField[];
+  readonly submit: RefSubmit | undefined;
 }
 
 export interface AutoFillOptions {
-  readonly sites: SiteTree;
-  readonly fill: FillValues;
+  readonly classifiers: readonly Named<DomClassifier<JsonValue>>[];
+  readonly strategies: readonly Named<MatchStrategy>[];
+  readonly values: ValueService;
   readonly logger: Logger;
-  // The discovery mode: fill one time, without a submit.
-  readonly discovery: boolean;
+}
+
+// The submit method that serves the most fields with a key; on a tie, the first one. The fields of
+// the fill are the fields that it serves; without a method, all fields with a key (REQ-030).
+export function planFill(fields: readonly KeyedField[], submits: readonly RefSubmit[]): FillPlan {
+  let best: { submit: RefSubmit; count: number } | undefined;
+  for (const submit of submits) {
+    const count = fields.filter(({ ref }) => submit.serves.includes(ref)).length;
+    if (count > (best?.count ?? 0)) best = { submit, count };
+  }
+  if (!best) return { fields, submit: undefined };
+  const served = best.submit.serves;
+  return { fields: fields.filter(({ ref }) => served.includes(ref)), submit: best.submit };
 }
 
 export class AutoFill implements FormFill {
-  private readonly sites: SiteTree;
-  private readonly fill: FillValues;
+  private readonly classifiers: readonly Named<DomClassifier<JsonValue>>[];
+  private readonly strategies: readonly Named<MatchStrategy>[];
+  private readonly values: ValueService;
   private readonly logger: Logger;
-  private readonly discovery: boolean;
+  // The page code of each classifier, made at the first use.
+  private scripts: Promise<string[]> | undefined = undefined;
 
-  constructor({ sites, fill, logger, discovery }: AutoFillOptions) {
-    this.sites = sites;
-    this.fill = fill;
+  constructor({ classifiers, strategies, values, logger }: AutoFillOptions) {
+    this.classifiers = classifiers;
+    this.strategies = strategies;
+    this.values = values;
     this.logger = logger;
-    this.discovery = discovery;
   }
 
-  async run(lane: LaneSession, url: string, contextOf: ContextOf, checkPage: CheckPage): Promise<FillOutcome> {
-    const { fill, logger, discovery } = this;
+  // The classifiers that run on the page, with their page code and input.
+  private async runsFor(page: PageInfo): Promise<ClassifierRun[]> {
+    this.scripts ??= Promise.all(this.classifiers.map(({ plugin }) => plugin.pageScript()));
+    const scripts = await this.scripts;
+    const runs: ClassifierRun[] = [];
+    for (const [index, { name, plugin }] of this.classifiers.entries()) {
+      try {
+        const input = await plugin.pageInput(page);
+        if (input !== undefined) runs.push({ name, script: scripts[index] ?? '', input });
+      } catch (error) {
+        this.logger.error('classifier_error', { plugin: name, url: page.url, message: errorMessage(error) });
+      }
+    }
+    return runs;
+  }
+
+  // The keys of the fields: each match-strategy gets only the fields without a key (REQ-031c).
+  private async keysOf(fields: readonly RefField[], page: PageInfo): Promise<KeyedField[]> {
+    const keys = await this.values.keys(page);
+    if (!keys.length) return [];
+    const found = new Map<string, string>();
+    for (const { name, plugin } of this.strategies) {
+      const open = fields.filter(({ ref }) => !found.has(ref)).map(({ ref, hint }) => ({ ref, hint }));
+      if (!open.length) break;
+      let matches: readonly FieldMatch[] = [];
+      try {
+        matches = await plugin.match(open, keys, page);
+      } catch (error) {
+        this.logger.error('match_error', { plugin: name, url: page.url, message: errorMessage(error) });
+      }
+      for (const { ref, key } of matches) {
+        if (!found.has(ref) && open.some((field) => field.ref === ref) && keys.includes(key)) found.set(ref, key);
+      }
+    }
+    return fields.filter(({ ref }) => found.has(ref)).map(({ ref }) => ({ ref, key: found.get(ref) ?? '' }));
+  }
+
+  async run(lane: LaneSession, url: string, client: FillClient, checkPage: CheckPage): Promise<FillOutcome> {
+    const { logger, values } = this;
     const { fillState, pageCode } = lane;
     let submitted = false;
     let current = url;
@@ -215,25 +160,42 @@ export class AutoFill implements FormFill {
     let loginFrom: string | undefined;
     const pageUrl = (): Promise<string> => pageCode.run(currentUrl, null).catch(() => current);
     for (let round = 0; round < FILL_ROUNDS; round++) {
-      const match = this.sites.match(current);
-      if (!match) {
+      const page = pageInfo(current);
+      const runs = page.host ? await this.runsFor(page) : [];
+      if (!runs.length) {
         fillState.attempts.clear();
         fillState.waitedUrl = undefined;
         break;
       }
 
+      // In a login flow (after a login click or a submit), wait FLOW_WAIT for a field. Else wait
+      // until the page settles, a maximum of PEEK_WAIT, one time for each URL (J1d). A possible
+      // login click does not wait for a field.
+      const host = page.host ?? '';
+      const canClick = !fillState.loginClicked.has(host) && (await values.keys(page)).length > 0;
+      const wait = submitted ? FLOW_WAIT : fillState.waitedUrl !== current ? PEEK_WAIT : 0;
+      fillState.waitedUrl = current;
+      let found: PageClassification;
+      try {
+        found = await pageCode.run(classifyPage, { classifiers: runs, wait, settle: !submitted, quiet: SETTLE_QUIET, interval: POLL_INTERVAL, stopOnLogin: canClick });
+      } catch (error) {
+        logger.error('fill_error', { url: current, step: 'classify', message: errorMessage(error) });
+        break;
+      }
+      for (const { classifier, message } of found.errors) logger.error('classifier_error', { plugin: classifier, url: current, message });
+
       // The login link: one click for each lane and host. It does not count as a round.
-      const host = contextOf(current).host ?? '';
-      if (match.logins.length && !fillState.loginClicked.has(host) && fill.canLogIn(contextOf(current))) {
-        let clicked: string | null = null;
+      const login = found.logins[0];
+      if (canClick && login) {
+        let clicked = false;
         try {
-          clicked = await pageCode.run(clickLogin, { selectors: match.logins, submitWait: SUBMIT_WAIT });
+          clicked = await pageCode.run(clickRef, { ref: login, submitWait: SUBMIT_WAIT });
         } catch (error) {
           logger.error('fill_error', { url: current, step: 'login', message: errorMessage(error) });
         }
         if (clicked) {
           fillState.loginClicked.add(host);
-          logger.info('login_clicked', { url: current, selector: clicked });
+          logger.info('login_clicked', { url: current });
           loginFrom = current;
           current = await pageUrl();
           const check = await checkPage(current);
@@ -244,79 +206,65 @@ export class AutoFill implements FormFill {
           continue;
         }
       }
-      const selectors = [...new Set(match.forms.flatMap((form) => form.fields.map(({ selector }) => selector)))];
-      if (!selectors.length) break;
-
-      // In a login flow (after a login click or a submit), wait FLOW_WAIT. Else wait PEEK_WAIT once
-      // for each URL.
-      const wait = submitted ? FLOW_WAIT : fillState.waitedUrl !== current ? PEEK_WAIT : 0;
-      fillState.waitedUrl = current;
-      let found: string[];
-      try {
-        found = await pageCode.run(findFields, { fields: selectors.map((selector) => ({ selector })), wait, interval: POLL_INTERVAL });
-      } catch (error) {
-        logger.error('fill_error', { url: current, step: 'find', message: errorMessage(error) });
-        break;
-      }
-      if (!found?.length) {
+      if (!found.fields.length) {
         // The page left the forms: a later page can get a fill again.
         fillState.attempts.clear();
-        if (submitted) logger.info('fill_no_field', { url: current, waited: wait, selectors });
+        if (submitted) logger.info('fill_no_field', { url: current, waited: wait });
         break;
       }
 
-      // The form with the most visible fields; on a tie, the first one.
-      const form = match.forms.reduce<{ form: FormMatch | undefined; count: number }>((best, candidate) => {
-        const count = candidate.fields.filter(({ selector }) => found.includes(selector)).length;
-        return count > best.count ? { form: candidate, count } : best;
-      }, { form: undefined, count: 0 }).form;
-      if (!form) break;
-      const visibleFields: readonly FormField[] = form.fields.filter(({ selector }) => found.includes(selector));
-      const shown = visibleFields.map(({ selector }) => selector);
+      const keyed = await this.keysOf(found.fields, page);
+      if (!keyed.length) {
+        logger.info('fill_no_value', { url: current, fields: found.fields.map(({ hint }) => hint) });
+        break;
+      }
+      const plan = planFill(keyed, found.submits);
+      const keys = [...new Set(plan.fields.map(({ key }) => key))];
 
-      // The loop guard: each form and field set gets one fill until the page leaves the forms.
-      const attempt = `${form.key}\n${[...shown].sort().join(',')}`;
+      // The loop guard: each fill (host and keys) one time, until the page leaves the forms (G2).
+      const attempt = `${host}\n${[...keys].map((key) => key.toLowerCase()).sort().join(',')}`;
       if (fillState.attempts.has(attempt)) {
-        // In the discovery mode, the server fills one time and the user submits: no failed fill.
-        if (!fillState.failed.has(attempt) && !discovery) logger.info('fill_failed', { url: current, form: form.key, fields: shown });
+        if (!fillState.failed.has(attempt)) logger.info('fill_failed', { url: current, keys });
         fillState.failed.add(attempt);
         break;
       }
       fillState.attempts.add(attempt);
 
-      const values: FieldValue[] = [];
+      let given: Map<string, string>;
       try {
-        const resolved = await fill.resolveAll([...new Set(visibleFields.map(({ name }) => name))], contextOf(current), { discovery });
-        for (const field of visibleFields) {
-          const value = resolved.get(field.name);
-          if (value !== undefined) values.push({ name: field.name, selector: field.selector, value });
-        }
+        given = await values.values(keys, { page, client: client.name, dialog: client.dialog });
       } catch (error) {
         if (!(error instanceof FillError)) throw error;
         logger.error('fill_error', { url: current, step: 'value', message: error.message });
         if (error instanceof ApprovalError) lane.notes.push(REFUSED_NOTE);
         break;
       }
-      if (!values.length) {
-        logger.info('fill_no_value', { url: current, form: form.key, fields: shown });
+      const fields = plan.fields.flatMap(({ ref, key }) => {
+        const value = given.get(key);
+        return value === undefined ? [] : [{ ref, value, key }];
+      });
+      if (!fields.length) {
+        logger.info('fill_no_value', { url: current, keys });
         break;
       }
-      let outcome: FillResult;
+      let outcome;
       try {
-        outcome = await pageCode.run(fillAndSubmit, {
-          fields: values.map(({ selector, value }) => ({ selector, value })),
-          submits: form.submits,
+        outcome = await pageCode.run(fillRefs, {
+          fields: fields.map(({ ref, value }) => ({ ref, value })),
+          submit: plan.submit ? { kind: plan.submit.kind, ref: plan.submit.ref } : null,
           submitWait: SUBMIT_WAIT,
-          submit: !discovery,
         });
       } catch (error) {
-        logger.error('fill_error', { url: current, step: 'submit', message: fill.clean(errorMessage(error)) });
+        logger.error('fill_error', { url: current, step: 'submit', message: values.clean(errorMessage(error)) });
         break;
       }
-      if (outcome?.filled) logger.info('fill_filled', { url: current, form: form.key, fields: values.map(({ name }) => name), reason: 'discovery mode: no submit' });
-      if (!outcome?.submitted) break;
+      const filled = fields.map(({ key }) => key);
+      if (!outcome.submitted) {
+        if (outcome.filled) logger.info('fill_filled', { url: current, fields: filled, reason: 'no submit method' });
+        break;
+      }
       submitted = true;
-      logger.info('fill_submitted', { url: current, form: form.key, fields: values.map(({ name }) => name), how: outcome.how });
+      logger.info('fill_submitted', { url: current, fields: filled, how: outcome.how, classifier: plan.submit?.classifier });
 
       // The page after the submit gets the host check before each other step.
       current = await pageUrl();
@@ -325,9 +273,8 @@ export class AutoFill implements FormFill {
       logger.info('page_opened', { url: current, via: 'auto_submit' });
     }
 
-    // After the login flow, open again the URL of the login click, also after a failed login. Not in
-    // the discovery mode: the user submits.
-    if (loginFrom && !discovery && current !== loginFrom) {
+    // After the login flow, open again the URL of the login click, also after a failed login.
+    if (loginFrom && current !== loginFrom) {
       try {
         await pageCode.run(async (page: Page, { target, wait }: { target: string; wait: number }): Promise<void> => {
           await page.goto(target, { timeout: wait });

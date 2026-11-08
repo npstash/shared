@@ -177,3 +177,18 @@ The log of the decisions that change the design. Format and rules:
 - 20261107-09 Nestor fc2c70a7e4a7 In the discovery mode, the server does not open again the URL of the login click
 - 20261108-01 Nestor 00b631b3ec05 Write the tool in TypeScript in strict mode; Node.js runs the .ts files with type stripping, without a build step
 - 20261108-02 Nestor 00b631b3ec05 Give each component an interface and a class; the constructors get the dependencies; one composition root makes the objects; no mutable state at module level
+- 20261108-03 Nestor 601f12a226c4 Replace the form-fill providers with plugins in plugins/<category>/<plugin>/, in the categories key-value-source, approval-plugin, dom-classifier, match-strategy and page-script
+- 20261108-04 Nestor 601f12a226c4 Plugins run in the server process and get only JSON data, their context and the services that the server gives; no server object and no Playwright object
+- 20261108-05 Nestor 601f12a226c4 A dom-classifier runs as page code against the live DOM; each field of its result is a fill candidate with a hint, and it gives the submit method with the fields that it serves
+- 20261108-06 Nestor 601f12a226c4 A match-strategy pairs the hint of a field with a key of a key-value-source; the first key-value-source in order with the key gives the value
+- 20261108-07 Nestor 601f12a226c4 The server replaces each value of a page-script message with all its keys; the Node code of a plugin never gets a value
+- 20261108-08 Nestor 601f12a226c4 The server marks the elements of the form fill and of agent calls with a ref; page scripts read the mark
+- 20261108-09 Nestor 601f12a226c4 The discovery is the dom-classifier discovery and the page-script discovery; the discovery file holds forms and login matchers in a host tree, and the recorder writes into the node of the root domain
+- 20261108-10 Nestor 601f12a226c4 Remove the discovery mode, DISCOVER and the ask provider
+- 20261108-11 Nestor 601f12a226c4 server.json has the plugin instances by category; an instance has name, plugin, description, enabled and config
+- 20261108-12 Nestor 601f12a226c4 hosts.json holds only the host access; recordHosts in server.json records the opened hosts
+- 20261108-13 Nestor 601f12a226c4 The vault system of a host is in the file of the vault instance
+- 20261108-14 Nestor 601f12a226c4 The server selects the submit method that serves the most fields with a key; without one, it fills and does not submit
+- 20261108-15 Nestor 601f12a226c4 The loop guard identifies a fill by the host and the sorted keys
+- 20261108-16 Nestor 601f12a226c4 The heuristic classifier gives login fields only with "fields": true; the default is false
+- 20261108-17 Nestor 601f12a226c4 Outside a login flow, the server waits until the page settles; it does no form fill after read-only tools

@@ -1,32 +1,57 @@
-// server.json in the config folder: how the server works.
+// server.json in the config folder: how the server works (REQ-019, REQ-031 of sdd/SRS.md).
 //
 //   {
-//     "providers": [                               the fill providers, in the order that the server asks them
-//       { "type": "vault",  "enabled": true, "mask": true,  "vault": "vault-<name>" },
-//       { "type": "values", "enabled": true, "mask": false, "values": { "<name>": "<value>" } },
-//       { "type": "ask",    "enabled": true, "mask": true,  "fields": ["<name>"] },
-//       { "type": "vault", "enabled": true, "mask": true, "vault": "vault-<name>",
-//         "approval": { "type": "approve-https", "address": "https://<host>:<port>", "fingerprint": "<SHA-256>" } }
-//     ],
+//     "recordHosts": false,                         record the opened hosts in hosts.json (REQ-042)
+//     "plugins": {                                  the plugin instances of each category, in order
+//       "key-value-source": [
+//         { "name": "vault-main", "plugin": "vault", "description": "...", "enabled": true, "mask": true,
+//           "config": { "vault": "vault-main", "file": "vault-main.json" },
+//           "approval": { "plugin": "approve-dialog", "enabled": true, "config": {} } }
+//       ],
+//       "dom-classifier": [ { "name": "...", "plugin": "...", "description": "...", "enabled": true, "config": {} } ],
+//       "match-strategy": [ ... ],
+//       "page-script": [ ... ]
+//     },
 //     "tools": { "<tool>": { "enabled": true } }   the tool switches; the server adds missing tools
 //   }
 //
-// "enabled": false turns a provider or a tool off. A provider without "mask" is masked: its values
-// show as *** to the agent. The other keys of a provider are its settings (see providers-form-fill/).
-// An approval provider (approve-dialog, approve-https) is the "approval" of a key-value provider; the
-// mask of that entry applies. "enabled": false in "approval" turns the approval off (REQ-031 of
-// sdd/SRS.md).
+// "enabled": false turns an instance, an approval or a tool off. A key-value-source without "mask"
+// is masked: its values show as *** to the agent.
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { JsonObject } from './json.ts';
 import { isJsonObject, mtimeOf, readJson, writeJson } from './json.ts';
 import type { Logger } from './logger.ts';
+import type { Category } from './plugins/plugin.ts';
+import { INSTANCE_CATEGORIES } from './plugins/plugin.ts';
 
-// One provider of server.json that is on.
-export interface ProviderEntry {
-  readonly type: string;
+// One plugin instance of server.json.
+export interface InstanceEntry {
+  readonly name: string;
+  readonly plugin: string;
+  readonly description: string;
+  readonly enabled: boolean;
+  readonly config: JsonObject;
+}
+
+// The approval of a key-value-source instance.
+export interface ApprovalEntry {
+  readonly plugin: string;
+  readonly enabled: boolean;
+  readonly config: JsonObject;
+}
+
+// One key-value-source instance.
+export interface SourceEntry extends InstanceEntry {
   readonly mask: boolean;
-  // The entry of server.json: the settings of the provider.
-  readonly settings: JsonObject;
+  readonly approval: ApprovalEntry | undefined;
+}
+
+// The plugin instances of server.json, by category, in the order of the file.
+export interface PluginEntries {
+  readonly 'key-value-source': readonly SourceEntry[];
+  readonly 'dom-classifier': readonly InstanceEntry[];
+  readonly 'match-strategy': readonly InstanceEntry[];
+  readonly 'page-script': readonly InstanceEntry[];
 }
 
 // The switch of one tool in server.json.
@@ -34,9 +59,9 @@ export type ToolEntry = JsonObject & { enabled?: unknown };
 
 // The content of server.json.
 export interface ServerConfigData {
-  readonly providers: readonly unknown[];
+  readonly recordHosts: boolean;
+  readonly plugins: PluginEntries;
   readonly tools: Readonly<Record<string, ToolEntry | undefined>>;
-  readonly [key: string]: unknown;
 }
 
 // The config of the server: server.json.
@@ -44,8 +69,10 @@ export interface ServerConfig {
   readonly file: string;
   // The content of the file, read again if it changed.
   data(): ServerConfigData;
-  // The providers that are on, in the order of the file.
-  providers(): ProviderEntry[];
+  // The plugin instances, by category (REQ-031).
+  plugins(): PluginEntries;
+  // True if the server records the opened hosts (RECORD_HOSTS, REQ-042).
+  recordHosts(): boolean;
   // Write the tools: the other keys of the file stay.
   writeTools(tools: Record<string, ToolEntry>): void;
 }
@@ -64,7 +91,7 @@ export interface ToolSwitches {
 export class ServerConfigFile implements ServerConfig {
   readonly file: string;
   private mtime: number | undefined = undefined;
-  private content: ServerConfigData = { providers: [], tools: {} };
+  private content: ServerConfigData = { recordHosts: false, plugins: emptyPlugins(), tools: {} };
 
   constructor(file: string) {
     this.file = file;
@@ -81,20 +108,20 @@ export class ServerConfigFile implements ServerConfig {
     if (mtime === this.mtime) return false;
     const raw = readJson(this.file) ?? {};
     if (!isJsonObject(raw)) throw new Error(`${this.file}: the file must have a JSON object`);
-    if (raw.providers !== undefined && !Array.isArray(raw.providers)) throw new Error(`${this.file}: "providers" must be an array`);
+    if (raw.providers !== undefined) throw new Error(`${this.file}: "providers" is removed; use "plugins"`);
+    if (raw.recordHosts !== undefined && typeof raw.recordHosts !== 'boolean') throw new Error(`${this.file}: "recordHosts" must be true or false`);
     const tools = isJsonObject(raw.tools) ? raw.tools as Record<string, ToolEntry> : {};
-    this.content = { ...raw, providers: raw.providers ?? [], tools };
+    this.content = { recordHosts: raw.recordHosts === true, plugins: parsePlugins(this.file, raw.plugins), tools };
     this.mtime = mtime;
     return true;
   }
 
-  providers(): ProviderEntry[] {
-    return this.data().providers
-      .filter((entry): entry is JsonObject => isJsonObject(entry) && entry.enabled !== false)
-      .map((entry) => {
-        if (typeof entry.type !== 'string' || !entry.type) throw new Error(`${this.file}: each provider needs a "type"`);
-        return { type: entry.type, mask: entry.mask !== false, settings: entry };
-      });
+  plugins(): PluginEntries {
+    return this.data().plugins;
+  }
+
+  recordHosts(): boolean {
+    return this.data().recordHosts;
   }
 
   writeTools(tools: Record<string, ToolEntry>): void {
@@ -165,4 +192,55 @@ export class ToolsConfig implements ToolSwitches {
       }],
     };
   }
+}
+
+function emptyPlugins(): PluginEntries {
+  return { 'key-value-source': [], 'dom-classifier': [], 'match-strategy': [], 'page-script': [] };
+}
+
+// Read "plugins" of server.json. Throw an error for an entry that is not valid (REQ-031).
+export function parsePlugins(file: string, raw: unknown): PluginEntries {
+  if (raw === undefined) return emptyPlugins();
+  if (!isJsonObject(raw)) throw new Error(`${file}: "plugins" must be an object with one array for each category`);
+  for (const key of Object.keys(raw)) {
+    if (!(INSTANCE_CATEGORIES as readonly string[]).includes(key)) throw new Error(`${file}: "plugins" has the unknown category "${key}"`);
+  }
+  const names = new Set<string>();
+  const list = (category: Category): JsonObject[] => {
+    const value = raw[category] ?? [];
+    if (!Array.isArray(value)) throw new Error(`${file}: "plugins"."${category}" must be an array`);
+    return value.map((entry, index) => {
+      if (!isJsonObject(entry)) throw new Error(`${file}: "plugins"."${category}"[${index}] must be an object`);
+      return entry;
+    });
+  };
+  const instance = (category: Category, entry: JsonObject): InstanceEntry => {
+    const where = `${file}: an instance of "${category}"`;
+    for (const key of ['name', 'plugin', 'description'] as const) {
+      if (typeof entry[key] !== 'string' || !entry[key]) throw new Error(`${where} needs "${key}"`);
+    }
+    const name = String(entry.name);
+    if (names.has(name)) throw new Error(`${file}: two instances have the name "${name}"`);
+    names.add(name);
+    if (!isJsonObject(entry.config)) throw new Error(`${where} ("${name}") needs "config"`);
+    if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') throw new Error(`${where} ("${name}"): "enabled" must be true or false`);
+    return { name, plugin: String(entry.plugin), description: String(entry.description), enabled: entry.enabled !== false, config: entry.config };
+  };
+  const approval = (owner: string, value: unknown): ApprovalEntry | undefined => {
+    if (value === undefined) return undefined;
+    const where = `${file}: "approval" of "${owner}"`;
+    if (!isJsonObject(value) || typeof value.plugin !== 'string' || !value.plugin) throw new Error(`${where} needs "plugin"`);
+    if (value.config !== undefined && !isJsonObject(value.config)) throw new Error(`${where}: "config" must be an object`);
+    return { plugin: value.plugin, enabled: value.enabled !== false, config: isJsonObject(value.config) ? value.config : {} };
+  };
+  const sources = list('key-value-source').map((entry): SourceEntry => {
+    const base = instance('key-value-source', entry);
+    return { ...base, mask: entry.mask !== false, approval: approval(base.name, entry.approval) };
+  });
+  const plain = (category: Category): InstanceEntry[] => list(category).map((entry) => {
+    const base = instance(category, entry);
+    if (entry.approval !== undefined) throw new Error(`${file}: "${base.name}" is not a key-value-source; remove "approval"`);
+    return base;
+  });
+  return { 'key-value-source': sources, 'dom-classifier': plain('dom-classifier'), 'match-strategy': plain('match-strategy'), 'page-script': plain('page-script') };
 }

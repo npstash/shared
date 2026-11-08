@@ -5,12 +5,11 @@
 // A lane is one browser context for one agent (see lanes.ts). Each tool, except the lane tools,
 // needs the parameter lane.
 // Each tool call goes through these steps (see CallPipeline):
-//   tool switch (server.json) → lane → file name check → host check (sites.json) → Playwright MCP
-//   → host check of the opened page → login link and form fill (sites.json, providers-form-fill/;
-//   see autofill.ts), with a host check of each page after a submit
+//   tool switch (server.json) → lane → file name check → host check (hosts.json) → marks of the
+//   elements of the call → Playwright MCP → host check of the opened page → login link and form
+//   fill (the plugins; see autofill.ts), with a host check of each page after a submit
 //   → scrub of masked values and of secret headers → log
-// In the discovery mode, discover.ts writes the hosts, and the fields and buttons that the user
-// used, into sites.json, without a call (see Discovery).
+// The page-script plugins run in the lanes beside the calls (see page-scripts.ts).
 // Texts for the client do not name upstream, Playwright or the form fill.
 // startServer() is the composition root: it makes the objects of the server.
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -21,26 +20,28 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import type { CallToolRequest, CallToolResult, ElicitResult, ListRootsRequest, Progress, ListRootsResult, ListToolsResult, ServerNotification, ServerRequest, Tool } from '@modelcontextprotocol/sdk/types.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createConnection } from '@playwright/mcp';
+import type { Page } from 'playwright-core';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { ElicitSchema, FillContext } from '../../src/fill/provider.ts';
-import type { FillValues } from '../../src/fill/registry.ts';
-import { FillRegistry } from '../../src/fill/registry.ts';
+import { HostsFile } from '../../src/hosts.ts';
 import type { HostCheck, HostPolicy } from '../../src/hosts/host-policy.ts';
 import { SiteAccessPolicy } from '../../src/hosts/host-policy.ts';
-import { hostOfUrl } from '../../src/hosts/patterns.ts';
 import { errorCode, errorMessage } from '../../src/json.ts';
 import type { Logger } from '../../src/logger.ts';
 import { summarizeResult } from '../../src/logger.ts';
-import { PROVIDERS_DIR, SERVER_CONFIG, SITES_CONFIG, VERSION, configFile } from '../../src/paths.ts';
+import { HOSTS_CONFIG, PLUGINS_DIR, SERVER_CONFIG, VERSION, configFile } from '../../src/paths.ts';
+import type { Dialog, DialogAnswer, DialogForm } from '../../src/plugins/approval-plugin.ts';
+import type { ValueService } from '../../src/plugins/host.ts';
+import { PluginHost } from '../../src/plugins/host.ts';
 import type { ToolSwitches } from '../../src/server-config.ts';
 import { ServerConfigFile, ToolsConfig } from '../../src/server-config.ts';
-import { Sites } from '../../src/sites.ts';
-import type { FormFill } from './autofill.ts';
+import type { FillClient, FormFill } from './autofill.ts';
 import { AutoFill } from './autofill.ts';
 import type { Env } from './config.ts';
+import { markTargets } from './page-code.ts';
+import type { PageScriptHost } from './page-scripts.ts';
+import { PageScripts } from './page-scripts.ts';
 import { TMP_DIR, ignoredVariables, outputDir, renderMode, stateFile } from './config.ts';
-import { Discovery } from './discover.ts';
 import type { Lane, LaneManager, LanesOptions } from './lanes.ts';
 import { BROWSER_SESSIONS, Lanes, cleanStaleLanes, isBrowserSession } from './lanes.ts';
 import { UpstreamPageCode } from './run-code.ts';
@@ -50,11 +51,19 @@ import { cleanStaleXvfb } from './xvfb.ts';
 // Maximum time of one tool call without progress. Playwright has its own, shorter timeouts.
 const TOOL_TIMEOUT: number = 10 * 60 * 1000;
 
-// Maximum time that the user has to answer a dialog of the ask provider.
-const ASK_TIMEOUT: number = 5 * 60 * 1000;
-
 // Maximum text in a debug log entry of a tool result.
 const DEBUG_TEXT_MAX: number = 20000;
+
+// Tools that cannot change the page: no form fill after them (J2a). browser_tabs counts only with
+// "action": "list".
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'browser_snapshot', 'browser_take_screenshot', 'browser_console_messages', 'browser_network_requests', 'browser_network_request',
+]);
+
+// True if the call cannot change the page.
+function readOnly(name: string, args: ToolArgs | undefined): boolean {
+  return READ_ONLY_TOOLS.has(name) || (name === 'browser_tabs' && args?.action === 'list');
+}
 
 // The scrub also takes output files that changed this much before the call: file times are not exact.
 const MTIME_SLACK: number = 2000;
@@ -155,16 +164,18 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
   let markDownstreamReady: () => void = () => {};
   const downstreamReady = new Promise<void>((resolve) => { markDownstreamReady = resolve; });
 
-  // 1. Load the config of the server: server.json and sites.json.
+  // 1. Load the config of the server: server.json, hosts.json and the plugins.
   logger.info('config_dir', { dir: configDir });
   const serverConfig = new ServerConfigFile(configFile(configDir, SERVER_CONFIG));
   const toolsConfig = new ToolsConfig(serverConfig, logger, DANGEROUS_TOOLS);
-  const sites = new Sites(configFile(configDir, SITES_CONFIG));
-  sites.load();
-  const discoveryMode = env.BROWSER_AUTOMATION_X_MCP_DISCOVER === '1';
-  if (discoveryMode) logger.info('discovery_mode', {});
-  const hostPolicy = new SiteAccessPolicy({ sites });
-  const fill = await FillRegistry.load({ entries: serverConfig.providers(), providersDir: PROVIDERS_DIR, sites, logger });
+  const hosts = new HostsFile(configFile(configDir, HOSTS_CONFIG));
+  hosts.load();
+  const recordHosts = serverConfig.recordHosts();
+  const hostPolicy = new SiteAccessPolicy({
+    hosts,
+    onOpened: recordHosts ? (host: string): void => { if (hosts.record(host)) logger.info('host_recorded', { host }); } : undefined,
+  });
+  const plugins = await PluginHost.load({ entries: serverConfig.plugins(), pluginsDir: PLUGINS_DIR, configDir, logger });
 
   // 2. Select the render mode. The server does not use the variables of Playwright MCP.
   for (const name of ignoredVariables(env)) logger.info('ignored', { control: name, reason: 'the server does not use this variable' });
@@ -180,8 +191,8 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS },
   );
   const clientName = (): string | undefined => server.getClientVersion()?.name;
-  const discovery = discoveryMode ? new Discovery({ sites, fill, logger, clientName }) : undefined;
-  const autofill = new AutoFill({ sites, fill, logger, discovery: discoveryMode });
+  const pageScripts = new PageScripts({ instances: plugins.pageScripts, values: plugins, logger });
+  const autofill = new AutoFill({ classifiers: plugins.classifiers, strategies: plugins.strategies, values: plugins, logger });
 
   // 4. The lanes, and a connection to Playwright MCP that only gives the tool list.
   const output = outputDir(cwd);
@@ -197,15 +208,23 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
     logger,
     outputDir: output,
     stateFile: stateFile(env, cwd),
-    keepIndexedDb: (host: string): boolean => sites.has(host),
+    keepIndexedDb: (host: string): boolean => hosts.has(host),
     roots,
     afterOpen: async (lane: Lane): Promise<void> => {
       if (!lane.client) throw new Error(`the lane ${lane.id} has no upstream connection`);
       lane.session = new LaneSession({ lane: lane.id, client: lane.client, notes: lane.notes, pageCode: new UpstreamPageCode(lane.client) });
-      if (discovery && lane.context) await discovery.start(lane.session, lane.context);
+      const context = lane.context;
+      if (!context) return;
+      await pageScripts.install(lane.id, context);
+      // The pages that the user opens are recorded too (REQ-042).
+      if (recordHosts) {
+        const watch = (page: Page): void => { page.on('load', () => { void hostPolicy.opened(page.url()); }); };
+        context.pages().forEach(watch);
+        context.on('page', watch);
+      }
     },
     beforeClose: async (lane: Lane): Promise<void> => {
-      if (discovery && lane.session) await discovery.stop(lane.session);
+      await pageScripts.laneClosed(lane.id);
     },
     ...laneOptions,
   });
@@ -226,7 +245,7 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
     markDownstreamReady();
   };
 
-  const pipeline = new CallPipeline({ server, logger, toolSwitches: toolsConfig, hostPolicy, fill, autofill, lanes, cwd, outputDir: output, upstreamTools });
+  const pipeline = new CallPipeline({ server, logger, toolSwitches: toolsConfig, hostPolicy, values: plugins, autofill, pageScripts, lanes, cwd, outputDir: output, upstreamTools });
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     openLog();
     return pipeline.listTools();
@@ -244,7 +263,7 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
     logger.open();
     logger.info('shutdown', { reason });
     await lanes.closeAll(reason);
-    await Promise.allSettled([catalog.close(), server.close(), fill.dispose()]);
+    await Promise.allSettled([catalog.close(), server.close(), plugins.dispose()]);
     onClose?.(reason);
   }
   server.onclose = (): void => { void close('client closed'); };
@@ -369,8 +388,9 @@ export interface CallPipelineOptions {
   readonly logger: Logger;
   readonly toolSwitches: ToolSwitches;
   readonly hostPolicy: HostPolicy;
-  readonly fill: FillValues;
+  readonly values: ValueService;
   readonly autofill: FormFill;
+  readonly pageScripts: PageScriptHost;
   readonly lanes: LaneManager;
   readonly cwd: string;
   readonly outputDir: string;
@@ -383,8 +403,9 @@ export class CallPipeline {
   private readonly logger: Logger;
   private readonly toolSwitches: ToolSwitches;
   private readonly hostPolicy: HostPolicy;
-  private readonly fill: FillValues;
+  private readonly values: ValueService;
   private readonly autofill: FormFill;
+  private readonly pageScripts: PageScriptHost;
   private readonly lanes: LaneManager;
   private readonly cwd: string;
   private readonly outputDir: string;
@@ -395,8 +416,9 @@ export class CallPipeline {
     this.logger = options.logger;
     this.toolSwitches = options.toolSwitches;
     this.hostPolicy = options.hostPolicy;
-    this.fill = options.fill;
+    this.values = options.values;
     this.autofill = options.autofill;
+    this.pageScripts = options.pageScripts;
     this.lanes = options.lanes;
     this.cwd = options.cwd;
     this.outputDir = options.outputDir;
@@ -443,19 +465,35 @@ export class CallPipeline {
     }
   }
 
-  // The context of a provider for the page url (see src/fill/provider.ts).
-  private fillContext(url: string | undefined): FillContext {
+  // The client of a fill: its name, and its dialog if it can show one (MCP elicitation).
+  private fillClient(): FillClient {
     const { server } = this;
     const elicitation = server.getClientCapabilities()?.elicitation;
     const canAsk = Boolean(elicitation && (elicitation.form || Object.keys(elicitation).length === 0));
-    return {
-      host: hostOfUrl(url ?? ''),
-      url,
-      client: server.getClientVersion()?.name,
-      elicit: canAsk
-        ? (message: string, requestedSchema: ElicitSchema, timeout: number = ASK_TIMEOUT): Promise<ElicitResult> => server.elicitInput({ message, requestedSchema }, { timeout })
-        : undefined,
-    };
+    const dialog: Dialog | undefined = canAsk
+      ? {
+        ask: async (message: string, form: DialogForm, timeout: number): Promise<DialogAnswer> => {
+          const result: ElicitResult = await server.elicitInput({ message, requestedSchema: form }, { timeout });
+          return result.action === 'accept' ? { action: 'accept', content: result.content ?? {} } : { action: result.action };
+        },
+      }
+      : undefined;
+    return { name: server.getClientVersion()?.name, dialog };
+  }
+
+  // Mark the elements of a call with a target before upstream runs it (REQ-031e). Only the
+  // page-script plugins read the marks.
+  private async markCall(lane: LaneSession, name: string, args: ToolArgs | undefined): Promise<void> {
+    if (this.pageScripts.empty) return;
+    const targets: string[] = [];
+    const take = (value: unknown): void => { if (typeof value === 'string' && value) targets.push(value); };
+    for (const [key, value] of Object.entries(args ?? {})) if (key === 'target' || key.endsWith('Target')) take(value);
+    if (Array.isArray(args?.fields)) for (const field of args.fields as unknown[]) if (field && typeof field === 'object') take((field as ToolArgs).target);
+    const focused = name === 'browser_press_key';
+    if (!targets.length && !focused) return;
+    await lane.pageCode.run(markTargets, { targets, focused }).catch((error: unknown) => {
+      this.logger.debug('mark_error', { tool: name, message: errorMessage(error) });
+    });
   }
 
   // One call in a lane.
@@ -506,7 +544,7 @@ export class CallPipeline {
 
   // The steps of one call. Each step can stop the call with an error result.
   private async runSteps(lane: LaneSession, request: CallToolRequest, extra: CallExtra): Promise<CallToolResult> {
-    const { hostPolicy, fill, logger } = this;
+    const { hostPolicy, values, logger } = this;
     const { client } = lane;
     const { name } = request.params;
     let args: ToolArgs | undefined = request.params.arguments;
@@ -523,9 +561,9 @@ export class CallPipeline {
       if (!check.allowed) return this.blockedResult(lane, name, target, check, false);
     }
 
+    await this.markCall(lane, name, args);
     const progressToken = request.params._meta?.progressToken;
     const started = Date.now();
-    const call = lane.startAgentCall(started);
     let raw = await client.callTool({ ...request.params, arguments: args }, undefined, {
       signal: extra.signal,
       timeout: TOOL_TIMEOUT,
@@ -534,9 +572,6 @@ export class CallPipeline {
         void extra.sendNotification({ method: 'notifications/progress', params: { progressToken, ...progress } });
       },
     }) as CallToolResult;
-
-    // The end of the call: the discovery gives the events of this time to the agent.
-    call.end = Date.now();
 
     // A click, a redirect or a script can open a page of a blocked host. Close it.
     // Each page after a submit of the form fill gets the same check (see autofill.ts).
@@ -552,7 +587,7 @@ export class CallPipeline {
       const check = await checkPage(opened);
       if (!check.allowed) return this.blockedResult(lane, name, opened, check, true);
       if (opened !== previous) logger.info('page_opened', { url: opened, via: 'tool' });
-      const outcome = await this.autofill.run(lane, opened, (url) => this.fillContext(url), checkPage);
+      const outcome = readOnly(name, args) ? { submitted: false } : await this.autofill.run(lane, opened, this.fillClient(), checkPage);
       if (outcome.blocked) return this.blockedResult(lane, name, outcome.blocked.url, outcome.blocked.check, true);
       if (outcome.submitted) {
         raw = await client.callTool({ name: 'browser_snapshot', arguments: {} }, undefined, { timeout: TOOL_TIMEOUT }) as CallToolResult;
@@ -564,9 +599,9 @@ export class CallPipeline {
       }
     }
     const files = this.writtenFiles(raw, started);
-    fill.scrubFiles(files);
+    values.scrubFiles(files);
     maskFiles(files, logger);
-    return forClient(maskResult(fill.scrub(raw)));
+    return forClient(maskResult(values.scrub(raw)));
   }
 
   // The files of a call: each file link in the result, and each file of the output folder that

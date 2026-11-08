@@ -5,7 +5,7 @@ switches, a form fill, host lists and a log. A lane is an own browser context fo
 agents and sessions use the browser in parallel (see [Lanes](#lanes)).
 
 The internals are hidden from the agents. An agent sees the MCP server `browser-automation-x-mcp`
-and the browser tools. No text for the agent names Playwright, the form fill or its providers.
+and the browser tools. No text for the agent names Playwright, the form fill or its plugins.
 The deny rules of the agent tools close this folder and the config folder to the agents (see
 [Deny rules](#deny-rules)). Keep each link to this folder out of the files that agents read.
 
@@ -27,8 +27,8 @@ run.sh run.bat                launcher of the server and its runtime
 package.json                  Node.js packages; the dev packages are for the tests only
 tsconfig.json eslint.config.ts   type check and lint (static analysis)
 config/                       templates of the config files
-providers-form-fill/<type>/   form-fill providers: index.ts
-src/                          server.json, sites.json, logger, host check, fill registry
+plugins/<category>/<plugin>/  the plugins: index.ts; plugins/common/ for shared plugin code
+src/                          server.json, hosts.json, logger, host check, plugin APIs and host
 playwright/src/               the server
 tests/                        the test phases: static/, unit/, functional/, online/; fixtures/
 sdd/                          documents of the tool
@@ -140,19 +140,35 @@ of the other agent tools (`.kilo/kilo.jsonc`, `.continue/`).
 
 ## Config folder
 
-`--config-dir` gives the config folder, e.g. `local/configs/browser-automation-x-mcp`. It holds two
-JSON files. A missing file is first a copy of its template in `config/` of this folder.
+`--config-dir` gives the config folder, e.g. `local/configs/browser-automation-x-mcp`. It holds
+`server.json`, `hosts.json` and the files of the plugins. A missing `server.json` or `hosts.json` is
+first a copy of its template in `config/` of this folder. A plugin makes its missing files itself.
 
 **`server.json`**: how the server works.
 
 ```json
 {
-  "providers": [
-    { "type": "vault",  "enabled": true, "mask": true,  "vault": "vault-main",
-      "approval": { "type": "approve-https", "address": "https://127.0.0.1:8743", "fingerprint": "AB:CD:..." } },
-    { "type": "values", "enabled": true, "mask": false, "values": { "name": "Anna Nowak" } },
-    { "type": "ask",    "enabled": true, "mask": true,  "fields": ["phone"] }
-  ],
+  "recordHosts": false,
+  "plugins": {
+    "key-value-source": [
+      { "name": "vault-main", "plugin": "vault", "description": "Logins of personal sites", "enabled": true, "mask": true,
+        "config": { "vault": "vault-main", "file": "vault-main.json" },
+        "approval": { "plugin": "approve-https", "enabled": true,
+                      "config": { "address": "https://127.0.0.1:8743", "fingerprint": "AB:CD:..." } } },
+      { "name": "values", "plugin": "values", "description": "Values that are not secret", "enabled": true, "mask": false,
+        "config": { "values": { "name": "Anna Nowak" } } }
+    ],
+    "dom-classifier": [
+      { "name": "discovery", "plugin": "discovery", "description": "The learned forms", "enabled": true, "config": { "file": "discovery.json" } },
+      { "name": "heuristic", "plugin": "heuristic", "description": "Submit methods", "enabled": true, "config": { "fields": false } }
+    ],
+    "match-strategy": [
+      { "name": "propagate", "plugin": "propagate", "description": "Hint as key", "enabled": true, "config": {} }
+    ],
+    "page-script": [
+      { "name": "discovery-recorder", "plugin": "discovery", "description": "The recorder", "enabled": false, "config": { "file": "discovery.json" } }
+    ]
+  },
   "tools": {
     "browser_click":           { "enabled": true },
     "browser_run_code_unsafe": { "enabled": false }
@@ -160,156 +176,167 @@ JSON files. A missing file is first a copy of its template in `config/` of this 
 }
 ```
 
-- `providers`: the form-fill providers, in the order that the server asks them. `"enabled": false`
-  turns one off. `"mask"`: see [Form fill](#form-fill); without it, the provider is masked. The
-  other keys are the settings of the provider. `"approval"` attaches an approval provider to a
-  key-value provider. See [Providers](#providers).
+- `plugins`: the plugin instances, one array for each category, in the order of use. See
+  [Plugins](#plugins). Each instance needs `name` (unique), `plugin` (the folder in
+  `plugins/<category>/`), `description` and `config`. `"enabled": false` turns it off. A path in
+  `config` is relative to the config folder.
+- A key-value-source also has `mask` (see [Form fill](#form-fill); without it, the instance is
+  masked) and an optional `approval`.
+- `recordHosts`: `true` records the root domain of each loaded page of an allowed host in
+  `hosts.json` with `"access": "allow"`. The default is `false`.
 - `tools`: the tool switches (see [Tool switches](#tool-switches)). The server adds missing tools.
 
-**`sites.json`**: what the server knows about sites. Only the discovery mode writes it (see
-[Discovery](#find-the-fields-of-a-page-discovery)).
+**`hosts.json`**: the access of the hosts (see [Host access](#host-access)).
 
 ```json
 {
   "defaultAccess": "allow",
-  "sites": {
-    "amazon.pl": {
-      "access": "allow",
-      "provider-config": { "vault": { "vault": "vault-main", "entry": "Amazon - Nestor" } },
-      "login": ["internal:role=link[name=\"zaloguj się\"i]"],
-      "forms": [
-        { "fields": { "input[name=\"email\"]": "username" }, "submit": ["#continue"] },
-        { "fields": { "#ap_password": "password" }, "submit": ["#signInSubmit"] }
-      ]
-    },
+  "hosts": {
+    "amazon.pl": { "access": "allow" },
     "premium.pl": { "subdomains": { "sklep.premium.pl": { "access": "deny" } } }
   }
 }
 ```
 
-- A key of `sites` is a root domain, e.g. `amazon.pl`, not `www.amazon.pl`. The Public Suffix List
+- A key of `hosts` is a root domain, e.g. `amazon.pl`, not `www.amazon.pl`. The Public Suffix List
   gives the root domain: `amazon.co.uk`, `user.github.io`. An IP address and `localhost` stay.
-- `subdomains`: the nodes of the subdomains, with the same keys as a site. A key is the full host
-  name. A deeper host can be the child of a subdomain.
-- `access` and `provider-config` go down the tree: a subdomain without them gets them from the
-  nearest parent. The nearest value wins. For `provider-config`, this applies to each provider type
-  separately. `access`: see [Host access](#host-access).
-- `provider-config`: the config of a provider for the site, by the provider type. `"vault"` needs
-  `"vault"` (the vault of the vault provider in `server.json`) and `"entry"` (the vault system).
-- `forms` and `login`: for the host of their node and for its subdomains. A form has no path: it
-  applies on each page where one of its fields is visible. See [Form fill](#form-fill).
-- A site key that is not a root domain, a `subdomains` key outside its parent, `credentials`,
-  `pages`, a form without `fields`, a form with `provider-config`, or a `"vault"` config without
-  `vault` or `entry` is a load error.
+- `subdomains`: the nodes of the subdomains. A key is the full host name. A deeper host can be the
+  child of a subdomain. A node has only `access` and `subdomains`.
+- The files of the `vault` and `discovery` plugins are host trees of the same form.
 
 ## Form fill
 
-The agent never fills credentials or personal data. After each call, the server checks the page.
-If a field of a form of the host is visible, the server fills the form and submits it. The
-agent gets the page after the submit. It does not know about the fill.
+The agent never fills credentials or personal data. After each call that can change the page, the
+server asks the plugins:
 
-- **Fields:** `"fields": { "<selector>": "<key>" }`. The key is the key of a provider value, e.g.
-  `password`. A selector is CSS, or a label or role locator of Playwright, e.g.
-  `internal:label="Password"s`. The server looks for the selector in each frame of the page. The
-  forms of the host and of its parent domains apply. The server fills the form with the most
-  visible fields; on a tie, the first one (the host first, then its parents, each in file order).
+1. The **dom-classifiers** run in each frame of the page and give the fields (each with a hint, e.g.
+   `password`), the submit methods and the login links. A field is a fill candidate: the classifier
+   decides what to fill.
+2. The **match-strategies** give the key of each field from its hint.
+3. The **key-value-sources** give the values; an attached **approval plugin** approves them first.
+4. The server fills the fields and runs the submit method. The agent gets the page after the
+   submit. It does not know about the fill.
+
+- **No fill after:** `browser_snapshot`, `browser_take_screenshot`, `browser_console_messages`,
+  `browser_network_requests`, `browser_network_request`, and `browser_tabs` with `"action": "list"`.
 - **Wait:** after a login click or a submit (a login flow), the server waits a maximum of 3 s for a
-  visible field. On other pages, it waits a maximum of 3 s one time for each URL.
-- **No field:** in a login flow, a page without a visible field ends the flow. The log gets
-  `fill_no_field` with the URL, the wait and the selectors.
-- **Values:** for each key of the visible fields, the server asks the providers of `server.json`, in
-  their order. The first provider with the key gives the value. A field without a value stays
-  empty. If no field has a value, the server does nothing.
-- **Submit:** `"submit": [...]`. The server uses the first entry that applies: a visible element (it
-  clicks it), or `"enter"` (it presses Enter in the last field).
-  Without such an entry, it calls `requestSubmit()` of the form, else it presses Enter. Then
-  it waits a maximum of 10 s for the page. A second step, e.g. the password after the username, gets
-  a fill in the same call. Maximum 3 rounds.
-- **Login link:** `"login": [...]` gives the sign-in links of a site, e.g. in the header of a shop.
-  Before the fill, the server clicks the first visible one on each page of the host, then fills the
-  login pages. It clicks one time for each lane and host, and only for a page that has a vault
-  config. After the login flow, also after a failed login, the server opens again the URL where it
-  clicked. In the discovery mode, it does not. Use a
-  locator with the text that shows only before the login, e.g.
-  `internal:role=link[name="zaloguj się"i]`. After the login the text changes, and the server does
-  not click.
-- **Host check:** each page after a submit gets the host check before the next fill (see
-  [Host access](#host-access)).
-- **Loop guard:** the server fills each set of visible fields of a form one time. If the same fields
-  come back, e.g. after a wrong password, it does not fill them again. The log gets `fill_failed`.
-  The guard is reset on a page without a visible field of a form.
-- **Mask:** `"mask": true` (the default) replaces the values of the provider with `***` in each
+  visible field. On other pages, it waits until the page settles (no change of the DOM for 300 ms),
+  a maximum of 3 s, one time for each URL.
+- **No field:** in a login flow, a page without a field ends the flow. The log gets
+  `fill_no_field`.
+- **Selection:** the server uses the submit method that serves the most fields with a key; on a
+  tie, the first one in the order of the dom-classifiers. It fills only the fields that the method
+  serves. Without a method, it fills the fields and does not submit.
+- **Values:** the first key-value-source in order that has the key gives the value. A field without
+  a value stays empty. If no field has a value, the server does nothing.
+- **Rounds:** after a submit, the server waits a maximum of 10 s for the page. A second step, e.g.
+  the password after the username, gets a fill in the same call. Maximum 3 rounds.
+- **Login link:** before the fill, the server clicks the first visible login link of a
+  dom-classifier, one time for each lane and host, and only if a key-value-source has keys for the
+  page. After the login flow, also after a failed login, it opens again the URL where it clicked.
+- **Host check:** each page after a submit gets the host check before the next fill.
+- **Loop guard:** the server does each fill (the host and the keys) one time. If the same fill
+  comes back, e.g. after a wrong password, it does not fill again. The log gets `fill_failed`. The
+  guard is reset on a page without a field.
+- **Mask:** `"mask": true` (the default) replaces the values of the instance with `***` in each
   result and in each text file of the output folder. Binary files, e.g. screenshots, stay unchanged.
-- **Errors:** a provider error or a page error goes only to the log. The agent gets the page as it
-  is.
+- **Errors:** a plugin error or a page error goes only to the log. The agent gets the page as it is.
 
-### Providers
+## Plugins
 
-| Provider | Kind | Settings in `server.json` | Values |
+A plugin is one implementation in `plugins/<category>/<plugin>/index.ts`. Its default export is a
+class of the API of its category in [src/plugins/](src/plugins/). Shared plugin code is in
+`plugins/common/`. A plugin gets only its config and the data of each call: no object of the
+server and no object of Playwright.
+
+| Category | Plugin | `config` | What it does |
 | --- | --- | --- | --- |
-| vault | key-value | `"vault": "vault-<name>"` | The secret of the vault system of the page: `entry` of the nearest `provider-config.vault` in `sites.json`, if its `vault` is the vault of the provider. The key is the secret name, e.g. `password`. |
-| values | key-value | `"values": { "<key>": "<value>" }` | Values that are not secret. |
-| ask | value | `"fields": ["phone", ...]` | A dialog of the client for the listed keys. Only clients with MCP elicitation. In `claude -p`, Claude Code cancels the dialog. Do not list passwords: the MCP specification does not allow this dialog for sensitive data. |
-| approve-dialog | approval | none | The values of its key-value provider, after the user approves in a dialog of the client. |
-| approve-https | approval | `"address": "https://<host>:<port>"`, `"fingerprint": "<SHA-256>"` | The values of its key-value provider, after an approval service approves. |
+| key-value-source | `vault` | `vault`, `file` | The secrets of the vault system of the page. The file is a host tree; the nearest node with a `"system"` gives the system. The keys are the secret names, e.g. `password`. |
+| key-value-source | `values` | `values` | Values that are not secret; the same keys on each page. |
+| approval-plugin | `approve-dialog` | none | Approves in a dialog of the client. In `claude -p`, Claude Code cancels the dialog. |
+| approval-plugin | `approve-https` | `address`, `fingerprint` | Asks an approval service. |
+| dom-classifier | `discovery` | `file` | The forms and the login links of the discovery file. |
+| dom-classifier | `heuristic` | `fields` | The submit methods of the forms: the submit button, else `requestSubmit()`, else Enter. With `"fields": true`, also login fields by rules. |
+| match-strategy | `propagate` | none | The hint of a field is its key, if a key-value-source has the key. |
+| page-script | `discovery` | `file` | The recorder: it writes the forms that the user fills into the discovery file. |
 
-- **Key-value:** has keys and values. In the discovery mode, it gives the key of a value that the user
-  filled.
-- **Value:** gives a value for a key. The discovery mode does not use it.
-- **Approval:** goes into `"approval"` of a key-value provider entry, e.g.
-  `"approval": { "type": "approve-dialog" }`. The mask of that entry applies. `"enabled": false` in
-  `"approval"` turns the approval off. An approval provider in the list of `providers` is a load
-  error. Before a fill, the provider asks for one
-  approval for all its keys of the form. The request has the host, the keys and the client name; no
-  value and no URL. A refusal, or no answer in 15 s, stops the fill. No later provider gives the keys.
-  The result of the call gets the note "The user did not approve an action on this page."
-  The discovery mode uses the key-value provider without an approval.
+- **Approval:** goes into `"approval"` of a key-value-source. Before a fill, the plugin approves all
+  keys of that instance in one request: the host, the keys and the client name; no value and no
+  URL. A refusal, or no answer in 15 s, stops the fill. No later source gives the keys. The result
+  of the call gets the note "The user did not approve an action on this page."
 - **approve-https:** sends `POST <address>/approve` with `{ "host", "keys", "client" }`, and expects
   `{ "approved": true }`. It pins the certificate of the service with `fingerprint` (SHA-256; case and
   `:` have no effect), and sends nothing to an other certificate. An empty `address` or `fingerprint`
   refuses each fill. A service that approves each request is in `projects/other/approve-provider-service`
   of the workspace.
+- **heuristic fields:** a visible password field that is not `new-password`, and the text or email
+  field before it; else a field with `autocomplete` `username` or `webauthn`. A form that asks for
+  the password to confirm an action looks the same as a login: turn `fields` on only if you accept
+  this.
+- **Vault file**, e.g. `vault-main.json`:
 
-To add a provider, see [src/fill/provider.ts](src/fill/provider.ts).
+  ```json
+  { "hosts": { "amazon.pl": { "system": "Amazon - Nestor" } } }
+  ```
 
-### Find the fields of a page (discovery)
+### The discovery file
 
-Start the server with `BROWSER_AUTOMATION_X_MCP_DISCOVER=1`, e.g. in the `env` of `.mcp.json`. The
-server writes into `sites.json` at once. No call of the agent is necessary.
+The `discovery` dom-classifier reads it; the recorder writes it.
 
-- **Hosts:** for each loaded page of an allowed host, its root domain goes into `sites.json` with
-  `"access": "allow"`, e.g. `amazon.pl` for `www.amazon.pl`. An access that the file has stays.
-- **Forms:** the forms and the login links go into the nearest node of the host with a
-  `provider-config`, else into the root domain. A new form that has a selector of a recorded form
-  adds its selectors to that form. Else it is a new form.
-- **Fields:** at a click of a button or a submit, the server gets the values of the fields that the
-  user filled. It asks the key-value providers for the key of each value, in their order, and writes
-  `"<selector>": "<key>"`. Then it discards the values. It never logs or writes a value. A field
-  without a key gets a name from its attributes (`username`, `password`, `email`, `otp`, else its
-  `name`), but only if the selector has no key yet. A later value provider, e.g. `ask`, can fill it.
+```json
+{
+  "hosts": {
+    "amazon.pl": {
+      "login": [{ "css": "a", "text": "zaloguj się" }],
+      "forms": [
+        { "fields": { "input[name=\"email\"]": "email" }, "submit": ["#continue"] },
+        { "fields": { "#ap_password": "password" }, "submit": ["#signInSubmit"] }
+      ]
+    }
+  }
+}
+```
+
+- `fields`: `"<css>": "<hint>"`. The hint is a key of a key-value-source, e.g. `password`.
+- `submit` and `login`: matchers. A matcher is a CSS selector, or `{ "css", "text" }`: an element
+  of the selector whose visible text has the text, case-insensitive. `"enter"` in `submit` presses
+  Enter in the last field. Use a login link text that shows only before the login: after the login
+  the text changes, and the server does not click.
+- The forms and the login links of a node apply to its host and to its subdomains.
+
+### Record the fields of a page (the recorder)
+
+Turn on the page-script `discovery` in `server.json`. The recorder writes into the discovery file at
+once. No call of the agent is necessary.
+
+- **Forms:** the forms and the login links go into the node of the root domain. A new form that
+  has a selector of a recorded form adds its selectors to that form. Else it is a new form.
+- **Fields:** at a click of a button or a submit, the page code sends the values of the fields that
+  the user filled. The server gives the recorder only the keys of the values. The recorder writes
+  `"<selector>": "<key>"`. A field without a key gets a name from its attributes (`username`,
+  `password`, `email`, `otp`, else its `name`), but only if the selector has no key yet.
 - **Submit:** the button that the user clicks goes into `submit`. For a submit with Enter, the submit
   button of the form goes into `submit`; without such a button, `"enter"`.
 - **Login link:** the last link that the user followed before a submit goes into `login`.
-- **Fill:** the key-value providers fill the known fields, without an approval. Value providers do not fill. The server does not submit.
-- Only the fields of the user go into the file. The fills of the agent and of the form fill do not.
-- The log gets each record at once, without values: `user_filled`, `user_pressed`, `user_submitted`,
-  `user_followed` and the same for `agent`, each with the time of the event (`at`). It gets
-  `fields_written` for each change of `sites.json`.
-- Before each write, the server reads `sites.json` again. Your changes stay.
+- The form fill still works while the recorder is on. The fields that the form fill or the agent
+  touched do not go into the file. A field that the agent changes with `browser_evaluate` counts as
+  a field of the user.
+- The log gets each action of the user, without values: `user_filled`, `user_pressed`,
+  `user_submitted`, `user_followed`, each with the time of the event (`at`). It gets
+  `fields_written` for each change of the file.
+- Before each write, the recorder reads the file again. Your changes stay.
 - Selector of a field: autocomplete, name, an id that does not look generated, the type, aria-label,
-  placeholder; else `internal:label="<label>"s`. Selector of a button: id, name, type; else
-  `internal:role=button[name="<text>"s]`. A selector must find one element.
+  placeholder: the first CSS selector that is unique. Matcher of a button: id, name, type; else
+  `{ "css", "text" }`.
 
-1. Open the login page of a site in a lane. The server writes the root domain.
-2. Add `"provider-config": { "vault": { "vault": "<vault>", "entry": "<system>" } }` to the root
-   domain in `sites.json`, and save the file. Do this before the submit: without it, the vault
-   provider has no keys for the site.
-3. Do each step of the login in the browser.
-4. Remove `BROWSER_AUTOMATION_X_MCP_DISCOVER`.
+1. Map the root domain of the site to its vault system in the vault file. Do this before the
+   submit: without it, the vault has no keys for the site.
+2. Do each step of the login in the browser.
+3. Turn off the recorder.
 
 ## Host access
 
-`sites.json` decides which hosts open:
+`hosts.json` decides which hosts open:
 
 - A node with `"access": "deny"` blocks its host and its subdomains. A deny wins also over an
   `"allow"` of a subdomain below it.
@@ -317,7 +344,7 @@ server writes into `sites.json` at once. No call of the agent is necessary.
 - Else `defaultAccess` decides (`"allow"` or `"deny"`).
 - The server checks the URL before it opens a page, and the page after each call (clicks,
   redirects, submits). A blocked page is replaced by `about:blank`, and the call fails.
-- Only the discovery mode writes `sites.json`: it records the opened hosts.
+- The server writes `hosts.json` only with `recordHosts`: it records the opened hosts.
 
 ## Tool switches
 
@@ -364,7 +391,7 @@ Claude Code chat, a Codex session, a Kilo window) has its own server and render 
 
   `browser_lanes` shows the browser session of each lane.
 - **IndexedDB:** some sites keep the login in IndexedDB, e.g. Firebase apps or WhatsApp Web. The
-  server keeps it only for the sites of `sites.json`.
+  server keeps it only for the hosts of `hosts.json`.
 
 - **File names:** the `filename` of a tool must be in the output folder. A name without a folder
   goes there. An other path gives an error.
@@ -453,11 +480,13 @@ process ID: `mm-dd_hhmmss_<pid>`. The last 5 pairs of each client stay.
 | `BROWSER_AUTOMATION_X_MCP_LOG_LEVEL` | `info` | `error`, `info` or `debug`. `debug` adds the text of each result, only in `.log.json`. |
 | `BROWSER_AUTOMATION_X_MCP_LOG_SECRETS` | unset | `1` logs the values of `text`, `value`, `values` and `password`. |
 
-Events of the form fill: `fill_providers`, `fill_value` (field and provider, no value),
-`fill_approved`, `fill_refused`, `approval_refused`, `fill_filled`, `fill_submitted`, `fill_failed`,
-`fill_no_value`, `fill_error`, `scrub_file`. Events of the discovery: `fields_written`,
-`user_filled`, `user_pressed`, `user_submitted`, `user_followed`, `agent_filled`, `agent_pressed`,
-`agent_submitted`, `agent_followed`, `discovery_error`, `discovery_match_error`. Other events:
+Events of the plugins: `plugins_loaded`, `source_error`, `classifier_error`, `match_error`,
+`approval_error`, `page_script_error`; each event of a plugin has `plugin`, the instance name.
+Events of the form fill: `fill_value` (field and plugin, no value), `fill_approved`,
+`fill_refused`, `approval_refused`, `fill_filled`, `fill_submitted` (`how` and `classifier` of the
+submit method), `fill_failed`, `fill_no_value`, `fill_no_field`, `fill_error`, `scrub_file`. Events
+of the recorder: `fields_written`, `user_filled`, `user_pressed`, `user_submitted`,
+`user_followed`. Other events:
 `upstream_ready`, `client_ready`, `list_tools`, `tool_call`, `tool_result`, `tool_error`,
 `browser_started`, `browser_stopped`, `lane_opened`, `lane_closed` (`reason`: `tool`, `idle` or the
 shutdown), `lane_folder_removed`, `tab_limit`, `state_saved`, `state_save_failed`, `mask_file`,
@@ -467,7 +496,7 @@ shutdown), `lane_folder_removed`, `tab_limit`, `state_saved`, `state_save_failed
 an error event ends in `_error` or `_failed`.
 
 - By default, the log has no typed text and no form values: `"<redacted 8 chars>"`. The log never
-  has a value that a provider gave.
+  has a value that a key-value-source gave.
 - At level `debug`, the result text can contain values that are not masked.
 
 ```bash
@@ -488,14 +517,14 @@ committed config and the real storage state stay unchanged. The test client open
 it in each call.
 
 - [tests/static/](tests/static/): `tsc --noEmit` and ESLint (rule typed-code).
-- [tests/unit/policy.test.ts](tests/unit/policy.test.ts): `server.json`, `sites.json`, host access, tool
-  switches, URL patterns, the fill registry, the provider kinds, matching and approvals, and the
-  providers (the vault through the test double in [tests/fixtures/fake-vault/](tests/fixtures/fake-vault/);
-  `approve-https` against a local HTTPS server).
+- [tests/unit/policy.test.ts](tests/unit/policy.test.ts): `server.json`, `hosts.json`, host access, tool
+  switches, URL patterns, the plugin host (values, approvals, keys of a value, scrub), the discovery
+  file, and the plugins (the vault through the test double in
+  [tests/fixtures/fake-vault/](tests/fixtures/fake-vault/); `approve-https` against a local HTTPS server).
 - [tests/functional/policy.test.ts](tests/functional/policy.test.ts): tool switches, host lists,
-  form fill (fill, submit, mask, loop guard, two steps, label locators, several submits, host
-  check after a submit, login link, approval), discovery (hosts, keys of the values of the user,
-  submit buttons, `enter`, login links, fill without a submit).
+  `recordHosts`, form fill with the plugins (fill, submit, mask, loop guard, two steps, heuristic
+  fields, several submits, host check after a submit, login link, approval), the recorder (keys of
+  the values of the user, submit buttons, `enter`, login links, the marks of agent calls).
 - [tests/functional/tools.test.ts](tests/functional/tools.test.ts): the same tools as upstream with
   the parameter `lane`, the texts for the client, navigation, errors, screenshots, the log and the
   storage state from one session to the next.

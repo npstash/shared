@@ -11,18 +11,19 @@ export const PLATFORM: string = `${process.platform === 'win32' ? 'win' : proces
 const require = createRequire(import.meta.url);
 export const VERSION: string = (require('../package.json') as { version: string }).version;
 
-// The code of the form-fill providers.
-export const PROVIDERS_DIR: string = path.join(TOOL_DIR, 'providers-form-fill');
+// The plugins: plugins/<category>/<plugin>/index.ts.
+export const PLUGINS_DIR: string = path.join(TOOL_DIR, 'plugins');
 
 // The config files are in the config folder that the argument --config-dir gives, e.g.
 // local/configs/browser-automation-x-mcp of the repository. The tool folder has a template of each file.
-//   server.json   providers and tool switches (src/server-config.ts)   config/server.template.json
-//   sites.json    access, provider-config and pages of sites (src/sites.ts) config/sites.template.json
+//   server.json   plugin instances and tool switches (src/server-config.ts)   config/server.template.json
+//   hosts.json    the access of the hosts (src/hosts.ts)                     config/hosts.template.json
+// The plugins make their own files in the config folder.
 export const SERVER_CONFIG: string = 'server.json';
-export const SITES_CONFIG: string = 'sites.json';
+export const HOSTS_CONFIG: string = 'hosts.json';
 export const CONFIG_TEMPLATES: Readonly<Record<string, string>> = {
   [SERVER_CONFIG]: path.join(TOOL_DIR, 'config', 'server.template.json'),
-  [SITES_CONFIG]: path.join(TOOL_DIR, 'config', 'sites.template.json'),
+  [HOSTS_CONFIG]: path.join(TOOL_DIR, 'config', 'hosts.template.json'),
 };
 
 // The path of a config file. A missing file is first a copy of its template.

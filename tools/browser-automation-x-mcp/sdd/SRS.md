@@ -234,10 +234,16 @@ has no code that finds fields: the plugins do this (REQ-031).
 #### REQ-030 — Fill after a call
 
 - **Trigger:** A result of upstream shows a page URL, and a dom-classifier instance is on.
+- **Pre-condition:** The call can change the page. It is not `browser_snapshot`,
+  `browser_take_screenshot`, `browser_console_messages`, `browser_network_requests`,
+  `browser_network_request`, or `browser_tabs` with `action = list`.
 - **Basic Flow:**
-  1. The server shall run the dom-classifier instances in each frame of the page (REQ-031b). It
-     shall wait for a classified field. In a login flow (after a login click or a submit), it
-     waits a maximum of FLOW_WAIT (3000 ms). Else it waits a maximum of PEEK_WAIT (3000 ms).
+  1. The server shall run the dom-classifier instances in each frame of the page (REQ-031b). If no
+     field is classified:
+     - in a login flow (after a login click or a submit), it shall run them again until a field is
+       classified, a maximum of FLOW_WAIT (3000 ms);
+     - else it shall wait until the page settles: no change of the DOM for SETTLE_QUIET (300 ms), a
+       maximum of PEEK_WAIT (3000 ms). Then it shall run them one more time.
   2. It shall get the key of each field from the match-strategy instances (REQ-031c).
   3. It shall select the submit method that serves the most fields with a key. On a tie, the
      first method in the order of the dom-classifier instances wins. It shall fill only the fields
@@ -767,7 +773,8 @@ The ask provider is removed.
 | ACTIVITY_INTERVAL | 5000 | ms | — | Minimum time between two reports of the input of the user |
 | STATE_FILE | `.local_assets/storage-state-<hash of the working folder>.json` | — | `BROWSER_AUTOMATION_X_MCP_STORAGE_STATE` | Storage state of the lanes of one workspace (REQ-064) |
 | FLOW_WAIT | 3000 | ms | — | Maximum wait for a form field in a login flow |
-| PEEK_WAIT | 3000 | ms | — | Maximum wait for a form field on an other page, one time for each URL |
+| PEEK_WAIT | 3000 | ms | — | Maximum wait until an other page settles, one time for each URL |
+| SETTLE_QUIET | 300 | ms | — | Time without a change of the DOM after which a page is settled |
 | SUBMIT_WAIT | 10000 | ms | — | Maximum wait for the load and for the network after a submit |
 | FILL_ROUNDS | 3 | rounds | — | Maximum fill and submit rounds in one call |
 | MASK | `***` | — | — | Replacement of a masked value |
