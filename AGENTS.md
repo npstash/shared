@@ -22,6 +22,7 @@ agents.
 - **submodule-dependencies** — find `shared`, a vault or other shareable submodules only with the reference code; no fixed paths. @rules/submodule-dependencies.md
 - **browser-automation** — for browser automation, use the `browser-automation-x-mcp` MCP server if it is available; mandatory. @rules/browser-automation.md
 - **browser-cookie-consent** — in browser automation, accept all cookies in a consent dialog; do not ask. @rules/browser-cookie-consent.md
+- **typed-code** — no untyped code: TypeScript, not JavaScript; type hints in Python; interfaces separate from implementations. @rules/typed-code.md
 - **repo-structure-template** — when the repo structure or a templated file changes, ask to update the create-repo-structure skill. @rules/repo-structure-template.md
 
 ### Skills

@@ -41,7 +41,7 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 #### REQ-005 — Texts for the client
 
 - **Basic Flow:** The texts for the client shall not name upstream, Playwright, the form fill
-  or its providers.
+  or its plugins.
   1. The server name shall be SERVER_NAME (browser-automation-x-mcp).
   2. The instructions shall start with: "Use the tools of this server for each browser automation
      task when they are available. This is mandatory." Then they shall tell the agent to open a
@@ -195,12 +195,12 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 - **Trigger:** The server starts.
 - **Basic Flow:** The server shall read its config files from the folder that `--config-dir DIR`
   gives. A relative path is relative to the working folder. The files are JSON:
-  1. `server.json`: the providers (an array, in the order that the server asks them) and the tool
-     switches.
-  2. `sites.json`: `defaultAccess`, and the sites: a tree of root domains and their subdomains,
-     each with its access, its provider config, its forms and its login links (REQ-037).
-  The schemas are in [DESIGN.md](DESIGN.md#data-model). Only the discovery mode writes
-  `sites.json` (REQ-039).
+  1. `server.json`: the plugin instances (REQ-031), the tool switches, and `recordHosts`
+     (REQ-042).
+  2. `hosts.json`: `defaultAccess`, and the hosts: a tree of root domains and their subdomains,
+     each with its access (REQ-037).
+  The schemas are in [DESIGN.md](DESIGN.md#8-data-model). The server writes `hosts.json` only as
+  REQ-042 says. The plugins read and write their own files in the config folder (REQ-031).
 - **Alternative Flow:** A config file is missing → the server shall copy its template from the
   tool folder.
 - **Exception Flow:** `--config-dir` is missing → the server does not start. It writes the error
@@ -227,67 +227,124 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 ## 4. Form fill
 
-The agent does not fill credentials or personal data. The server fills the fields of the forms of
-`sites.json` and submits the form. The agent gets the page after the submit.
+The agent does not fill credentials or personal data. The server fills the fields that the
+plugins find and match, and submits the form. The agent gets the page after the submit. The server
+has no code that finds fields: the plugins do this (REQ-031).
 
 #### REQ-030 — Fill after a call
 
-- **Trigger:** A result of upstream shows a page URL, and the host has forms in `sites.json`
-  (REQ-037).
+- **Trigger:** A result of upstream shows a page URL, and a dom-classifier instance is on.
 - **Basic Flow:**
-  1. The server shall wait for a visible field of the forms of the host, in each frame of the
-     page. In a login flow (after a login click or a submit), it waits a maximum of
-     FLOW_WAIT (3000 ms). Else it waits a maximum of PEEK_WAIT (3000 ms).
-  2. It shall select the form with the most visible fields. On a tie, the first form wins: the
-     forms of the host first, then the forms of its parents, each node in file order.
-  3. It shall get the value of each visible field of the form from the providers (REQ-031), fill
-     the fields that have a value, and submit the form (REQ-038).
-  4. It shall check the host of the page after the submit (REQ-041) before each other step.
-  5. It shall repeat steps 1–4 on the new page, a maximum of FILL_ROUNDS (3) rounds.
-  6. It shall give the client a snapshot of the page after the last submit, in place of the
+  1. The server shall run the dom-classifier instances in each frame of the page (REQ-031b). It
+     shall wait for a classified field. In a login flow (after a login click or a submit), it
+     waits a maximum of FLOW_WAIT (3000 ms). Else it waits a maximum of PEEK_WAIT (3000 ms).
+  2. It shall get the key of each field from the match-strategy instances (REQ-031c).
+  3. It shall select the submit method that serves the most fields with a key. On a tie, the
+     first method in the order of the dom-classifier instances wins. It shall fill only the fields
+     that this method serves.
+  4. It shall get the values of the keys (REQ-031a), fill the fields that have a value, and
+     submit (REQ-038).
+  5. It shall check the host of the page after the submit (REQ-041) before each other step.
+  6. It shall repeat steps 1–5 on the new page, a maximum of FILL_ROUNDS (3) rounds.
+  7. It shall give the client a snapshot of the page after the last submit, in place of the
      result of upstream.
 - **Alternative Flow:**
   - The server waited for this URL before, and the page did not change by a submit or a login
     click → it does not wait. It checks the fields one time.
-  - No field is visible, or no provider has a value → the server does nothing. The client gets the
-    result of upstream.
-  - No field is visible in a login flow → the server logs `fill_no_field` with the URL, the wait
-    and the selectors. The flow ends.
+  - No submit method serves a field with a key → the server fills each field with a key, and
+    does not submit (REQ-038).
+  - No field is classified, no field has a key, or no key has a value → the server does nothing.
+    The client gets the result of upstream.
+  - No field is classified in a login flow → the server logs `fill_no_field` with the URL and the
+    wait. The flow ends.
   - The host of the page after a submit is blocked → the server stops the fill. It opens
     `about:blank` and gives the error of REQ-041.
-  - DISCOVER is `1` → the server fills the fields, but it does not submit. It does steps 1–3 one
-    time. The client gets the result of upstream.
-- **Exception Flow:** A provider or the page code fails → the server logs the error and does
+- **Exception Flow:** A plugin or the page code fails → the server logs the error and does
   nothing. The client gets the result of upstream. The error is not visible to the client.
 
-#### REQ-031 — Provider kinds and order
+#### REQ-031 — Plugins
 
-- **Basic Flow:** Each provider has one kind:
-  1. A key-value provider has keys and values. It can give the key of a value (REQ-039a). Types:
-     `vault`, `values`.
-  2. A value provider gives a value for a key, but it has no list of keys. Type: `ask`.
-  3. An approval provider is attached to one key-value provider: it is the `approval` of the
-     entry of that provider. It gets the approval of the user, then that provider gives its values
-     (REQ-036c). Types: `approve-dialog`, `approve-https`.
-  The server shall ask the providers of `providers` in `server.json` in the order of the array. The
-  first provider that has the key gives the value.
+- **Basic Flow:**
+  1. A plugin is one implementation in `plugins/<category>/<plugin>/`. A plugin instance is one
+     entry in `server.json` with its config. Shared plugin code is in `plugins/common/<plugin>/`.
+  2. `plugins` of `server.json` has one array for each category: `key-value-source`,
+     `dom-classifier`, `match-strategy`, `page-script`. An approval plugin
+     (category `approval-plugin`) is only in `approval` of a key-value-source instance.
+  3. An instance has `name` (unique), `plugin`, `description`, `enabled` and `config`. A
+     key-value-source instance also has `mask` and an optional `approval` with `plugin`,
+     `enabled` and `config`.
+  4. The server shall use the instances that are on, in the order of the array.
+  5. A plugin shall get only its config, a logger, and the data of each call. An approval plugin
+     also gets the MCP elicitation. A plugin gets no object of the server and no object of
+     Playwright.
+  6. A plugin can keep state. It reads and writes its own files. A path in its config is relative
+     to the config folder.
 - **Alternative Flow:**
-  - A provider does not have the key → the server asks the next provider.
-  - A provider has `"enabled": false` → the server does not use it.
-  - DISCOVER is `1` → the server does not use the value providers. A key-value provider gives its
-    values without an approval.
-  - The `approval` of an entry has `"enabled": false` → the provider gives its values without an
-    approval.
-- **Exception Flow:**
-  - A provider has no `type`, or its type has no folder in `providers-form-fill/` → the server does
-    not start.
-  - An approval provider is an entry of `providers` → the server does not start.
-  - An entry that is not a key-value provider has `approval`, `approval` has no `type`, or its type
-    is not an approval provider → the server does not start.
+  - An instance has `"enabled": false` → the server does not use it.
+  - `approval` has `"enabled": false` → the key-value-source gives its values without an approval.
+  - A category has no instance that is on → the server does not do the steps of that category.
+- **Exception Flow:** An instance has no `name`, `plugin`, `description` or `config`, two
+  instances have the same `name`, the plugin has no folder in its category, or `approval` names a
+  plugin that is not in `approval-plugin` → the server does not start.
+
+#### REQ-031a — Key-value-source
+
+- **Basic Flow:**
+  1. A key-value-source instance shall give the keys that it has for a page, and the values of
+     these keys.
+  2. The first instance in the array order that has a key for the page shall give the value.
+  3. It shall give the keys of a value (REQ-031d).
+- **Alternative Flow:** The instance has an approval plugin → the server gets the approval first
+  (REQ-036c).
+
+#### REQ-031b — Dom-classifier
+
+- **Basic Flow:**
+  1. A dom-classifier instance shall run as a page script against the live DOM of each frame.
+  2. It shall give the fields: the element and a hint. A hint is a short text, e.g. `password`,
+     `username`, `email`. The hints are an open list. A hint is not a key.
+  3. It shall give the submit methods, each with the field elements that it serves: a click of an
+     element, Enter in a field, or `requestSubmit()` of the form of a field.
+  4. It shall give the login links: the elements.
+  5. The server shall merge the results of all instances. For the same element, the first
+     instance in the array order wins.
+- **Note:** Selectors that only Playwright can resolve, e.g. `internal:role=…`, are not used.
+
+#### REQ-031c — Match-strategy
+
+- **Basic Flow:**
+  1. A match-strategy instance shall give the key of a field from its hint. The key is a key
+     that a key-value-source has for the page.
+  2. The server shall ask the instances in the array order. Each instance gets only the fields
+     without a key.
+- **Alternative Flow:** No instance gives a key for a field → the server does not fill the field.
+
+#### REQ-031d — Page-script
+
+- **Basic Flow:**
+  1. The server shall inject the page script of each page-script instance into each frame of each
+     lane.
+  2. It shall give the page script a channel to the Node code of its plugin.
+  3. A message can have values. The server shall replace each value with its keys from the
+     key-value-source instances, in their order, before it gives the message to the Node code. The
+     Node code never gets a value.
+  4. The server shall tell the Node code when a lane closes.
+- **Alternative Flow:** The value is equal to a value of a masked instance → the server adds it to
+  the masked values (REQ-032).
+- **Note:** A page script can read the field values in the page. The page scripts are reviewed
+  local code.
+
+#### REQ-031e — Marks for page scripts
+
+- **Basic Flow:** The server shall mark each element that the form fill touches, and each element
+  of an agent call with a `ref`. A page script shall be able to read the mark.
+- **Alternative Flow:** An element that `browser_evaluate` or `browser_press_key` changes has no
+  mark.
 
 #### REQ-032 — Mask of filled values
 
-- **Pre-condition:** The provider of the value is masked: its `mask` in `server.json` is not `false`.
+- **Pre-condition:** The key-value-source instance of the value is masked: its `mask` in
+  `server.json` is not `false`.
 - **Basic Flow:** The server shall replace the value with MASK (`***`) in each later result, for
   the time of the session.
 - **Alternative Flow:** Upstream writes a text file in a call → the server shall replace the values
@@ -307,196 +364,200 @@ The agent does not fill credentials or personal data. The server fills the field
 
 The tool `fill_values_list` is removed. The client has no tool for the form fill.
 
-#### REQ-034 — Vault provider
+#### REQ-034 — Key-value-source `vault`
 
 - **Basic Flow:**
-  1. The provider shall take the vault config of the page from `sites.json`: the nearest
-     `provider-config.vault` (REQ-037). The config applies only if its `vault` is the `vault` of
-     the provider entry. Its `entry` is the exact name of a vault system.
-  2. It shall give the secret whose name is the key, through the vault tool, from the vault that
-     `vault` of its entry in `server.json` gives. The case of the key has no effect.
-  3. To give the key of a value, it shall compare the value with each secret of the system, in the
-     order of `get-system`. It gives the name of the first equal secret.
-  4. It shall not search the vault for systems.
-- **Alternative Flow:** No node or page has a vault config, the config is for an other vault, or the
-  system has no such secret → the provider has no value and no key.
+  1. The plugin shall read the file that `file` of its config gives: a tree of root domains and
+     subdomains (as REQ-037), each node with an optional `system`. The nearest node of the host
+     wins. `system` is the exact name of a vault system.
+  2. Its keys for a page are the secret names of the system. The case of a key has no effect.
+  3. It shall give the secret whose name is the key, through the vault tool, from the vault that
+     `vault` of its config gives.
+  4. To give the keys of a value, it shall compare the value with each secret of the system, in
+     the order of `get-system`.
+  5. It shall not search the vault for systems.
+- **Alternative Flow:** No node of the host has a `system` → the instance has no keys.
 - **Exception Flow:**
-  - `vault` is empty → error.
+  - `vault` or `file` is empty, or the file is not valid → error.
   - The vault tool fails → error with its message.
 
-#### REQ-035 — Values provider
+#### REQ-035 — Key-value-source `values`
 
 - **Basic Flow:**
-  1. The provider shall give the value of the key from `values` of its entry in `server.json`. The
-     case of the key has no effect.
-  2. To give the key of a value, it shall give the first key of `values` with an equal value.
+  1. The plugin shall give the value of the key from `values` of its config. The case of the key
+     has no effect. It has the same keys for each page.
+  2. To give the keys of a value, it shall give each key of `values` with an equal value.
 
-#### REQ-036 — Ask provider
+#### REQ-036 — Removed
 
-- **Pre-condition:** The client declared the elicitation capability. The key is in `fields` of its
-  entry in `server.json`. DISCOVER is not `1`.
-- **Basic Flow:** The provider shall show a dialog to the user (UI-01) and give the answer.
-- **Alternative Flow:** The user gave the value for this host and field name before in the
-  session → the provider gives it without a dialog.
-- **Exception Flow:**
-  - The user declines or cancels → error; the server does not fill the form.
-  - No answer in ASK_TIMEOUT (300000 ms) → error; the server does not fill the form.
+The ask provider is removed.
 
-#### REQ-036a — Approval dialog (`approve-dialog`)
+#### REQ-036a — Approval plugin `approve-dialog`
 
 - **Pre-condition:** The client declared the elicitation capability.
-- **Basic Flow:** The provider shall show a dialog to the user (UI-03). It shall give `true` when the
+- **Basic Flow:** The plugin shall show a dialog to the user (UI-03). It shall give `true` when the
   user accepts with the approval.
-- **Alternative Flow:** The client cannot show dialogs → the provider refuses.
+- **Alternative Flow:** The client cannot show dialogs → the plugin refuses.
 - **Exception Flow:** The user declines, cancels, or gives no answer in APPROVAL_TIMEOUT (15000 ms)
-  → the provider refuses.
+  → the plugin refuses.
 
-#### REQ-036b — Approval service (`approve-https`)
+#### REQ-036b — Approval plugin `approve-https`
 
 - **Basic Flow:**
-  1. The provider shall connect to `address` of its entry in `server.json` with TLS.
+  1. The plugin shall connect to `address` of its config with TLS.
   2. It shall compare the SHA-256 fingerprint of the certificate of the service with `fingerprint`
-     of its entry. Case and `:` have no effect.
+     of its config. Case and `:` have no effect.
   3. It shall send `POST <address>/approve` with the JSON `{ "host", "keys", "client" }`. It sends
      no authentication.
   4. It shall give `true` when the answer is `200` with `{ "approved": true }`.
-- **Alternative Flow:** `address` or `fingerprint` is empty → the provider refuses, and does not
+- **Alternative Flow:** `address` or `fingerprint` is empty → the plugin refuses, and does not
   connect.
 - **Exception Flow:** The fingerprint is not equal, the connection fails, the answer is an other
-  answer, or no answer comes in APPROVAL_TIMEOUT (15000 ms) → the provider refuses. It sends nothing
+  answer, or no answer comes in APPROVAL_TIMEOUT (15000 ms) → the plugin refuses. It sends nothing
   after a wrong fingerprint.
 
 #### REQ-036c — Approval of a fill
 
-- **Pre-condition:** DISCOVER is not `1`.
-- **Trigger:** The fill of one form needs keys that the first provider with the key is an approval
-  provider (REQ-031).
+- **Trigger:** The fill needs keys whose key-value-source instance has an approval plugin
+  (REQ-031a).
 - **Basic Flow:**
-  1. The server shall ask each approval provider one time for each fill of a form. The request has
-     all keys of the fill that the provider gives, the host of the page, and the client name of
-     MCP `initialize`. It has no value and no URL.
-  2. When the provider approves, the server shall get the values of the keys from its key-value
-     provider.
-- **Exception Flow:** The provider refuses → error; the server does not fill the form. No later
-  provider gives the keys. The server logs `fill_error`. The result of the call gets the note "The
-  user did not approve an action on this page." The note does not name the form fill (REQ-005).
-- **Note:** The mask of the key-value provider entry applies (REQ-032).
+  1. The server shall ask each approval plugin one time for each fill. The request has all keys
+     of the fill that its instance gives, the host of the page, and the client name of MCP
+     `initialize`. It has no value and no URL.
+  2. When the plugin approves, the server shall get the values of the keys from the instance.
+- **Exception Flow:** The plugin refuses → error; the server does not fill. No later instance gives
+  the keys. The server logs `fill_error`. The result of the call gets the note "The user did not
+  approve an action on this page." The note does not name the form fill (REQ-005).
+- **Note:** The mask of the key-value-source instance applies (REQ-032).
 
-#### REQ-037 — Fields of a page
+#### REQ-037 — Hosts of `hosts.json`
 
-- **Basic Flow:** The server shall read the sites of `sites.json` as a tree:
-  1. A key of `sites` is a root domain: the registrable domain of the Public Suffix List, also for
+- **Basic Flow:** The server shall read the hosts of `hosts.json` as a tree:
+  1. A key of `hosts` is a root domain: the registrable domain of the Public Suffix List, also for
      private suffixes. An IP address or a host without a registrable domain is its own root domain.
-  2. A node has optional `access`, `provider-config`, `forms`, `login` and `subdomains`. A key of
-     `subdomains` is the full host name of a subdomain of the node.
+  2. A node has optional `access` and `subdomains`. A key of `subdomains` is the full host name of
+     a subdomain of the node.
   3. The node of a host is the deepest node that covers it. A node covers its host and each
      subdomain of it.
-  4. `access` and `provider-config` go down the tree. The nearest value wins: the node of the host,
-     then its parents. For `provider-config`, this applies to each provider type separately.
-  5. `provider-config` has one object for each provider type, e.g.
-     `"vault": { "vault": "<vault>", "entry": "<system>" }`.
-  6. `forms` is an array. A form has `fields` (`{ "<selector>": "<key>" }`) and optional `submit`.
-     `login` is an array of the selectors of login links (REQ-030a).
-  7. The forms and the login links of a node apply to its host and to its subdomains. A form has
-     no path: it applies on each page of these hosts where one of its fields is visible.
-  8. A selector is CSS, or a label or role locator of Playwright. The key is the key of a provider
-     (REQ-031). The case of the key has no effect.
-- **Exception Flow:** A key of `sites` is not a root domain, a key of `subdomains` is not a
-  subdomain of its node, a node has `credentials` or `pages`, a form has no `fields` or has
-  `provider-config`, or a `vault` config has no `vault` or `entry` → the server gives an error.
+  4. `access` goes down the tree. The nearest value wins: the node of the host, then its parents.
+- **Exception Flow:** A key of `hosts` is not a root domain, a key of `subdomains` is not a
+  subdomain of its node, or a node has an other key → the server gives an error.
+- **Note:** The plugin files that have a tree of hosts use the same rules, e.g. REQ-034, REQ-039c.
 
 #### REQ-030a — Login link
 
-- **Pre-condition:** The host has `login` selectors in `sites.json` (REQ-037), and
-  a provider has a system for the page (the vault provider: a vault config, REQ-034).
+- **Pre-condition:** A dom-classifier gives a login link on the page (REQ-031b), and a
+  key-value-source instance has keys for the page (REQ-031a).
 - **Trigger:** A result of upstream shows a page URL.
 - **Basic Flow:**
-  1. Before the fill of REQ-030, the server shall click the first visible `login` selector.
+  1. Before the fill of REQ-030, the server shall click the first visible login link.
   2. It shall wait SUBMIT_WAIT (10000 ms) for the next page, then check its host (REQ-041).
   3. It shall log `login_clicked`, and continue with REQ-030 on the next page. The click is not a
      round of FILL_ROUNDS.
   4. At the end of the fill, the server shall open again the URL where it clicked, also after a
      failed login. It shall check its host (REQ-041) and log `page_opened` with `login_return`.
 - **Alternative Flow:**
-  - No `login` selector is visible, e.g. because the link has an other text after the login → the
-    server does not click.
+  - No login link is visible → the server does not click.
   - The server clicked a login link of the host in this lane before → it does not click again.
   - The page at the end of the fill has the URL of the click → the server does not open it again.
-  - DISCOVER is `1` → the server does not open the URL of the click again.
-- **Note:** A login link is a role locator with the visible text, e.g.
-  `internal:role=link[name="zaloguj się"i]`: it matches only before the login.
 
 #### REQ-038 — Submit and loop guard
 
 - **Basic Flow:**
-  1. The server shall use the first `submit` entry of the form that applies. A selector applies when its element is visible: the server clicks it.
-     The entry `enter` always applies: the server presses Enter in the last filled field. Without
-     such an entry, it shall call `requestSubmit()` of the form of the last filled field. Else it
-     shall press Enter in it.
+  1. The server shall run the submit method of the dom-classifier: click the element, press Enter
+     in the field, or call `requestSubmit()` of the form of the field.
   2. It shall wait a maximum of SUBMIT_WAIT (10000 ms) for the load of the page, then for the
      end of the network requests.
-  3. It shall fill each set of visible fields of a form one time only.
-- **Alternative Flow:** The same fields of the same form are visible again, e.g. after a wrong
-  password → the server does not fill them. It logs `fill_failed`.
-- **Post-condition:** The guard is reset on a page without a visible field of a form of the host.
+  3. It shall fill each fill one time only. The identity of a fill is the host and the sorted keys
+     of its fields.
+- **Alternative Flow:**
+  - No dom-classifier gives a submit method for the filled fields → the server fills and does not
+    submit.
+  - The same fill comes again, e.g. after a wrong password → the server does not fill. It logs
+    `fill_failed`.
+- **Post-condition:** The guard is reset on a page without a classified field.
 
-#### REQ-039 — Discovery mode: record
+#### REQ-039 — Page-script `discovery`: record
 
-- **Pre-condition:** DISCOVER is `1`.
+- **Pre-condition:** An instance of the page-script `discovery` is on.
 - **Trigger:** A fill of a field, a click of a button, a click of a link to an other page, or a
-  submit without a button, in a page of a lane. A script in each frame watches the page.
+  submit without a button, in a page of a lane.
 - **Basic Flow:**
-  1. For a field, the script shall make a selector that is unique in its frame: `autocomplete`,
+  1. For a field, the script shall make a CSS selector that is unique in its frame: `autocomplete`,
      then `name`, then an `id` that does not look generated, then the type, `aria-label`,
-     `placeholder`. Else a label locator of Playwright. For a button: an `id` that does not look
-     generated, then `name`, then the type. Else a role locator of Playwright with the name of the
-     button. For a link: a role locator with its visible text, case-insensitive. A locator of
-     Playwright must find one element.
-  2. At a click of a button or a submit, the script shall give the values of the fields of the
-     form that were filled since the last submit, and not filled by the form fill.
-  3. It shall report each record to the server at once.
-  4. The server shall give each record to the form fill (an element that the form fill touched), to
-     the agent (in the time of its call), else to the user.
-  5. It shall log the records of the user and of the agent: `<who>_filled`, `<who>_pressed`,
-     `<who>_submitted`, `<who>_followed`, each with the time of the event in the browser (`at`).
-     The log has no value.
+     `placeholder`. For a button: an `id` that does not look generated, then `name`, then the
+     type. Else, for a button or a link, a matcher `{ "css", "text" }` with its visible text,
+     case-insensitive.
+  2. It shall skip each element with a mark of the server (REQ-031e).
+  3. At a click of a button or a submit, the script shall send the values of the fields of the
+     form that were filled since the last submit (REQ-031d).
+  4. The plugin shall log each record: `user_filled`, `user_pressed`, `user_submitted`,
+     `user_followed`, each with the time of the event in the browser (`at`). The log has no value.
+- **Note:** An element that `browser_evaluate` changes has no mark: the plugin records it as an
+  element of the user.
 
-#### REQ-039a — Discovery mode: write sites.json
+#### REQ-039a — Page-script `discovery`: write the discovery file
 
-- **Pre-condition:** DISCOVER is `1`.
+- **Pre-condition:** An instance of the page-script `discovery` is on.
 - **Trigger:** A click of a button or a submit (REQ-039), a navigation of the page, or the close of
   the lane.
 - **Basic Flow:**
-  1. The server shall read `sites.json` again. The node is the nearest node of the host with a
-     `provider-config` (REQ-037), else the root domain. A missing root domain is a new site.
-  2. The form is the form of the node that has a selector of the fields that the user or the form
-     fill filled. Else a new form goes at the end of `forms`, if the user filled a field.
-  3. For each field that the user filled, it shall get the key of the value (`match`) from the
-     key-value providers (REQ-031), in their order.
-     The first key wins. It shall write `"<selector>": "<key>"` into `fields` of the form.
-  4. It shall write the button that the user clicked into `submit` of the form.
-  5. For a submit without a button, it shall write the first visible submit button of the form into
+  1. The plugin shall read the discovery file again. It is the file that `file` of its config
+     gives.
+  2. The node is the node of the root domain of the host (REQ-037). A missing root domain is a new
+     node.
+  3. The form is the form of the node that has a selector of the filled fields. Else a new form
+     goes at the end of `forms`.
+  4. For each field, it shall write `"<selector>": "<key>"` into `fields` of the form. The key is
+     the first key of the value (REQ-031d).
+  5. It shall write the button that the user clicked into `submit` of the form.
+  6. For a submit without a button, it shall write the first visible submit button of the form into
      `submit`. If the form has no such button, it shall write `enter`.
-  6. At a submit with fields of the user, it shall write the last link that the user followed
-     before into `login` of the node of the link. Then it forgets the link.
-  7. It shall discard the values. It shall not log or write a value.
+  7. At a submit, it shall write the last link that the user followed before into `login`. Then it
+     forgets the link.
   8. It shall change only these entries. The other entries of the file stay.
 - **Alternative Flow:**
-  - No provider has a key for the value, or the trigger has no values (a navigation, the close of
-    the lane) → the server writes the name from the attributes of the field: `username`,
-    `password`, `email`, `otp`, else its `name`. It does this only if the selector has no key.
-  - The value is empty → the server does not get a key.
-  - The agent or the form fill filled the field → the server does not write it.
-  - The value is equal to a value of a masked provider → the server adds it to the masked values
-    (REQ-032).
-  - Only the form fill filled, and no form has its selectors → the server writes nothing.
+  - The value has no key, or the trigger has no values (a navigation, the close of the lane) → the
+    plugin writes the name from the attributes of the field: `username`, `password`, `email`,
+    `otp`, else its `name`. It does this only if the selector has no key.
+  - The value is empty → the server gives no key.
+
+#### REQ-039b — Dom-classifier `discovery`
+
+- **Pre-condition:** An instance of the dom-classifier `discovery` is on.
+- **Basic Flow:**
+  1. The plugin shall read the discovery file that `file` of its config gives. It shall read it
+     again when it changes.
+  2. The forms and the login links of the node of the host and of its parents apply (REQ-037).
+  3. Each visible field of a form is a field. Its hint is the key of the file.
+  4. The first `submit` entry of a form that applies is the submit method of its visible fields. A
+     matcher applies when its element is visible: a click. `enter` always applies: Enter in the
+     last field.
+  5. Each visible element of a `login` matcher is a login link.
+- **Exception Flow:** The file is not valid → error; the classifier gives no result.
+
+#### REQ-039c — Dom-classifier `heuristic`
+
+- **Basic Flow:**
+  1. The plugin shall give each visible field of a form as a field. The hint comes from the
+     attributes: `username`, `password`, `email`, `otp`, else its `name`.
+  2. The submit method of the fields of a form is the click of the first visible submit button of
+     the form. Without a button, it is `requestSubmit()` of the form. A field without a form gets
+     Enter.
+  3. It gives no login links.
+
+#### REQ-039d — Match-strategy `propagate`
+
+- **Basic Flow:** The key of a field shall be its hint, if a key-value-source instance has this
+  key for the page. The case has no effect.
+- **Alternative Flow:** No key-value-source has the hint as a key → the plugin gives no key.
 
 ## 5. Host access
 
 #### REQ-040 — Check before a page opens
 
 - **Trigger:** The client calls `browser_navigate`, or `browser_tabs` with `action = new` and a URL.
-- **Basic Flow:** The server shall check the host of the URL with the tree of `sites.json` (REQ-037):
+- **Basic Flow:** The server shall check the host of the URL with the tree of `hosts.json` (REQ-037):
   1. The node of the host or one of its parents has `"access": "deny"` → blocked. A deny wins also
      over an `"allow"` below it.
   2. Else the nearest node with an `access` decides.
@@ -514,17 +575,17 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 #### REQ-042 — Record the opened hosts
 
-- **Pre-condition:** DISCOVER is `1`.
+- **Pre-condition:** RECORD_HOSTS (false) is `true`.
 - **Trigger:** A page of an allowed host loaded: by a call, or by the user in the browser.
 - **Basic Flow:** The server shall add the root domain of the host (REQ-037) with
-  `"access": "allow"` to `sites.json` at once. An access that the file has stays.
-- **Alternative Flow:** DISCOVER is not `1` → the server records nothing.
+  `"access": "allow"` to `hosts.json` at once. An access that the file has stays.
 
 #### REQ-043 — Config files in the config folder
 
-- **Trigger:** The server starts, and `server.json` or `sites.json` is missing in the config folder.
-- **Basic Flow:** The server shall copy `config/server.template.json` or `config/sites.template.json`
+- **Trigger:** The server starts, and `server.json` or `hosts.json` is missing in the config folder.
+- **Basic Flow:** The server shall copy `config/server.template.json` or `config/hosts.template.json`
   to it (REQ-019).
+- **Note:** A plugin makes its missing files itself.
 
 ## 6. Logging
 
@@ -532,8 +593,8 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 - **Basic Flow:** The server shall write each event into two files in LOG_DIR/`<client>`/:
   start, client, tool call, result (duration, error flag, size of the content), opened page,
-  filled field, submit, failed fill, records of REQ-039, written fields of REQ-039a, blocked host, upstream
-  stderr, shutdown. `<client>` is the client name of MCP `initialize`, in lowercase with only
+  filled field, submit, failed fill, events of the plugins, blocked host, upstream stderr,
+  shutdown. `<client>` is the client name of MCP `initialize`, in lowercase with only
   `a-z`, `0-9` and `-`.
   1. The file name is the start time and the process ID: `mm-dd_hhmmss_<pid>`.
   2. `<name>.log.json` gets one JSON line for each event, with all fields.
@@ -555,7 +616,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Basic Flow:** The server shall replace the values of the arguments `text`, `value`, `values`
   and `password` with their length.
 - **Alternative Flow:** LOG_SECRETS is `1` → the server logs the values of the arguments.
-- **Post-condition:** The log never has a value of a provider.
+- **Post-condition:** The log never has a value of a key-value-source.
 
 ---
 
@@ -577,7 +638,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Basic Flow:**
   1. Each upstream tool shall have the required parameter `lane`.
   2. The server shall forward the call without `lane` to the upstream connection of the lane.
-  3. Each lane shall have its own tabs, current tab, page URL, fill state and recorder state.
+  3. Each lane shall have its own tabs, current tab, page URL and fill state.
 - **Alternative Flow:**
   - `browser_close` → the server closes the lane, as `browser_lane_close`.
   - `browser_tabs` with `action=new`, and the lane has MAX_TABS_PER_LANE (5) tabs → the server gives
@@ -607,7 +668,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Trigger:** `browser_lane_close`, `browser_close`, LANE_IDLE (10 min) without a call
   (REQ-066), or the shutdown (REQ-003).
 - **Basic Flow:**
-  1. In the discovery mode, the server shall write the records that wait (REQ-039a).
+  1. The server shall tell the page-script instances that the lane closes (REQ-031d).
   2. It shall save the storage state of the lane (REQ-064).
   3. It shall close the upstream connection and the Chromium of the lane, and delete the lane
      profile.
@@ -620,7 +681,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 - **Trigger:** A page of the lane loads (also after a login of the user), or the lane closes.
 - **Basic Flow:**
   1. The server shall get the cookies, the localStorage and the IndexedDB of the lane.
-  2. It shall remove the IndexedDB of each origin whose host no site of `sites.json` covers.
+  2. It shall remove the IndexedDB of each origin whose host no node of `hosts.json` covers.
   3. It shall merge the state into STATE_FILE. An entry is a cookie (name, domain and path) or an
      origin. An entry that the lane changed or added wins. An entry that the lane did not change
      keeps the value of the file. An entry that the lane removed goes away, if the file did not
@@ -651,19 +712,9 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 ## User interface
 
-### UI-01 — Dialog of the ask provider
+### UI-03 — Dialog of the approval plugin `approve-dialog`
 
-- **Purpose:** The user gives a value that the agent must not know, e.g. a phone number.
-- **Shows:** The field name and the host of the page. The note that the agent does not see the
-  value.
-- **Actions:** Enter the value and accept → the server fills it (REQ-036). Decline or cancel → the
-  server does not fill the form.
-- **Feedback:** The agent gets the page after the submit, with MASK in place of the value.
-- **Realization:** An MCP elicitation form of the client, e.g. a dialog of Claude Code.
-
-### UI-03 — Dialog of the approval provider
-
-- **Purpose:** The user approves a fill with values of a key-value provider, e.g. a login.
+- **Purpose:** The user approves a fill with values of a key-value-source, e.g. a login.
 - **Shows:** The host of the page, the keys, and the client name. It shows no value and no URL.
 - **Actions:** Approve and accept → the server fills the values (REQ-036c). Decline, cancel or no
   approval → the server does not fill the form.
@@ -686,8 +737,7 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 
 | Name | Default | Unit | Configuration key | Meaning |
 | --- | --- | --- | --- | --- |
-| ASK_TIMEOUT | 300000 | ms | — | Maximum time of a dialog of the ask provider |
-| APPROVAL_TIMEOUT | 15000 | ms | — | Maximum time of one approval of an approval provider |
+| APPROVAL_TIMEOUT | 15000 | ms | — | Maximum time of one approval of an approval plugin |
 | TOOL_TIMEOUT | 600000 | ms | — | Maximum time of one call without progress |
 | NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` / `run.bat` | Pinned Node.js runtime |
 | RENDER_MODE | DEFAULT | — | `RENDER_MODE` | `DEFAULT`, `HEADED`, `HEADED_INVISIBLE` or `HEADLESS` (REQ-015) |
@@ -721,5 +771,5 @@ The tool `fill_values_list` is removed. The client has no tool for the form fill
 | SUBMIT_WAIT | 10000 | ms | — | Maximum wait for the load and for the network after a submit |
 | FILL_ROUNDS | 3 | rounds | — | Maximum fill and submit rounds in one call |
 | MASK | `***` | — | — | Replacement of a masked value |
-| DISCOVER | unset | — | `BROWSER_AUTOMATION_X_MCP_DISCOVER` | `1` turns on the discovery mode |
+| RECORD_HOSTS | false | — | `recordHosts` in `server.json` | `true` records the opened hosts in `hosts.json` (REQ-042) |
 | DEBUG_TEXT_MAX | 20000 | characters | — | Result text in a debug entry |

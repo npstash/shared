@@ -11,13 +11,13 @@ tool switches, an automatic form fill, host lists and lanes. A lane is one brows
 agent: agents and sessions use the browser in parallel. It runs without root and without OS
 installs. The browser is always Chromium.
 
-The server code is in `playwright/`. The code in `src/`, the form-fill providers
-(`providers-form-fill/`) and the config templates in `config/` are the parts that do not use
-Playwright. The config files are in a config folder of the repository that uses the tool, e.g.
+The server code is in `playwright/`. The code in `src/`, the plugins (`plugins/`) and the
+config templates in `config/` are the parts that do not use Playwright. The code is TypeScript in
+strict mode. Node runs the `.ts` files with type stripping; there is no build step. The config files are in a config folder of the repository that uses the tool, e.g.
 `local/configs/browser-automation-x-mcp`.
 
 The internals are hidden from the agent. The agent sees the server `browser-automation-x-mcp` with
-the browser tools. No text for the agent names upstream, Playwright, the form fill or its providers
+the browser tools. No text for the agent names upstream, Playwright, the form fill or its plugins
 (REQ-005 of SRS). Deny rules of the agent tools close the tool folder and the config folder to the
 agents (section 9).
 
@@ -53,11 +53,11 @@ flowchart TD
 
 - **AI agent in an MCP client:** calls the browser tools. It does not know the form fill. It gets
   the page after the submit, with MASK in place of masked values.
-- **User:** configures the tool, adds the credentials of a site, fills the forms in the discovery
-  mode, answers the dialogs of the ask and approval providers.
+- **User:** configures the tool, adds the credentials of a site, fills the forms that the
+  discovery recorder learns, answers the dialogs of the approval plugin.
 - **Web sites:** the pages that the agent opens.
-- **Vault tool:** gives the secrets of the vault provider.
-- **Approval service:** approves or refuses a fill for the `approve-https` provider (REQ-036b of
+- **Vault tool:** gives the secrets of the `vault` plugin.
+- **Approval service:** approves or refuses a fill for the `approve-https` plugin (REQ-036b of
   SRS). The workspace has a service that approves each request.
 - **nodejs.org, Playwright CDN, Ubuntu archive:** the sources of the runtime, the browser and the
   missing Linux libraries.
@@ -68,7 +68,7 @@ flowchart TD
 flowchart TD
     C[MCP client] -->|MCP, stdio| F
     subgraph S[browser-automation-x-mcp]
-        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.js</i>] -->|starts: run.sh --config-dir DIR| F[Server process<br/><i>Node.js, MCP SDK</i>]
+        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.ts</i>] -->|starts: run.sh --config-dir DIR| F[Server process<br/><i>Node.js, MCP SDK</i>]
         F -->|MCP, in memory, one for each lane| M[Playwright MCP<br/><i>in the server process</i>]
         F -->|launches one for each lane| B[Chromium<br/><i>downloaded browser, lane profile</i>]
         M -->|CDP, pipe| B
@@ -98,9 +98,11 @@ flowchart TD
   server: it starts with the first lane and stops after the last lane. Unpacked into the tool
   folder.
 - **Config folder:** outside the tool folder; `--config-dir` gives it (REQ-019 of SRS). It holds
-  `server.json` (providers, tool switches) and `sites.json` (a tree of sites with access,
-  provider config, forms and login links). A missing file is a copy of its template in the tool folder. The server adds missing
-  tools to `server.json`. Only the discovery mode writes `sites.json` (REQ-039a of SRS).
+  `server.json` (plugin instances, tool switches), `hosts.json` (a tree of hosts with their
+  access) and the files of the plugins, e.g. the vault file and the discovery file. A missing
+  `server.json` or `hosts.json` is a copy of its template in the tool folder. The server adds
+  missing tools to `server.json`, and writes `hosts.json` only as REQ-042 of SRS says. The plugins
+  read and write their own files.
 - **Log:** two files for each server start in LOG_DIR/`<client>`/: `.log` for a person and
   `.log.json` with all fields (REQ-050 of SRS); gitignored.
 - **Runtime files:** Node.js, browsers, libraries, temp files, STATE_FILE; gitignored.
@@ -113,124 +115,116 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph F[Server process]
-        SV[MCP server] --> P[Call pipeline<br/><i>playwright/src/mcp-server.js</i>]
-        P --> T[Tool switches<br/><i>src/server-config.js</i>]
+        SV[MCP server] --> P[Call pipeline<br/><i>playwright/src/mcp-server.ts</i>]
+        P --> T[Tool switches<br/><i>src/server-config.ts</i>]
         P --> H[Host policy<br/><i>src/hosts/</i>]
-        P --> AF[Form fill<br/><i>playwright/src/autofill.js</i>]
-        AF --> FC[Sites<br/><i>src/sites.js</i>]
-        AF --> R[Fill registry<br/><i>src/fill/registry.js</i>]
+        P --> AF[Form fill<br/><i>playwright/src/autofill.ts</i>]
+        P --> MK[Marks<br/><i>elements of agent calls</i>]
+        H --> HT[Hosts<br/><i>src/hosts.ts</i>]
+        AF --> PH[Plugin host<br/><i>src/plugins/</i>]
         AF --> CL
-        P --> DS[Discovery and recorder<br/><i>playwright/src/discover.js, page-lib.js</i>]
-        AF --> DS
-        DS --> CL
-        R --> PV[Vault provider]
-        R --> PI[Values provider]
-        R --> PA[Ask provider]
-        R --> PD[Approval dialog provider]
-        R --> PH[Approval HTTPS provider]
-        PD --> PV
-        PH --> PV
-        H --> FC
-        P --> LN[Lanes<br/><i>playwright/src/lanes.js</i>]
+        PH --> KV[key-value-source:<br/>vault, values]
+        PH --> AP[approval-plugin:<br/>approve-dialog, approve-https]
+        PH --> DC[dom-classifier:<br/>discovery, heuristic]
+        PH --> MS[match-strategy:<br/>propagate]
+        PH --> PS[page-script:<br/>discovery]
+        KV --> AP
+        P --> LN[Lanes<br/><i>playwright/src/lanes.ts</i>]
+        LN --> PH
         LN --> CL[MCP client of upstream<br/><i>one for each lane</i>]
-        LN --> SS[Storage state<br/><i>playwright/src/storage-state.js</i>]
-        P --> LG[Logger<br/><i>src/logger.js</i>]
-        LN --> XV[Xvfb starter<br/><i>playwright/src/xvfb.js</i>]
+        LN --> SS[Storage state<br/><i>playwright/src/storage-state.ts</i>]
+        P --> LG[Logger<br/><i>src/logger.ts</i>]
+        LN --> XV[Xvfb starter<br/><i>playwright/src/xvfb.ts</i>]
     end
     XV -->|starts, stops| X[Xvfb]
     CL -->|MCP, in memory| M[Playwright MCP]
     LN -->|launchPersistentContext, one for each lane| B[Chromium]
-    PA -->|elicitation/create| SV
-    PD -->|elicitation/create| SV
-    PV -->|CLI| V[Vault tool]
-    PH -->|HTTPS| AS[Approval service]
+    AP -->|elicitation/create, through the plugin host| SV
+    KV -->|CLI| V[Vault tool]
+    AP -->|HTTPS| AS[Approval service]
 ```
+
+Each component has an interface and a class that implements it. The constructors get the
+dependencies. The entry point is the composition root: it makes the objects. No mutable state is at
+module level.
 
 - **MCP server / MCP client:** the SDK objects for the connections. The server forwards roots,
   progress and cancellation between the client and the connection of the lane.
 - **Call pipeline:** the steps of one call, in this order: tool switch → lane tools, or the lane of
-  the call (REQ-061 of SRS) → file name check (REQ-014a) → host check of the target URL → upstream
-  → host check of the opened page → login link and form fill, with a host
-  check of each page after a submit → scrub of masked values and secret headers (REQ-032,
-  REQ-032a) → removal of the code sections → log. Each lane has its own call state (page URL, fill
-  state, agent call times): an object with the shared session as its prototype. The discovery
-  runs beside the calls, in the browser.
-- **Lanes:** `playwright/src/lanes.js` (section 7 of SRS). Opens and closes lanes, keeps
+  the call (REQ-061 of SRS) → file name check (REQ-014a) → host check of the target URL → marks of
+  the elements of the call → upstream → host check of the opened page → login link and form fill,
+  with a host check of each page after a submit → scrub of masked values and secret headers
+  (REQ-032, REQ-032a) → removal of the code sections → log. Each lane has its own call state (page
+  URL, fill state).
+- **Marks:** before a call with a `ref`, the server marks the element of the `ref` in the page
+  (REQ-031e).
+- **Lanes:** `playwright/src/lanes.ts` (section 7 of SRS). Opens and closes lanes, keeps
   MAX_LANES and MAX_TABS_PER_LANE, closes idle lanes, and starts and stops the Chromium of each
   lane and the Xvfb of the server. It writes the lane profile with
-  `playwright/src/chrome-prefs.js` (REQ-016), loads the storage state with `setStorageState()` for
+  `playwright/src/chrome-prefs.ts` (REQ-016), loads the storage state with `setStorageState()` for
   the browser session `normal`, saves it for `normal` and `fresh` (REQ-062, REQ-064),
-  and adds a page script that reports the input of the user (REQ-066). At the start of the
-  server, it deletes the lane profiles of servers that do not run.
-- **Storage state:** `playwright/src/storage-state.js`. Reads STATE_FILE, removes the IndexedDB of
-  hosts that no site of `sites.json` covers, merges the state of a lane into the file, and writes it
-  with mode `0600` (REQ-064). The lanes save at each page load and at the close.
-- **Server config:** `src/server-config.js` reads `server.json`: the providers that are on, in the
-  order of the array, with their mask and settings.
-- **Tool switches:** `src/server-config.js` with `tools` of `server.json` and the dangerous tools
+  and adds a page script that reports the input of the user (REQ-066). It gives the context of a
+  new lane to the plugin host for the page scripts, and tells the plugin host when a lane closes.
+  At the start of the server, it deletes the lane profiles of servers that do not run.
+- **Storage state:** `playwright/src/storage-state.ts`. Reads STATE_FILE, removes the IndexedDB of
+  hosts that no node of `hosts.json` covers, merges the state of a lane into the file, and writes
+  it with mode `0600` (REQ-064). The lanes save at each page load and at the close.
+- **Server config:** `src/server-config.ts` reads `server.json`: the plugin instances of each
+  category that are on, in the order of the array.
+- **Tool switches:** `src/server-config.ts` with `tools` of `server.json` and the dangerous tools
   of Playwright MCP; adds missing tools; gives the error of a disabled tool.
-- **Sites:** `src/sites.js` reads `sites.json` as a tree: root domains with `subdomains`
-  (REQ-037 of SRS). It checks the tree at each load. It gives the chain of nodes of a host, the
-  access of a host (a deny in the chain wins, else the nearest node, else `defaultAccess`), the forms
-  and login links of a URL (the nodes of the chain, the host first) and the provider config of a URL
-  (the nearest node, for each provider type) (REQ-034, REQ-040 of SRS). The root domain
-  comes from the Public Suffix List (`tldts`).
-- **Host policy:** `src/hosts/host-policy.js` checks the access of the sites.
-- **Form fill:** `playwright/src/autofill.js`. It runs page code through `browser_run_code_unsafe`
-  of upstream: find the visible fields of the forms of the host, select the form with the most
-  visible fields, fill it, submit, wait (REQ-030, REQ-038 of SRS). It waits FLOW_WAIT in a login
-  flow, else PEEK_WAIT one time for each URL. It logs `fill_no_field` when a login flow ends on a
-  page without a visible field. The tool switch
-  of the agent does not apply to these calls. Their results never go to the agent. It keeps the
-  loop guard of the lane. Before the fill, it clicks a visible login link of `sites.json`, one time
-  for each lane and host, if the vault provider has a system for the host (REQ-030a). After the
-  fill, it opens again the URL of the click, but not in the discovery mode. It marks the
-  elements that it touches with `__baxAuto` for the recorder. A blocked page after a submit stops
-  the fill (REQ-030). In the discovery mode, it fills one time and does not submit.
-- **Discovery:** `playwright/src/discover.js` (REQ-039, REQ-039a, REQ-042 of SRS). When a lane
-  opens, `startDiscovery()` adds the recorder of `playwright/src/page-lib.js` to each frame, and the
-  binding `__baxRecord` of the context. The recorder makes the selectors in the browser. It reports
-  each fill, click and submit at once. At a click or a submit, it also gives the values of the
-  fields that the form fill did not fill. The server logs each record without values, and gives it
-  to the form fill, the agent (by the time of its calls) or the user. At a click or a submit, it
-  gets the keys of the values of the user from the fill registry (`match`), discards the values,
-  and writes `sites.json` into the node of the exact host. It adds a missing node under the nearest
-  node that covers the host. A navigation and the close of the lane write the fields that wait,
-  without keys. At each page load, it writes the root domain of the host. No agent call is
-  necessary.
-- **Sites writer:** `src/sites.js` (`updateSites()`). It reads `sites.json` again, changes the
-  entries of one page or site, and writes the file in one step (REQ-039a).
-- **Page code:** `playwright/src/run-code.js` runs a function in the page through
-  `browser_run_code_unsafe`.
-- **Fill registry:** loads the providers of `server.json` in their order. For an entry with
-  `approval`, it loads the approval provider with the key-value provider as `inner`, and uses it in
-  the place of the entry. It gives the values of the keys of one fill, with one approval for each
-  approval provider (REQ-031, REQ-036c of SRS). It gives the key of a value from the key-value
-  providers (REQ-039a). It scrubs the values of masked providers from the results and from the
-  text files that upstream wrote in the call (REQ-032).
-- **Providers:** `providers-form-fill/<type>/index.js`. The base classes are in
-  `src/fill/provider.js`: `FillProvider` (value provider), `KeyValueProvider`, `ApprovalProvider`.
-  The settings of a provider are the keys of its entry in `server.json`.
-  - Key-value: `vault` (REQ-034) takes the vault system from the nearest `provider-config.vault`
-    of `sites.json` with its vault; `values` (REQ-035).
-  - Value: `ask` (REQ-036).
-  - Approval: `approve-dialog` (REQ-036a) and `approve-https` (REQ-036b). Its settings are the
-    `approval` object of the entry of a key-value provider.
-- **Xvfb starter:** `playwright/src/xvfb.js`. `renderMode()` of `playwright/src/config.js`
+- **Hosts:** `src/hosts.ts` reads `hosts.json` as a tree: root domains with `subdomains`
+  (REQ-037 of SRS). It checks the tree at each load. It gives the chain of nodes of a host and the
+  access of a host (a deny in the chain wins, else the nearest node, else `defaultAccess`). It
+  writes the opened hosts (REQ-042). The root domain comes from the Public Suffix List (`tldts`).
+- **Host policy:** `src/hosts/host-policy.ts` checks the access of the hosts.
+- **Form fill:** `playwright/src/autofill.ts`. It runs page code through
+  `browser_run_code_unsafe` of upstream. It runs the dom-classifiers of the plugin host in each
+  frame, gets the keys from the match-strategies and the values from the key-value-sources, fills
+  the fields, and runs the submit method of the dom-classifier (REQ-030, REQ-038 of SRS). The page
+  code keeps a reference of each classified element in the page; the server gets no element
+  object. It waits FLOW_WAIT in a login flow, else PEEK_WAIT one time for each URL. It logs
+  `fill_no_field` when a login flow ends on a page without a classified field. The tool switch of
+  the agent does not apply to these calls. Their results never go to the agent. It keeps the loop
+  guard of the lane. Before the fill, it clicks a visible login link of a dom-classifier, one time
+  for each lane and host, if a key-value-source has keys for the page (REQ-030a). After the fill,
+  it opens again the URL of the click. It marks the elements that it touches (REQ-031e). A blocked
+  page after a submit stops the fill (REQ-030). It has no code that finds fields.
+- **Plugin host:** `src/plugins/`. It has the interface of each plugin category and the types of
+  its data. It loads the instances of `server.json` from `plugins/<category>/<plugin>/`, gives
+  each one its config and a logger, and gives the approval plugins the MCP elicitation (REQ-031).
+  For a key-value-source with `approval`, it attaches the approval plugin. It gives the values of
+  the keys of one fill, with one approval for each approval plugin (REQ-031a, REQ-036c). It
+  merges the results of the dom-classifiers (REQ-031b) and asks the match-strategies in order
+  (REQ-031c). It injects the page scripts into each frame of a lane, keeps the channel to their
+  Node code, and replaces each value of a message with its keys (REQ-031d). It scrubs the values
+  of masked instances from the results and from the text files that upstream wrote in the call
+  (REQ-032). It never gives a server object or a Playwright object to a plugin.
+- **Plugins:** `plugins/<category>/<plugin>/`. Shared plugin code is in `plugins/common/<plugin>/`.
+  - key-value-source: `vault` (REQ-034) takes the vault system from its own file; `values`
+    (REQ-035).
+  - approval-plugin: `approve-dialog` (REQ-036a) and `approve-https` (REQ-036b).
+  - dom-classifier: `discovery` (REQ-039b) reads the discovery file; `heuristic` (REQ-039c) finds
+    fields and submit methods from the attributes and the forms of the page.
+  - match-strategy: `propagate` (REQ-039d) uses the hint of a field as its key.
+  - page-script: `discovery` (REQ-039, REQ-039a) records the actions of the user and writes the
+    discovery file.
+  - `plugins/common/discovery/`: the format of the discovery file, for both `discovery` plugins.
+- **Xvfb starter:** `playwright/src/xvfb.ts`. `renderMode()` of `playwright/src/config.ts`
   resolves `RENDER_MODE` (REQ-015 of SRS). For `HEADED_INVISIBLE`, the lanes start Xvfb through
   `setpriv --pdeathsig KILL` before Chromium, record it in XVFB_DIR and give its `DISPLAY` to
   Chromium. At each start, the server kills the Xvfb of servers that do not run (REQ-018).
-- **Entry point:** `playwright/src/server.js` takes only `--config-dir`. It sets the browsers
+- **Entry point:** `playwright/src/server.ts` takes only `--config-dir`. It sets the browsers
   path, the cache folder, the temp folder and the libraries in the process environment before it
-  loads Playwright: Playwright reads them once.
-- **Logger:** `src/logger.js`. It keeps the events in a buffer until `initialize` gives the client
+  loads Playwright: Playwright reads them once. It is the composition root.
+- **Logger:** `src/logger.ts`. It keeps the events in a buffer until `initialize` gives the client
   name, then writes `.log.json` and the short lines of `.log`. It redacts the secret arguments.
 
 ### 5.2 Launcher
 
 - **`run.sh` / `run.bat`:** steps 1–4: Node.js (checksum), npm packages (when
   `package-lock.json` changes), Chromium (for each Playwright version), Linux libraries.
-- **`playwright/src/setup/syslibs.js`:** `ldd` → soname → package (Debian rule and an exception table) →
+- **`playwright/src/setup/syslibs.ts`:** `ldd` → soname → package (Debian rule and an exception table) →
   `apt-get download` → `dpkg-deb -x`, in rounds; private apt lists if the system has none; fonts;
   Xvfb with the patched path of `xkbcomp` (REQ-017 of SRS).
 
@@ -243,11 +237,12 @@ flowchart TD
 | Server process | MCP `initialize` | Gives SERVER_NAME, the tools capability and the instructions of REQ-005. |
 | Server process | MCP `tools/list` | The lane tools (REQ-060 of SRS), and the tools of upstream with the required parameter `lane`, without the name Playwright; notes for disabled tools. |
 | Server process | MCP `tools/call` | The call pipeline (5.1). Error results: UI-02 of SRS. |
-| Server process | MCP `elicitation/create` (to the client) | The dialogs of the ask provider (UI-01) and of the approval provider (UI-03). |
+| Server process | MCP `elicitation/create` (to the client) | The dialog of the approval plugin `approve-dialog` (UI-03). |
 | Server process | arguments | `--config-dir DIR` (necessary; REQ-019 of SRS). Each other argument stops the server (REQ-004). |
-| Server process | environment | `RENDER_MODE` (REQ-015 of SRS); `BROWSER_AUTOMATION_X_MCP_LOG_DIR`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_DISCOVER`, `_STORAGE_STATE`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). The server ignores each `PLAYWRIGHT_MCP_*` variable. |
+| Server process | environment | `RENDER_MODE` (REQ-015 of SRS); `BROWSER_AUTOMATION_X_MCP_LOG_DIR`, `_LOG_LEVEL`, `_LOG_SECRETS`, `_STORAGE_STATE`; `BROWSER_AUTOMATION_X_MCP_VAULT_TOOL` (tests: a test double of the vault tool). The server ignores each `PLAYWRIGHT_MCP_*` variable. |
 | Playwright MCP (used) | `createConnection(config, contextGetter)` | One connection for each lane, with the context of the lane. |
-| Playwright MCP (used) | `browser_run_code_unsafe`, `browser_snapshot` | Page code of the form fill; the snapshot after the submit. |
+| Playwright MCP (used) | `browser_run_code_unsafe`, `browser_snapshot` | Page code of the form fill and of the dom-classifiers; the snapshot after the submit. |
+| Playwright (used) | `addInitScript`, `exposeBinding` of the lane context | The page scripts of the plugins and their channel. |
 | Launcher | `run.sh [install|test|args]` | Makes the runtime; `install` stops after it; `test` runs the tests. |
 | Vault tool (used) | `run.sh --vault NAME get-system SYSTEM` / `get-secret SYSTEM KEY` | The secret names of one system; one secret on stdout. |
 | Approval service (used) | `POST <address>/approve` `{ host, keys, client }` → `{ approved }` | TLS with a pinned SHA-256 fingerprint, no authentication (REQ-036b of SRS). |
@@ -256,16 +251,22 @@ flowchart TD
 
 | Component | Interface | Used by |
 | --- | --- | --- |
-| Fill provider | `kind`; `resolve(key, ctx)`: value, `undefined`, or a `FillError`; `dispose()`. Key-value: also `has(key, ctx)`, `match(value, ctx)` → key or `undefined`. Approval: `inner`, `approve({ host, keys, client }, ctx)` → `true` or `false`. `ctx = { host, url, client, elicit }`. See `src/fill/provider.js`. | Fill registry |
-| Sites | `access(host)` → `{ allowed, reason }`; `match(url)` → `{ key, fields: [{ name, selector }], submits, logins }` or `undefined`; `providerConfig(url, type)`; `chainOf(host)`; `has(host)`; `rootDomain(host)`; `pageOf(url)` → `{ host, path }`; `updateSites(file, change)` | Host policy, form fill, vault provider, lanes, discovery |
-| Server config | `providers()` → `[{ type, mask, settings }]`; `writeTools(tools)` | Fill registry, tool switches |
-| Form fill | `autofill(session, url, ctx, checkPage)` → `{ submitted, blocked }`. `session` is the state of one lane. | Call pipeline |
-| Discovery | `startDiscovery(session, context)`, `stopDiscovery(session)` | Lanes |
-| Lanes | `open()` → lane or `undefined` (busy); `close(id, reason)`; `get(id)`; `status()`; `tabCount(lane)`; `closeAll(reason)` | Call pipeline |
-| Storage state | `loadState(file)`, `filterIndexedDb(state, keep)`, `mergeState(base, mine, theirs)`, `writeState(file, state)` | Lanes |
-| Host policy | `check(url)` → `{ allowed, reason }`; `opened(url, ctx)` | Call pipeline |
-| Tool switches | `addMissing(names)`, `isEnabled(name)`, `describe(tool)`, `disabledResult(name)` | Call pipeline |
-| Fill registry | `resolveAll(keys, ctx, { discovery })` → `Map` key → value; `match(value, ctx)` → key or `undefined`; `canLogIn(ctx)`; `scrub(result)`, `scrubFiles(files)`, `clean(text)` | Form fill, discovery, call pipeline |
+| Call pipeline | Runs one tool call of the client through the steps of 5.1 | MCP server |
+| Lanes | Opens, closes and lists lanes; gives the lane of a call | Call pipeline |
+| Storage state | Loads, filters, merges and writes the storage state | Lanes |
+| Host policy | Checks a URL; records an opened host | Call pipeline |
+| Hosts | Reads the tree of `hosts.json`; gives the chain and the access of a host; writes an opened host | Host policy, storage state |
+| Tool switches | Says if a tool is on; gives the error of a disabled tool; adds missing tools | Call pipeline |
+| Server config | Gives the plugin instances of each category | Plugin host |
+| Form fill | Fills and submits the classified fields of the page of a lane | Call pipeline |
+| Marks | Marks the element of a call with a `ref` | Call pipeline |
+| Plugin host | Loads the plugins; gives values, approvals, classified fields, keys; runs the page scripts and their channel; scrubs masked values | Form fill, lanes, call pipeline |
+| key-value-source | Gives the keys of a page, the values of keys, and the keys of a value | Plugin host |
+| approval-plugin | Approves the fill of the keys of one instance on a host | Plugin host |
+| dom-classifier | Gives the fields, the submit methods and the login links of a frame | Plugin host |
+| match-strategy | Gives the key of a field | Plugin host |
+| page-script | Runs a script in each frame, with Node code beside it | Plugin host |
+| Logger | Writes the events of the server and of the plugins | All |
 
 ## 7. Key flows
 
@@ -298,12 +299,14 @@ sequenceDiagram
     Agent->>Server: tools/call browser_navigate login.example/u/login
     Server->>Playwright MCP: browser_navigate
     Playwright MCP-->>Server: result, Page URL: login.example/u/login
-    Server->>Server: host check; sites.json: forms of login.example
-    Server->>Playwright MCP: browser_run_code_unsafe: wait for the fields (PEEK_WAIT)
-    Server->>Vault provider: resolve("password", host)
-    Vault provider->>Vault tool: get-secret "System" password
-    Vault tool-->>Vault provider: secret
-    Server->>Playwright MCP: browser_run_code_unsafe: fill, submit, wait (SUBMIT_WAIT)
+    Server->>Server: host check
+    Server->>Playwright MCP: browser_run_code_unsafe: run the dom-classifiers, wait for a field (PEEK_WAIT)
+    Playwright MCP-->>Server: fields with hints, submit methods
+    Server->>Match-strategy: keys of the fields
+    Server->>Vault plugin: value of "password" on login.example
+    Vault plugin->>Vault tool: get-secret "System" password
+    Vault tool-->>Vault plugin: secret
+    Server->>Playwright MCP: browser_run_code_unsafe: fill, submit method, wait (SUBMIT_WAIT)
     Server->>Playwright MCP: browser_snapshot
     Playwright MCP-->>Server: page after the submit (may show a value)
     Server->>Server: host check; scrub: value → ***; remove code sections
@@ -323,21 +326,19 @@ sequenceDiagram
     Server-->>Agent: error: page closed, reason
 ```
 
-Discovery of a login form (the root domain has a vault config in `sites.json`):
+Discovery of a login form (the vault file has a system for login.example):
 
 ```mermaid
 sequenceDiagram
-    User->>Browser: opens login.example/u/login
-    Browser->>Server: page load
-    Server->>sites.json: root domain login.example, "access": "allow"
     User->>Browser: fills username, password; clicks Sign in
-    Browser->>Server: record: press #signin, values of the user fields
-    Server->>sites.json: read again
-    Server->>Vault provider: match(value) for each field
-    Vault provider->>Vault tool: get-system, get-secret for each secret
-    Vault provider-->>Server: username, password
+    Browser->>Page script discovery: input, click events
+    Page script discovery->>Server: message: press #signin, values of the user fields
+    Server->>Vault plugin: keys of each value
+    Vault plugin->>Vault tool: get-system, get-secret for each secret
+    Vault plugin-->>Server: username, password
     Server->>Server: discard the values
-    Server->>sites.json: fields: { "#user": "username", "#pass": "password" }, submit: ["#signin"]
+    Server->>Node code of discovery: message: press #signin, keys username, password
+    Node code of discovery->>Discovery file: fields: { "#user": "username", "#pass": "password" }, submit: ["#signin"]
 ```
 
 Approval of a fill:
@@ -345,36 +346,24 @@ Approval of a fill:
 ```mermaid
 sequenceDiagram
     Agent->>Server: tools/call browser_navigate login.example/u/login
-    Server->>Server: sites.json: #user = username, #pass = password
-    Server->>Approval provider: approve({ host, keys: [username, password], client })
-    Approval provider->>Approval service: POST /approve (pinned certificate)
-    Approval service-->>Approval provider: { approved: true }
-    Server->>Vault provider: resolve(username), resolve(password)
+    Server->>Server: classified fields and keys: #user = username, #pass = password
+    Server->>Approval plugin: approve({ host, keys: [username, password], client })
+    Approval plugin->>Approval service: POST /approve (pinned certificate)
+    Approval service-->>Approval plugin: { approved: true }
+    Server->>Vault plugin: values of username, password
     Server->>Playwright MCP: browser_run_code_unsafe: fill, submit
     Server-->>Agent: page after the submit
-```
-
-Dialog of the ask provider:
-
-```mermaid
-sequenceDiagram
-    Agent->>Server: tools/call browser_navigate shop.example/order
-    Server->>Server: sites.json: phone = #phone; ask provider
-    Server->>Client: elicitation/create (host, field name)
-    Client->>User: dialog
-    User-->>Client: value, accept
-    Client-->>Server: {action: accept, content: {value}}
-    Server->>Playwright MCP: browser_run_code_unsafe: fill, submit
-    Server-->>Agent: page after the submit, *** in place of the value
 ```
 
 ## 8. Data model
 
 | File | Committed | Format | Written by |
 | --- | --- | --- | --- |
-| `<config>/server.json` | yes | `providers`: array of `{ type, enabled, mask, <settings> }` (vault: `vault`; values: `values`; ask: `fields`; optional `approval` of a key-value provider: `{ type, enabled, <settings> }`; approve-https: `address`, `fingerprint`); `tools`: `{ <tool>: { enabled } }`, sorted | user; server adds missing tools |
-| `<config>/sites.json` | yes | `defaultAccess`; `sites`: `{ <root domain>: <node> }`; node: `{ access, "provider-config": { <type>: { ... } }, forms: [{ fields: { <selector>: <key> }, submit: [<selector> or "enter"] }], login: [<selector>], subdomains: { <host>: <node> } }`; vault config: `{ vault, entry }` (REQ-037, REQ-040 of SRS) | user; discovery mode (REQ-039a, REQ-042) |
-| `config/server.template.json`, `config/sites.template.json` | yes | the first content of each file above | user; server copies a template to a missing file |
+| `<config>/server.json` | yes | `plugins`: `{ <category>: [<instance>] }` for `key-value-source`, `dom-classifier`, `match-strategy`, `page-script`; instance: `{ name, plugin, description, enabled, config }`; a key-value-source also has `mask` and optional `approval: { plugin, enabled, config }`; `tools`: `{ <tool>: { enabled } }`, sorted; `recordHosts` (RECORD_HOSTS) | user; server adds missing tools |
+| `<config>/hosts.json` | yes | `defaultAccess`; `hosts`: `{ <root domain>: <node> }`; node: `{ access, subdomains: { <host>: <node> } }` (REQ-037, REQ-040 of SRS) | user; server (REQ-042) |
+| `<config>/<vault file>` | yes | `hosts`: the tree of `hosts.json`; node: `{ system, subdomains }` (REQ-034) | user |
+| `<config>/<discovery file>` | yes | `hosts`: the tree of `hosts.json`; node: `{ forms: [{ fields: { <css>: <key> }, submit: [<matcher> or "enter"] }], login: [<matcher>], subdomains }`; matcher: `<css>` or `{ css, text }` (REQ-039a, REQ-039b) | user; page-script `discovery` |
+| `config/server.template.json`, `config/hosts.template.json` | yes | the first content of each file above | user; server copies a template to a missing file |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log.json` | no | JSON Lines: `ts`, `level`, `session`, `event`, fields of the event | server |
 | `LOG_DIR/<client>/<mm-dd_hhmmss_pid>.log` | no | `HH:MM:SS <event> <url> <key>=<value> ...`, a maximum of LOG_LINE_MAX characters | server |
 | STATE_FILE | no | Playwright storage state (JSON): `cookies`, `origins` with `localStorage` and `indexedDB`; mode `0600` | server |
@@ -383,9 +372,12 @@ sequenceDiagram
 | OUTPUT_DIR | no | snapshots, screenshots, console logs, network files of upstream; the only folder for a `filename` of the agent (REQ-014a) | Playwright; server scrubs and masks |
 | `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `shared/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
 
-Sites: a site key is a root domain; a `subdomains` key is a full host name under its node. A node
-covers its host and each subdomain of it. `access`, `provider-config`, `forms` and `login` go down
-the tree. A form has no path. No case. A URL without a host passes.
+Hosts: a host key is a root domain; a `subdomains` key is a full host name under its node. A node
+covers its host and each subdomain of it. `access` goes down the tree. No case. A URL without a
+host passes. The plugin files use the same tree.
+
+Plugin APIs: **MISSING:** the typed API of each plugin category, with its input and output. They
+come after the TypeScript migration, for a review (ADR-20261108-plugin_architecture).
 
 `<config>` is the config folder that `--config-dir` gives, e.g. `local/configs/browser-automation-x-mcp`
 of the repository.
@@ -403,11 +395,23 @@ of the repository.
 | `@playwright/mcp` 0.0.83 (with its `playwright-core`) | Server process | Browser tools; Chromium launch |
 | `@modelcontextprotocol/sdk` 1.32.2 | Server process | MCP server and client |
 | `tldts` 7.4.18 | Server process | Root domain of a host (Public Suffix List) |
+| `typescript`, `@types/node`, `eslint`, `typescript-eslint` (dev, pinned) | Tests | Type check and lint |
 | Chromium (downloaded) | Chromium | Browser |
 | `ldd`, `apt-get`, `apt-cache`, `dpkg-deb` (Ubuntu base) | Launcher | Missing libraries, no root |
 | `curl`, `tar`, `sha256sum` / `certutil` | Launcher | Download of Node.js |
-| Vault tool `shared/tools/auth` | Vault provider | Secrets |
-| Approval service, e.g. `projects/other/approve-provider-service` of the workspace | Approval HTTPS provider | Approvals |
+| Vault tool `shared/tools/auth` | Plugin `vault` | Secrets |
+| Approval service, e.g. `projects/other/approve-provider-service` of the workspace | Plugin `approve-https` | Approvals |
+
+Test phases (section "Verification" of the SDD workflow): `run.sh test` runs all phases;
+`run.sh test <phase>` runs one phase. A failure does not stop the run. A passed test gives a short
+summary; a failed test gives its full output.
+
+| Phase | Folder |
+| --- | --- |
+| Static analysis: `tsc --noEmit`, lint | `tests/static/` |
+| Unit | `tests/unit/` |
+| Functional | `tests/functional/` |
+| Online and QAS | `tests/online/` |
 
 Manual test: see [README.md](../README.md#tests), and run `claude -p` with `--mcp-config` as
 [README.md](../README.md#client-setup) says.
@@ -416,12 +420,15 @@ Manual test: see [README.md](../README.md#tests), and run `claude -p` with `--mc
 
 All decisions are in [ADL.md](ADL.md).
 
+- [ADR-20261108-plugin_architecture](adr/ADR-20261108-plugin_architecture.md): plugins in place of
+  the form-fill providers; the discovery as plugins; `hosts.json`; TypeScript.
+
 - [ADR-20261106-domain_tree_and_provider_config](adr/ADR-20261106-domain_tree_and_provider_config.md):
   `sites.json` as a tree of root domains and subdomains; `provider-config`; approval attached to a
-  key-value provider.
+  key-value provider. `provider-config` is superseded by ADR-20261108-plugin_architecture.
 - [ADR-20261106-provider_kinds_and_matching](adr/ADR-20261106-provider_kinds_and_matching.md):
   key-value, value and approval providers; discovery writes `sites.json` with the keys of the
-  values that the user filled.
+  values that the user filled. Superseded by ADR-20261108-plugin_architecture.
 - [ADR-20261104-browser_lanes](adr/ADR-20261104-browser_lanes.md): one browser context for each
   agent, upstream in the server process, logins in a storage-state file.
 - [ADR-20261028-tool_folders](adr/ADR-20261028-tool_folders.md): one folder for each browser
@@ -430,16 +437,15 @@ All decisions are in [ADL.md](ADL.md).
 
 ## 11. Open issues
 
-- A pop-up (MCP elicitation) for hosts that `sites.json` does not allow.
+- A pop-up (MCP elicitation) for hosts that `hosts.json` does not allow.
 - The approval service approves each request. A service with real decisions (e.g. a confirmation
   on a phone) is open.
 - A value of the user can match a wrong key, e.g. a username that is also an email.
-- The discovery mode fills without approval. Use it only with a person at the browser.
 - Proof of QAS-001 in clean Ubuntu 22.04 and 24.04 containers, with instructions (B3).
 - CJK fonts (`fonts-noto-cjk`, 58 MB) for screenshots of Chinese, Japanese and Korean text.
 - `libgssapi-krb5-2` for Kerberos sign-on on hosts without it (lazy-loaded by Chromium).
-- In `claude -p` (no UI), Claude Code cancels each dialog of the ask provider. The server does not fill
-  the form.
+- In `claude -p` (no UI), Claude Code cancels each dialog of the approval plugin `approve-dialog`.
+  The server does not fill the form.
 - `browser_evaluate` can read a value that stays in a field after a failed submit.
 - A deny rule does not stop each shell command. An agent with a shell can still read the tool
   folder.
@@ -447,6 +453,13 @@ All decisions are in [ADL.md](ADL.md).
   the translate bubble on amazon.pl. They are manual tests.
 - A site that keeps the same link text after the login needs an other sign for the login link
   (REQ-030a). Not supported.
+- A dom-classifier with an agent, which gives richer hints, is not made.
+- A dom-classifier with Fathom is not made. Firefox uses Fathom in production only for new-password,
+  sign-up and credit card fields; its login ruleset is a proof of concept.
+- An element that `browser_evaluate` changes has no mark: the discovery recorder records it as an
+  element of the user.
+- The page scripts run in the main world of the page. The scripts of the site can see the marks
+  and the page APIs of the server.
 - Two lanes of the same agent are possible. The server cannot see which agent makes a call.
 
 ## 12. Default values
