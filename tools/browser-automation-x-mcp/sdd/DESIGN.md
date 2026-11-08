@@ -145,8 +145,9 @@ flowchart TD
 ```
 
 Each component has an interface and a class that implements it. The constructors get the
-dependencies. The entry point is the composition root: it makes the objects. No mutable state is at
-module level.
+dependencies. `startServer()` of `playwright/src/mcp-server.ts` is the composition root: it makes
+the objects. No mutable state is at module level. The state of one lane for the call steps is a
+`LaneSession` (`playwright/src/session.ts`).
 
 - **MCP server / MCP client:** the SDK objects for the connections. The server forwards roots,
   progress and cancellation between the client and the connection of the lane.
@@ -216,7 +217,7 @@ module level.
   Chromium. At each start, the server kills the Xvfb of servers that do not run (REQ-018).
 - **Entry point:** `playwright/src/server.ts` takes only `--config-dir`. It sets the browsers
   path, the cache folder, the temp folder and the libraries in the process environment before it
-  loads Playwright: Playwright reads them once. It is the composition root.
+  loads Playwright: Playwright reads them once.
 - **Logger:** `src/logger.ts`. It keeps the events in a buffer until `initialize` gives the client
   name, then writes `.log.json` and the short lines of `.log`. It redacts the secret arguments.
 
@@ -260,6 +261,8 @@ module level.
 | Server config | Gives the plugin instances of each category | Plugin host |
 | Form fill | Fills and submits the classified fields of the page of a lane | Call pipeline |
 | Marks | Marks the element of a call with a `ref` | Call pipeline |
+| Page code | Runs a function in the page of a lane through upstream | Form fill |
+| Lane session | Holds the state of one lane for the call steps: page URL, fill state, notes | Call pipeline, form fill |
 | Plugin host | Loads the plugins; gives values, approvals, classified fields, keys; runs the page scripts and their channel; scrubs masked values | Form fill, lanes, call pipeline |
 | key-value-source | Gives the keys of a page, the values of keys, and the keys of a value | Plugin host |
 | approval-plugin | Approves the fill of the keys of one instance on a host | Plugin host |

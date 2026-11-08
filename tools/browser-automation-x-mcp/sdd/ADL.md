@@ -175,3 +175,5 @@ The log of the decisions that change the design. Format and rules:
 - 20261107-07 Nestor fc2c70a7e4a7 The server waits FLOW_WAIT for a form field after a login click or a submit, else PEEK_WAIT one time for each URL
 - 20261107-08 Nestor fc2c70a7e4a7 A login flow that ends on a page without a visible form field logs fill_no_field with the URL, the wait and the selectors
 - 20261107-09 Nestor fc2c70a7e4a7 In the discovery mode, the server does not open again the URL of the login click
+- 20261108-01 Nestor 00b631b3ec05 Write the tool in TypeScript in strict mode; Node.js runs the .ts files with type stripping, without a build step
+- 20261108-02 Nestor 00b631b3ec05 Give each component an interface and a class; the constructors get the dependencies; one composition root makes the objects; no mutable state at module level

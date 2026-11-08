@@ -2,7 +2,7 @@
 REM Launcher of the MCP server browser-automation-x-mcp on stdio.
 REM   run.bat [args]    start the server, e.g. "run.bat --config-dir DIR"
 REM   run.bat install   make the runtime and install the browser, then stop
-REM   run.bat test      run the tests
+REM   run.bat test [phase...]  run the test phases: all, or the given ones (static, unit, functional, online)
 REM stdout is the MCP channel. Send all setup output to stderr.
 setlocal EnableExtensions
 set "DIR=%~dp0"
@@ -26,8 +26,15 @@ set "PATH=%NODE_DIR%;%PATH%"
 set "npm_config_cache=%ASSETS%\npm-cache"
 if not defined PLAYWRIGHT_BROWSERS_PATH set "PLAYWRIGHT_BROWSERS_PATH=%ASSETS%\browsers\%PLATFORM%"
 
-REM 2. Node.js packages in node_modules\, again when package-lock.json changes.
-fc /b "%DIR%\package-lock.json" "%DIR%\node_modules\.bax-lock" >nul 2>&1
+REM 2. Node.js packages in node_modules\, again when package-lock.json changes. The dev packages
+REM    (type check, lint) only for "run.bat test". A full install is also good for a start.
+set "LOCK_STAMP=%DIR%\node_modules\.bax-lock"
+set "OMIT=--omit=dev"
+if /i "%~1"=="test" (
+    set "LOCK_STAMP=%DIR%\node_modules\.bax-lock-dev"
+    set "OMIT="
+)
+fc /b "%DIR%\package-lock.json" "%LOCK_STAMP%" >nul 2>&1
 if errorlevel 1 call :install_packages || exit /b 1
 
 REM 3. Chromium, again when the Playwright version changes.
@@ -47,15 +54,20 @@ set ARGS=%ARGS% %1
 shift
 goto :collect
 :start
-node "%DIR%\playwright\src\server.js" %ARGS%
+node "%DIR%\playwright\src\server.ts" %ARGS%
 exit /b %errorlevel%
 
 :tests
-pushd "%DIR%"
-node --test --test-concurrency=1 "tests/*.test.js" "playwright/tests/*.test.js"
-set "RC=%errorlevel%"
-popd
-exit /b %RC%
+shift
+set "PHASES="
+:collect_phases
+if "%~1"=="" goto :run_tests
+set PHASES=%PHASES% %1
+shift
+goto :collect_phases
+:run_tests
+node "%DIR%\tests\run-phases.ts" %PHASES%
+exit /b %errorlevel%
 
 :install_node
 echo run.bat: download Node.js %NODE_VERSION% (%PLATFORM%) 1>&2
@@ -77,11 +89,13 @@ exit /b 0
 :install_packages
 echo run.bat: install the Node.js packages 1>&2
 pushd "%DIR%"
-call npm ci --no-audit --no-fund --loglevel=error 1>&2
+call npm ci %OMIT% --no-audit --no-fund --loglevel=error 1>&2
 set "RC=%errorlevel%"
 popd
 if not "%RC%"=="0" exit /b %RC%
-copy /y "%DIR%\package-lock.json" "%DIR%\node_modules\.bax-lock" >nul
+del /q "%DIR%\node_modules\.bax-lock" "%DIR%\node_modules\.bax-lock-dev" >nul 2>&1
+copy /y "%DIR%\package-lock.json" "%LOCK_STAMP%" >nul
+if not defined OMIT copy /y "%DIR%\package-lock.json" "%DIR%\node_modules\.bax-lock" >nul
 exit /b 0
 
 :install_browser

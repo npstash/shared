@@ -24,12 +24,13 @@ MCP client (Claude Code) <-stdio-> server: one Playwright MCP connection for eac
 
 ```
 run.sh run.bat                launcher of the server and its runtime
-package.json                  Node.js packages
+package.json                  Node.js packages; the dev packages are for the tests only
+tsconfig.json eslint.config.ts   type check and lint (static analysis)
 config/                       templates of the config files
-providers-form-fill/<type>/   form-fill providers: index.js
+providers-form-fill/<type>/   form-fill providers: index.ts
 src/                          server.json, sites.json, logger, host check, fill registry
-tests/                        tests of src/ and of the providers
-playwright/                   the server: src/, tests/
+playwright/src/               the server
+tests/                        the test phases: static/, unit/, functional/, online/; fixtures/
 sdd/                          documents of the tool
 ```
 
@@ -38,7 +39,7 @@ sdd/                          documents of the tool
 ```bash
 ./run.sh install                           # make the runtime, install the browser, then stop
 ./run.sh --config-dir <DIR>                # start the server (MCP server on stdio)
-./run.sh test                              # run the tests
+./run.sh test [phase...]                   # run the test phases: all, or e.g. "unit"
 run.bat install                            # the same on Windows
 ```
 
@@ -269,7 +270,7 @@ agent gets the page after the submit. It does not know about the fill.
   refuses each fill. A service that approves each request is in `projects/other/approve-provider-service`
   of the workspace.
 
-To add a provider, see [src/fill/provider.js](src/fill/provider.js).
+To add a provider, see [src/fill/provider.ts](src/fill/provider.ts).
 
 ### Find the fields of a page (discovery)
 
@@ -404,7 +405,7 @@ fonts.
 
 - To do it again, delete `.local_assets/syslibs/`.
 - If a library has no package, `run.sh` stops with its name. Add it to `EXCEPTIONS` in
-  [playwright/src/setup/syslibs.js](playwright/src/setup/syslibs.js).
+  [playwright/src/setup/syslibs.ts](playwright/src/setup/syslibs.ts).
 - In CI (`CI=true`), `run.sh` installs the OS packages with `--with-deps`. CI runners have sudo.
 
 ## Arguments and defaults
@@ -475,32 +476,39 @@ tail -f "$(ls -t .local_assets/logs/*/*.log | head -1)"
 
 ## Tests
 
-`./run.sh test` runs the tests with `node --test`. Each test uses a copy of the config in
+The code is TypeScript in strict mode. Node.js runs the `.ts` files directly (type stripping);
+there is no build step.
+
+`./run.sh test` runs the test phases in this order: `static`, `unit`, `functional`, `online`.
+`./run.sh test unit` runs one phase. A failure does not stop the run. A passed test gives a short
+summary; a failed test gives its full output ([tests/reporter.ts](tests/reporter.ts)). Only this
+path installs the dev packages: TypeScript and ESLint. Each test uses a copy of the config in
 `.local_assets/test-config/`, and its own storage-state file in `.local_assets/test-state/`. The
 committed config and the real storage state stay unchanged. The test client opens a lane and gives
 it in each call.
 
-- [tests/policy-unit.test.js](tests/policy-unit.test.js): `server.json`, `sites.json`, host access, tool
+- [tests/static/](tests/static/): `tsc --noEmit` and ESLint (rule typed-code).
+- [tests/unit/policy.test.ts](tests/unit/policy.test.ts): `server.json`, `sites.json`, host access, tool
   switches, URL patterns, the fill registry, the provider kinds, matching and approvals, and the
   providers (the vault through the test double in [tests/fixtures/fake-vault/](tests/fixtures/fake-vault/);
   `approve-https` against a local HTTPS server).
-- [playwright/tests/policy.test.js](playwright/tests/policy.test.js): tool switches, host lists,
+- [tests/functional/policy.test.ts](tests/functional/policy.test.ts): tool switches, host lists,
   form fill (fill, submit, mask, loop guard, two steps, label locators, several submits, host
   check after a submit, login link, approval), discovery (hosts, keys of the values of the user,
   submit buttons, `enter`, login links, fill without a submit).
-- [playwright/tests/tools.test.js](playwright/tests/tools.test.js): the same tools as upstream with
+- [tests/functional/tools.test.ts](tests/functional/tools.test.ts): the same tools as upstream with
   the parameter `lane`, the texts for the client, navigation, errors, screenshots, the log and the
   storage state from one session to the next.
-- [playwright/tests/lanes.test.js](playwright/tests/lanes.test.js): lanes in parallel, the limits,
+- [tests/functional/lanes.test.ts](tests/functional/lanes.test.ts): lanes in parallel, the limits,
   the lane errors, `browser_close`, logins between lanes, file names, header masks, the input of
   the user as activity, the deletion of old lane profiles.
-- [playwright/tests/forms.test.js](playwright/tests/forms.test.js): form tools of the agent on local
+- [tests/functional/forms.test.ts](tests/functional/forms.test.ts): form tools of the agent on local
   pages.
-- [playwright/tests/online.test.js](playwright/tests/online.test.js): public sites. A test is
+- [tests/online/online.test.ts](tests/online/online.test.ts): public sites. A test is
   skipped when its site is not reachable. Set `BROWSER_AUTOMATION_X_MCP_OFFLINE=1` to skip all of
   them.
-- [playwright/tests/unit.test.js](playwright/tests/unit.test.js),
-  [playwright/tests/xvfb.test.js](playwright/tests/xvfb.test.js): redaction, defaults, the library
+- [tests/unit/server.test.ts](tests/unit/server.test.ts),
+  [tests/functional/xvfb.test.ts](tests/functional/xvfb.test.ts): redaction, defaults, the library
   mapping, the storage-state merge, the masks, idle lanes, Xvfb, the start and stop of Chromium
   with the lanes.
 
