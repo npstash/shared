@@ -1,6 +1,6 @@
 name: Tests
 
-# Keep the same in each repository: see the tests-and-ci rule.
+# Keep this file the same in each repository: see the rule tests-and-ci.
 
 on:
   push:
