@@ -16,6 +16,6 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["src", "playwright/src", "providers-form-fill", "tests", "eslint.config.ts"],
+  "include": ["src", "playwright/src", "plugins", "tests", "eslint.config.ts"],
   "exclude": ["node_modules", ".local_assets"]
 }
