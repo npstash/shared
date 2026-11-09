@@ -134,11 +134,13 @@ export function cleanStaleXvfb(logger: Logger): void {
   }
 }
 
-// Give the start time of a process (field 22 of /proc/<pid>/stat), or undefined.
+// Give the start time of a process (field 22 of /proc/<pid>/stat), or undefined. A zombie has
+// stopped: its parent did not read its exit status yet.
 export function processStart(pid: number | undefined): string | undefined {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return fields[0] === 'Z' ? undefined : fields[19];
   } catch {
     return undefined;
   }

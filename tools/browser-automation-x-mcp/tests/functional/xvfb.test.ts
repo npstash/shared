@@ -65,6 +65,27 @@ describe('xvfb', { skip }, () => {
     }
   });
 
+  test('a server that is a zombie does not run: the cleanup removes its Xvfb', async () => {
+    const stale = await startXvfb({ logger });
+    try {
+      const file = registryFile(stale.display);
+      const entry = JSON.parse(fs.readFileSync(file, 'utf8'));
+      // No await from here: the event loop cannot reap the killed process.
+      const server = spawn('sleep', ['60'], { stdio: 'ignore' });
+      const pid = server.pid ?? 0;
+      const start = fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.split(' ')[19];
+      server.kill('SIGKILL');
+      const deadline = Date.now() + 5000;
+      while (!fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.startsWith('Z') && Date.now() < deadline);
+      assert.ok(fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1]?.startsWith('Z'), 'the process is a zombie');
+      fs.writeFileSync(file, JSON.stringify({ ...entry, server: { pid, start } }));
+      cleanStaleXvfb(logger);
+      assert.ok(!fs.existsSync(file));
+    } finally {
+      stale.stop();
+    }
+  });
+
   test('stops Xvfb when its server gets SIGKILL', async () => {
     const script = `const { startXvfb } = await import(${JSON.stringify(XVFB_MODULE)});
       const { display } = await startXvfb({ logger: { info() {}, debug() {}, error() {} } });
