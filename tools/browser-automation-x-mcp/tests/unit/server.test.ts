@@ -230,7 +230,7 @@ describe('lanes', () => {
   // A lane without a browser, for the tests of the lane list.
   const fakeLane = (fields: Partial<Lane> & { id: string }): Lane => ({
     browserSession: 'normal', opened: 0, lastUsed: 0, busy: 0, context: undefined, client: undefined, notes: [], base: undefined,
-    dir: '', closing: false, saving: undefined, session: undefined, ...fields,
+    dir: '', outputDir: undefined, closing: false, saving: undefined, session: undefined, ...fields,
   });
   const lanes = (options: Partial<LanesOptions> = {}): Lanes => {
     const value = new Lanes({ mode: 'HEADLESS', logger, stateFile: '/nowhere.json', ...options });

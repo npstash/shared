@@ -168,6 +168,45 @@ export async function classifyPage(page: Page, data: ClassifyData): Promise<Page
   return classifyAll();
 }
 
+export interface SettleData {
+  // Maximum time to wait, in ms.
+  readonly wait: number;
+  // The time without a change of the DOM after which the page is settled, in ms.
+  readonly quiet: number;
+  readonly interval: number;
+}
+
+// Page code: wait until the page has text and has no change of the DOM for data.quiet ms, a maximum
+// of data.wait ms. A page that loads itself again restarts the wait. Give true if the page settled.
+export async function settlePage(page: Page, data: SettleData): Promise<boolean> {
+  const watch = `(() => {
+    if (!window.__baxChanged) {
+      window.__baxChanged = Date.now();
+      new MutationObserver(() => { window.__baxChanged = Date.now(); })
+        .observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+    }
+    return { changed: window.__baxChanged, text: document.body ? document.body.innerText.trim().length : 0 };
+  })()`;
+  const deadline = Date.now() + data.wait;
+  while (Date.now() < deadline) {
+    let changed = 0;
+    let text = 0;
+    let readable = true;
+    for (const frame of page.frames()) {
+      const state = await frame.evaluate(watch).catch(() => undefined) as { changed: number; text: number } | undefined;
+      if (state) {
+        changed = Math.max(changed, state.changed);
+        text += state.text;
+      } else if (frame === page.mainFrame()) {
+        readable = false;
+      }
+    }
+    if (readable && text > 0 && Date.now() - changed >= data.quiet) return true;
+    await page.waitForTimeout(data.interval);
+  }
+  return false;
+}
+
 // Page code: fill the fields by ref, then run the submit method, and wait for the page.
 // data.submit null: fill only. The touched elements get the mark __baxTouched.
 export async function fillRefs(page: Page, data: FillRefsData): Promise<FillRefsResult> {

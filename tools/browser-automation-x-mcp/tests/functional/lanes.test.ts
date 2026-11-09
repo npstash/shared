@@ -8,7 +8,7 @@ import { NullLogger } from '../../src/logger.ts';
 import { TOOL_DIR } from '../../src/paths.ts';
 import { outputDir, processEnv, tmpDirForChromium } from '../../playwright/src/config.ts';
 import type { CallText, LaneClient, ServerClient, TestSite } from '../helpers.ts';
-import { callText, readLog, startServerClient, startSite } from '../helpers.ts';
+import { callText, readLog, snapshotText, startServerClient, startSite } from '../helpers.ts';
 
 describe('lanes', () => {
   let site: TestSite;
@@ -51,7 +51,7 @@ describe('lanes', () => {
       ]);
       const [snapA, snapB] = await Promise.all([inLane(a, 'browser_snapshot'), inLane(b, 'browser_snapshot')]);
       assert.match(snapA.text, /Page URL: .*\/form\.html/);
-      assert.match(snapB.text, /heading "Fixture home"/);
+      assert.match(snapshotText(snapB.text), /heading "Fixture home"/);
       assert.match((await inLane(a, 'browser_tabs', { action: 'list' })).text, /form\.html/);
       assert.doesNotMatch((await inLane(b, 'browser_tabs', { action: 'list' })).text, /form\.html/);
     } finally {
@@ -190,6 +190,32 @@ describe('lanes', () => {
     }
   });
 
+  test('the files of a lane are in its folder; the lane close deletes them (REQ-014b, REQ-014c)', async () => {
+    const lane = await open();
+    const navigated = await inLane(lane, 'browser_navigate', { url: `${site.url}/` });
+    assert.match(navigated.text, /\[Snapshot\]\(.*\/lanes\/\d+-lane-[0-9a-f]+\/page-.+\.yml\) \(\d+ lines, \d+ characters\)/);
+    assert.match(snapshotText(navigated.text), /heading "Fixture home"/);
+    const long = await inLane(lane, 'browser_evaluate', { function: `() => 'x'.repeat(5000)` });
+    assert.match(long.text, /### Result\n- \[Result\]\(.+\.txt\) \(1 lines, 5002 characters\)/);
+    const short = await inLane(lane, 'browser_evaluate', { function: '() => true' });
+    assert.match(short.text, /### Result\ntrue/);
+    const file = path.resolve(TOOL_DIR, navigated.text.match(/\[Snapshot\]\((.+?)\)/)?.[1] ?? '');
+    assert.ok(fs.existsSync(file), file);
+    await inLane(lane, 'browser_lane_close');
+    assert.ok(!fs.existsSync(path.dirname(file)), 'the lane close deletes the folder');
+  });
+
+  test('takes one more snapshot of a page that was blank (REQ-014d)', async () => {
+    const lane = await open();
+    try {
+      const { text } = await inLane(lane, 'browser_navigate', { url: `${site.url}/blank-reload.html` });
+      assert.match(snapshotText(text), /heading "After the reload"/);
+      assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'snapshot_again' && entry.tool === 'browser_navigate'));
+    } finally {
+      await closeAll();
+    }
+  });
+
   test('a file name must be in the output folder', async () => {
     const lane = await open();
     try {
@@ -201,6 +227,8 @@ describe('lanes', () => {
       assert.ok(!(await inLane(lane, 'browser_snapshot', { filename: name })).isError);
       const file = path.join(outputDir(TOOL_DIR), name);
       assert.ok(fs.existsSync(file), file);
+      await closeAll();
+      assert.ok(fs.existsSync(file), 'a named file stays after the lane closes');
       fs.rmSync(file);
     } finally {
       await closeAll();

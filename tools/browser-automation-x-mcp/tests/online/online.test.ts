@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import type { LaneClient, ServerClient } from '../helpers.ts';
-import { call, evaluate, ref, startServerClient } from '../helpers.ts';
+import { call, evaluate, ref, startServerClient, takeSnapshot } from '../helpers.ts';
 
 const SITES: Readonly<Record<string, string>> = {
   example: 'https://example.com/',
@@ -42,7 +42,7 @@ describe('public pages', { skip: !Object.values(online).some(Boolean) && 'no sit
   test('example.com: reads the page and follows the link', { skip: skip('example') }, async () => {
     const text = await call(client, 'browser_navigate', { url: SITES.example });
     assert.match(text, /Page Title: Example Domain/);
-    const snapshot = await call(client, 'browser_snapshot');
+    const snapshot = await takeSnapshot(client);
     assert.match(snapshot, /documentation examples/);
     const link = snapshot.match(/- link "([^"]+)"[^\n]*\[ref=(\w+)\]/);
     assert.ok(link, 'no link on the page');
@@ -52,7 +52,7 @@ describe('public pages', { skip: !Object.values(online).some(Boolean) && 'no sit
 
   test('httpbin.org: fills and submits the order form', { skip: skip('httpbin') }, async () => {
     await call(client, 'browser_navigate', { url: SITES.httpbin });
-    const snapshot = await call(client, 'browser_snapshot');
+    const snapshot = await takeSnapshot(client);
     await call(client, 'browser_fill_form', {
       fields: [
         { name: 'Customer name', type: 'textbox', target: ref(snapshot, 'textbox', 'Customer name:'), value: 'Jan Kowalski' },

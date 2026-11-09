@@ -121,7 +121,7 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 - **Basic Flow:** The server shall keep STATE_FILE, the log, temp files and the browser registry
   (Linux) in the tool folder. It shall keep the output files (snapshots,
-  screenshots) in OUTPUT_DIR of the working folder: the agent reads them.
+  screenshots) in OUTPUT_DIR of the working folder: the agent reads them (REQ-014b, REQ-014c).
 - **Alternative Flow:**
   - The user gives `PLAYWRIGHT_BROWSERS_PATH` → the server keeps it.
   - The tool folder cannot hold the Unix socket of Chromium → the server uses `.local_assets/tmp/`
@@ -135,6 +135,43 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   absolute path to upstream.
 - **Exception Flow:** The file is not in OUTPUT_DIR → the server gives an error result (UI-02) and
   does not call upstream.
+- **Post-condition:** The file stays in OUTPUT_DIR after the lane closes.
+
+#### REQ-014b — Output folder of a lane
+
+- **Basic Flow:**
+  1. The server shall give each lane the folder LANE_OUTPUT_DIR/`<pid>-<lane id>`.
+  2. Upstream shall write each output file of the lane without a `filename` into this folder.
+  3. The server shall delete this folder when the lane closes (REQ-063).
+  4. At the start, the server shall delete the folders of LANE_OUTPUT_DIR of servers that do not run.
+
+#### REQ-014c — Results in files
+
+- **Trigger:** A call gives a text result without an error.
+- **Basic Flow:**
+  1. The server shall keep each snapshot in a file. An inline snapshot goes into a new file in the
+     folder of the lane.
+  2. The server shall move a `### Result` section with more than RESULT_INLINE_MAX (4000 characters)
+     into a new file in the folder of the lane.
+  3. The result shall show each file as a link with the path relative to the working folder, the
+     line count and the character count: `- [Snapshot](<path>) (<lines> lines, <characters> characters)`.
+  4. The other sections of the result shall stay in the result.
+- **Alternative Flow:** A section with a smaller size, or a result without text → the server does
+  not change it.
+- **Post-condition:** A file never holds a masked value (REQ-032, REQ-032a).
+
+#### REQ-014d — Empty snapshot
+
+- **Trigger:** The snapshot of a call has no text. A page can be blank at the snapshot, e.g. a page
+  that does a check and loads itself again.
+- **Basic Flow:**
+  1. The server shall wait until the page has text and has no change of the DOM for
+     SETTLE_QUIET (300 ms), a maximum of PEEK_WAIT (3000 ms). A load of the page restarts the wait.
+  2. The server shall take one more snapshot, into the same file.
+  3. The server shall replace the sections `### Page` and `### Snapshot` of the result.
+  4. The server shall do the host check of the page again if its URL changed (REQ-041).
+- **Post-condition:** The log has `snapshot_again`. A snapshot that stays empty has the size
+  `0 lines, 0 characters`.
 
 #### REQ-015 — Render mode of the browser
 
@@ -677,7 +714,7 @@ The ask provider is removed.
   1. The server shall tell the page-script instances that the lane closes (REQ-031d).
   2. It shall save the storage state of the lane (REQ-064).
   3. It shall close the upstream connection and the Chromium of the lane, and delete the lane
-     profile.
+     profile and the output folder of the lane (REQ-014b).
   4. It shall stop Xvfb when no lane is open (REQ-065).
 - **Post-condition:** The log has `lane_closed` with the reason.
 
@@ -770,6 +807,8 @@ The ask provider is removed.
 | LANE_IDLE | 10 | min | — | Time without a call, after which a lane closes |
 | IDLE_CHECK | 30000 | ms | — | Interval of the check for idle lanes |
 | LANES_DIR | `.local_assets/lanes/` | — | — | Profiles of the open lanes: `<pid>-<lane id>` |
+| LANE_OUTPUT_DIR | OUTPUT_DIR/`lanes/` | — | — | Output files of the open lanes: `<pid>-<lane id>` |
+| RESULT_INLINE_MAX | 4000 | characters | — | Maximum size of a `### Result` section in a result |
 | ACTIVITY_INTERVAL | 5000 | ms | — | Minimum time between two reports of the input of the user |
 | STATE_FILE | `.local_assets/storage-state-<hash of the working folder>.json` | — | `BROWSER_AUTOMATION_X_MCP_STORAGE_STATE` | Storage state of the lanes of one workspace (REQ-064) |
 | FLOW_WAIT | 3000 | ms | — | Maximum wait for a form field in a login flow |

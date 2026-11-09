@@ -192,3 +192,9 @@ The log of the decisions that change the design. Format and rules:
 - 20261108-15 Nestor 601f12a226c4 The loop guard identifies a fill by the host and the sorted keys
 - 20261108-16 Nestor 601f12a226c4 The heuristic classifier gives login fields only with "fields": true; the default is false
 - 20261108-17 Nestor 601f12a226c4 Outside a login flow, the server waits until the page settles; it does no form fill after read-only tools
+- 20261109-01 Nestor 6a9e379704ad Each snapshot is in a file; an other text result is in a file only with more than RESULT_INLINE_MAX characters
+- 20261109-02 Nestor 6a9e379704ad The result gives the file as a link with the path, the line count and the character count; the other sections stay in the result
+- 20261109-03 Nestor 6a9e379704ad Each lane has an output folder in LANE_OUTPUT_DIR; the lane close and the cleanup at the server start delete it
+- 20261109-04 Nestor 6a9e379704ad A file with a filename of the agent stays in OUTPUT_DIR after the lane closes
+- 20261109-05 Nestor 6a9e379704ad For an empty snapshot, the server waits until the page settles and takes one more snapshot into the same file
+- 20261109-06 Nestor 6a9e379704ad The server writes the result files after the scrub of masked values

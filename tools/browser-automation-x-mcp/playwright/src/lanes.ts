@@ -20,6 +20,7 @@ import type { Logger } from '../../src/logger.ts';
 import { ASSETS_DIR } from '../../src/paths.ts';
 import { writeChromePrefs } from './chrome-prefs.ts';
 import type { RenderMode } from './config.ts';
+import { laneOutputRoot } from './config.ts';
 import type { LaneSession } from './session.ts';
 import type { StateStore, StorageState } from './storage-state.ts';
 import { StorageStateFile, emptyState, filterIndexedDb, mergeState } from './storage-state.ts';
@@ -58,6 +59,8 @@ export interface Lane {
   base: StorageState | undefined;
   // The profile folder.
   readonly dir: string;
+  // The folder of the output files of the lane. The lane close deletes it.
+  readonly outputDir: string | undefined;
   closing: boolean;
   saving: Promise<void> | undefined;
   // The state of the lane for the call steps (see mcp-server.ts).
@@ -228,7 +231,9 @@ export class Lanes implements LaneManager {
     do id = `lane-${crypto.randomBytes(2).toString('hex')}`; while (this.lanes.has(id));
     const lane: Lane = {
       id, browserSession, opened: Date.now(), lastUsed: Date.now(), busy: 0, context: undefined, client: undefined, notes: [], base: undefined,
-      dir: path.join(LANES_DIR, `${process.pid}-${id}`), closing: false, saving: undefined, session: undefined,
+      dir: path.join(LANES_DIR, `${process.pid}-${id}`),
+      outputDir: this.outputDir === undefined ? undefined : path.join(laneOutputRoot(this.outputDir), `${process.pid}-${id}`),
+      closing: false, saving: undefined, session: undefined,
     };
     this.lanes.set(id, lane);
     try {
@@ -258,7 +263,7 @@ export class Lanes implements LaneManager {
     } catch (error) {
       this.lanes.delete(id);
       await lane.context?.close().catch(() => {});
-      fs.rmSync(lane.dir, { recursive: true, force: true });
+      this.removeFolders(lane);
       if (!this.lanes.size) this.stopXvfb();
       throw error;
     }
@@ -280,7 +285,7 @@ export class Lanes implements LaneManager {
   async connect(lane: Lane): Promise<Client> {
     const server = await createConnection({
       browser: { browserName: 'chromium', isolated: false },
-      outputDir: this.outputDir,
+      outputDir: lane.outputDir,
     }, async () => {
       if (!lane.context) throw new Error(`the lane ${lane.id} has no browser`);
       return lane.context;
@@ -304,11 +309,16 @@ export class Lanes implements LaneManager {
     await this.saveState(lane);
     await lane.client?.close().catch(() => {});
     await lane.context?.close().catch(() => {});
-    fs.rmSync(lane.dir, { recursive: true, force: true });
+    this.removeFolders(lane);
     this.logger.info('lane_closed', { lane: lane.id, reason, open: this.lanes.size });
     this.logger.info('browser_stopped', { lane: lane.id });
     if (!this.lanes.size) this.stopXvfb();
     return true;
+  }
+
+  private removeFolders(lane: Lane): void {
+    fs.rmSync(lane.dir, { recursive: true, force: true });
+    if (lane.outputDir !== undefined) fs.rmSync(lane.outputDir, { recursive: true, force: true });
   }
 
   // Save the state of the lane after the saves that run. A save at the close runs directly.

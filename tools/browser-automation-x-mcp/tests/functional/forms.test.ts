@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, test } from 'node:test';
 import type { LaneClient, ServerClient, TestSite } from '../helpers.ts';
-import { call, evaluate, ref, startServerClient, startSite } from '../helpers.ts';
+import { call, evaluate, ref, startServerClient, startSite, takeSnapshot } from '../helpers.ts';
 
 describe('form filling', () => {
   let site: TestSite;
@@ -22,7 +22,7 @@ describe('form filling', () => {
 
   async function open(page: string): Promise<string> {
     await call(client, 'browser_navigate', { url: `${site.url}/${page}` });
-    return call(client, 'browser_snapshot');
+    return takeSnapshot(client);
   }
 
   test('browser_type fills text fields found by ref', async () => {
@@ -117,7 +117,7 @@ describe('form filling', () => {
     let snapshot = await open('dynamic.html');
     assert.doesNotMatch(snapshot, /textbox "Company"/);
     await call(client, 'browser_click', { target: ref(snapshot, 'checkbox', 'I represent a company'), element: 'company checkbox' });
-    snapshot = await call(client, 'browser_snapshot');
+    snapshot = await takeSnapshot(client);
     await call(client, 'browser_type', { target: ref(snapshot, 'textbox', 'Company'), element: 'Company', text: 'ACME' });
     assert.equal(await evaluate(client, `() => document.getElementById('company').value`), 'ACME');
   });

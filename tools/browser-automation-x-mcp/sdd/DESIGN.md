@@ -106,7 +106,9 @@ flowchart TD
 - **Log:** two files for each server start in LOG_DIR/`<client>`/: `.log` for a person and
   `.log.json` with all fields (REQ-050 of SRS); gitignored.
 - **Runtime files:** Node.js, browsers, libraries, temp files, STATE_FILE; gitignored.
-- **Output files:** OUTPUT_DIR in the working folder: snapshots and screenshots for the agent.
+- **Output files:** OUTPUT_DIR in the working folder: files with a `filename` of the agent.
+  LANE_OUTPUT_DIR holds one folder for each open lane: the snapshots, long results and other files
+  of the lane. The result gives the path and the size (REQ-014b, REQ-014c of SRS).
 
 ## 5. Components (C4 level 3)
 
@@ -375,7 +377,8 @@ sequenceDiagram
 | STATE_FILE | no | Playwright storage state (JSON): `cookies`, `origins` with `localStorage` and `indexedDB`; mode `0600` | server |
 | LANES_DIR | no | `<pid>-<lane id>/`: the Chromium profile of an open lane, with `Default/Preferences` | server, Chromium |
 | `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of the server and Xvfb), tmp, STATE_FILE, LANES_DIR | launcher, Playwright, server |
-| OUTPUT_DIR | no | snapshots, screenshots, console logs, network files of upstream; the only folder for a `filename` of the agent (REQ-014a) | Playwright; server scrubs and masks |
+| OUTPUT_DIR | no | the only folder for a `filename` of the agent (REQ-014a); LANE_OUTPUT_DIR is in it | Playwright; server scrubs and masks |
+| LANE_OUTPUT_DIR | no | `<pid>-<lane id>/`: snapshots, long results, screenshots, console logs, network files of an open lane (REQ-014b, REQ-014c) | Playwright, server; server scrubs and masks |
 | `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `shared/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
 
 Hosts: a host key is a root domain; a `subdomains` key is a full host name under its node. A node

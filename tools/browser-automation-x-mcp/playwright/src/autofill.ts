@@ -41,7 +41,7 @@ export const SUBMIT_WAIT: number = 10000;
 const FILL_ROUNDS: number = 3;
 
 // The time between two checks for the fields or for the changes of the DOM.
-const POLL_INTERVAL: number = 100;
+export const POLL_INTERVAL: number = 100;
 
 // The check of the host of a page after a submit or a click: it records the page.
 export type CheckPage = (url: string) => Promise<HostCheck>;

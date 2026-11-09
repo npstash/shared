@@ -8,7 +8,8 @@
 //   tool switch (server.json) → lane → file name check → host check (hosts.json) → marks of the
 //   elements of the call → Playwright MCP → host check of the opened page → login link and form
 //   fill (the plugins; see autofill.ts), with a host check of each page after a submit
-//   → scrub of masked values and of secret headers → log
+//   → one more snapshot if the snapshot is empty → scrub of masked values and of secret headers
+//   → result files (see result-files.ts) → log
 // The page-script plugins run in the lanes beside the calls (see page-scripts.ts).
 // Texts for the client do not name upstream, Playwright or the form fill.
 // startServer() is the composition root: it makes the objects of the server.
@@ -36,14 +37,15 @@ import { PluginHost } from '../../src/plugins/host.ts';
 import type { ToolSwitches } from '../../src/server-config.ts';
 import { ServerConfigFile, ToolsConfig } from '../../src/server-config.ts';
 import type { FillClient, FormFill } from './autofill.ts';
-import { AutoFill } from './autofill.ts';
+import { AutoFill, PEEK_WAIT, POLL_INTERVAL, SETTLE_QUIET } from './autofill.ts';
 import type { Env } from './config.ts';
-import { markTargets } from './page-code.ts';
+import { markTargets, settlePage } from './page-code.ts';
 import type { PageScriptHost } from './page-scripts.ts';
 import { PageScripts } from './page-scripts.ts';
-import { TMP_DIR, ignoredVariables, outputDir, renderMode, stateFile } from './config.ts';
+import { TMP_DIR, ignoredVariables, laneOutputRoot, outputDir, renderMode, stateFile } from './config.ts';
 import type { Lane, LaneManager, LanesOptions } from './lanes.ts';
 import { BROWSER_SESSIONS, Lanes, cleanStaleLanes, isBrowserSession } from './lanes.ts';
+import { fileInOutput, findEmptySnapshot, replaceSections, storeResult } from './result-files.ts';
 import { UpstreamPageCode } from './run-code.ts';
 import { LaneSession } from './session.ts';
 import { cleanStaleXvfb } from './xvfb.ts';
@@ -65,6 +67,9 @@ function readOnly(name: string, args: ToolArgs | undefined): boolean {
   return READ_ONLY_TOOLS.has(name) || (name === 'browser_tabs' && args?.action === 'list');
 }
 
+// The sections that a new snapshot replaces in a result.
+const SNAPSHOT_SECTIONS: readonly string[] = ['Page', 'Snapshot'];
+
 // The scrub also takes output files that changed this much before the call: file times are not exact.
 const MTIME_SLACK: number = 2000;
 
@@ -79,6 +84,7 @@ const INSTRUCTIONS: string = [
   'browser_lane_open needs browserSession: normal (with the saved logins), fresh (without the saved logins; new logins are saved) or isolated (without the saved logins; nothing is saved).',
   'When the user asks for a session of the browser, e.g. "a fresh session", this is the browserSession. Without such a request, use normal.',
   'Tell the user the browser session of each lane that you open.',
+  'A snapshot and a long result are in a file: the result gives the path, the line count and the character count. Read the file as your task needs: search it, or read a part of it or all of it. The files of a lane are deleted when the lane closes.',
 ].join(' ');
 
 // Tools of Playwright MCP that a web page can misuse through prompt injection. Disabled by default.
@@ -196,6 +202,7 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
 
   // 4. The lanes, and a connection to Playwright MCP that only gives the tool list.
   const output = outputDir(cwd);
+  cleanStaleLanes(logger, laneOutputRoot(output));
   const roots = async (request: ListRootsRequest, extra: { signal: AbortSignal }): Promise<ListRootsResult> => {
     await downstreamReady;
     if (!server.getClientCapabilities()?.roots) return { roots: [] };
@@ -212,7 +219,7 @@ export async function startServer({ configDir, logger, serverTransport, cwd = pr
     roots,
     afterOpen: async (lane: Lane): Promise<void> => {
       if (!lane.client) throw new Error(`the lane ${lane.id} has no upstream connection`);
-      lane.session = new LaneSession({ lane: lane.id, client: lane.client, notes: lane.notes, pageCode: new UpstreamPageCode(lane.client) });
+      lane.session = new LaneSession({ lane: lane.id, client: lane.client, notes: lane.notes, pageCode: new UpstreamPageCode(lane.client), outputDir: lane.outputDir ?? output });
       const context = lane.context;
       if (!context) return;
       await pageScripts.install(lane.id, context);
@@ -347,14 +354,7 @@ function maskFiles(files: readonly string[], logger: Logger): void {
   }
 }
 
-// A file name of the agent must be in the output folder. A relative name is relative to it.
-// Give the absolute path, or undefined if the file is outside.
-export function fileInOutput(outputDir: string, name: string): string | undefined {
-  const file = path.resolve(outputDir, name);
-  const relative = path.relative(outputDir, file);
-  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
-  return file;
-}
+export { fileInOutput };
 
 // The URL that a call opens, if the arguments give it.
 function targetUrl(name: string, args: ToolArgs | undefined): string | undefined {
@@ -598,10 +598,35 @@ export class CallPipeline {
         }
       }
     }
+    const empty = findEmptySnapshot(raw, { cwd: this.cwd, outputDir: this.outputDir });
+    if (empty) {
+      const again = await this.takeSnapshotAgain(lane, name, args, empty.file);
+      if (again) {
+        raw = replaceSections(raw, again, SNAPSHOT_SECTIONS);
+        const last = pageUrlOf(raw);
+        if (last && last !== lane.pageUrl) {
+          const lastCheck = await checkPage(last);
+          if (!lastCheck.allowed) return this.blockedResult(lane, name, last, lastCheck, true);
+        }
+      }
+    }
     const files = this.writtenFiles(raw, started);
     values.scrubFiles(files);
     maskFiles(files, logger);
-    return forClient(maskResult(values.scrub(raw)));
+    return storeResult(forClient(maskResult(values.scrub(raw))), { laneDir: lane.outputDir, cwd: this.cwd, outputDir: this.outputDir });
+  }
+
+  // The page was blank at the snapshot, e.g. a page that loads itself again: wait until the page
+  // settles, then take the snapshot one more time, into the same file (REQ-014d).
+  private async takeSnapshotAgain(lane: LaneSession, name: string, args: ToolArgs | undefined, file: string | undefined): Promise<CallToolResult | undefined> {
+    const settled = await lane.pageCode.run(settlePage, { wait: PEEK_WAIT, quiet: SETTLE_QUIET, interval: POLL_INTERVAL }).catch((error: unknown) => {
+      this.logger.debug('settle_error', { tool: name, message: errorMessage(error) });
+      return false;
+    });
+    const again = name === 'browser_snapshot' ? args ?? {} : file === undefined ? {} : { filename: file };
+    const result = await lane.client.callTool({ name: 'browser_snapshot', arguments: again }, undefined, { timeout: TOOL_TIMEOUT }) as CallToolResult;
+    this.logger.info('snapshot_again', { tool: name, settled, isError: Boolean(result.isError) });
+    return result.isError ? undefined : result;
   }
 
   // The files of a call: each file link in the result, and each file of the output folder that

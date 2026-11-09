@@ -394,7 +394,12 @@ Claude Code chat, a Codex session, a Kilo window) has its own server and render 
   server keeps it only for the hosts of `hosts.json`.
 
 - **File names:** the `filename` of a tool must be in the output folder. A name without a folder
-  goes there. An other path gives an error.
+  goes there. An other path gives an error. The file stays after the lane closes.
+- **Result files:** each snapshot, and each result with more than 4000 characters, is in a file in
+  `output/lanes/<pid>-<lane id>/`. The result gives the path, the line count and the character
+  count. The lane close deletes the folder.
+- **Empty snapshot:** the server waits until the page settles, a maximum of 3 s, and takes one
+  more snapshot.
 - **Headers:** the values of `Cookie`, `Set-Cookie`, `Authorization` and `Proxy-Authorization`
   become `***` in the results and in the output files.
 

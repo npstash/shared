@@ -77,6 +77,11 @@ export function outputDir(cwd: string = process.cwd()): string {
   return path.join(cwd, '.local_assets', 'browser-automation-x-mcp', 'output');
 }
 
+// The folders of the output files of the lanes: <pid>-<lane id> in this folder.
+export function laneOutputRoot(output: string): string {
+  return path.join(output, 'lanes');
+}
+
 // The variables of Playwright MCP in env. The server does not use them.
 export function ignoredVariables(env: Env = process.env): string[] {
   return Object.keys(env).filter((key) => key.startsWith('PLAYWRIGHT_MCP_')).sort();

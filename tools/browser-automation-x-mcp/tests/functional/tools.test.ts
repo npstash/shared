@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import type { LaneClient, ServerClient, TestSite } from '../helpers.ts';
-import { call, evaluate, LANE_TOOL_NAMES, readLog, ref, startServerClient, startSite } from '../helpers.ts';
+import { call, evaluate, LANE_TOOL_NAMES, readLog, ref, startServerClient, startSite, takeSnapshot } from '../helpers.ts';
 
 describe('tools', () => {
   let site: TestSite;
@@ -63,7 +63,7 @@ describe('tools', () => {
     const text = await call(client, 'browser_navigate', { url: `${site.url}/` });
     assert.match(text, /Page Title: Fixture home/);
 
-    const snapshot = await call(client, 'browser_snapshot');
+    const snapshot = await takeSnapshot(client);
     assert.match(snapshot, /heading "Fixture home"/);
     assert.match(snapshot, /Test pages of the server/);
 
@@ -156,7 +156,7 @@ describe('logging of secrets', () => {
     const mcp = await startServerClient({ name: `secrets-${env.BROWSER_AUTOMATION_X_MCP_LOG_SECRETS ?? 'default'}`, env });
     try {
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/form.html` });
-      const snapshot = await call(mcp.client, 'browser_snapshot');
+      const snapshot = await takeSnapshot(mcp.client);
       await call(mcp.client, 'browser_type', { target: ref(snapshot, 'textbox', 'Password'), element: 'Password', text: secret });
       await call(mcp.client, 'browser_fill_form', {
         fields: [{ name: 'Email', type: 'textbox', target: ref(snapshot, 'textbox', 'Email'), value: secret }],

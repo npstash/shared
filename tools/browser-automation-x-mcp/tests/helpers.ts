@@ -331,6 +331,18 @@ export async function callText(client: LaneClient, name: string, args: Record<st
   return { text, isError: Boolean(result.isError) };
 }
 
+// The text of the snapshot file of a result.
+export function snapshotText(text: string): string {
+  const link = text.match(/\[Snapshot\]\((.+?)\)/)?.[1];
+  if (link === undefined) throw new Error(`no snapshot file in:\n${text}`);
+  return fs.readFileSync(path.resolve(TOOL_DIR, link), 'utf8');
+}
+
+// Take a snapshot. Give the text of its file.
+export async function takeSnapshot(client: LaneClient): Promise<string> {
+  return snapshotText(await call(client, 'browser_snapshot'));
+}
+
 // Find the ref of an element in a snapshot, e.g. ref(snapshot, 'textbox', 'Email').
 export function ref(snapshot: string, role: string, name: string): string {
   const pattern = new RegExp(`- ${role} "${escapeRegExp(name)}"[^\\n]*\\[ref=(\\w+)\\]`);

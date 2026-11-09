@@ -7,7 +7,7 @@ import { after, before, describe, test } from 'node:test';
 import type { ElicitRequest } from '@modelcontextprotocol/sdk/types.js';
 import { DANGEROUS_TOOLS } from '../../playwright/src/mcp-server.ts';
 import type { ServerClient, TestForm, TestNode, TestSite } from '../helpers.ts';
-import { call, callText, evaluate, readLog, ref, startServerClient, startSite } from '../helpers.ts';
+import { call, callText, evaluate, readLog, ref, startServerClient, startSite, snapshotText, takeSnapshot } from '../helpers.ts';
 
 let site: TestSite;
 before(async () => { site = await startSite(); });
@@ -79,7 +79,7 @@ describe('host access', () => {
       assert.equal(await evaluate(mcp.client, '() => location.href'), 'about:blank');
 
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/link?to=${target}` });
-      const snapshot = await call(mcp.client, 'browser_snapshot');
+      const snapshot = await takeSnapshot(mcp.client);
       const clicked = await callText(mcp.client, 'browser_click', { target: ref(snapshot, 'link', 'Go there'), element: 'link' });
       assert.equal(clicked.isError, true);
       assert.equal(await evaluate(mcp.client, '() => location.href'), 'about:blank');
@@ -147,12 +147,13 @@ describe('form fill', () => {
 
     // The result is the page after the submit. The values source is not masked.
     assert.match(text, /Page Title: Submitted/);
-    assert.match(text, /Anna Nowak/);
-    assert.match(text, /\*\*\*/);
+    const page = snapshotText(text);
+    assert.match(page, /Anna Nowak/);
+    assert.match(page, /\*\*\*/);
     assert.doesNotMatch(text, /Ran Playwright code|Playwright/);
     const shown = await evaluate(mcp.client, `() => JSON.parse(document.getElementById('result').textContent)`) as { password: string };
     assert.equal(shown.password, '***');
-    for (const output of [text, fs.readFileSync(mcp.logFile, 'utf8')]) {
+    for (const output of [text, page, fs.readFileSync(mcp.logFile, 'utf8')]) {
       for (const secret of [USERNAME, PASSWORD]) assert.ok(!output.includes(secret), `"${secret}" is visible`);
     }
     // The learned form has no submit: the heuristic classifier gives the button of the form.
@@ -167,7 +168,7 @@ describe('form fill', () => {
     assert.equal(site.submissions.length, before + 1);
     assert.deepEqual(site.submissions.at(-1), { user: USERNAME, pass: PASSWORD });
     assert.match(text, /Page Title: Login/);
-    await call(mcp.client, 'browser_snapshot');
+    await takeSnapshot(mcp.client);
     assert.equal(site.submissions.length, before + 1);
     assert.ok(readLog(mcp.logFile).some((entry) => entry.event === 'fill_failed'));
   });
@@ -286,7 +287,7 @@ describe('discovery recorder', () => {
       // The agent types into the note field. The page then acts as the user: it fills the
       // username and clicks Send, without a call of the agent.
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html` });
-      const snapshot = await call(mcp.client, 'browser_snapshot');
+      const snapshot = await takeSnapshot(mcp.client);
       await call(mcp.client, 'browser_type', { target: ref(snapshot, 'textbox', 'Note'), element: 'Note', text: 'hello' });
       await call(mcp.client, 'browser_navigate', { url: `${site.url}/user-step.html?user=1` });
       const calls = readLog(mcp.logFile).filter((entry) => entry.event === 'tool_call').length;

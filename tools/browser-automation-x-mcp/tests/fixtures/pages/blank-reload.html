@@ -1,0 +1,11 @@
+<!doctype html>
+<title>Blank reload</title>
+<script>
+  if (sessionStorage.getItem('reloaded')) {
+    addEventListener('DOMContentLoaded', () => { document.body.innerHTML = '<h1>After the reload</h1>'; });
+  } else {
+    sessionStorage.setItem('reloaded', '1');
+    setTimeout(() => location.reload(), 400);
+  }
+</script>
+<body></body>

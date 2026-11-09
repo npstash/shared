@@ -19,6 +19,7 @@ export interface LaneSessionOptions {
   readonly client: Client;
   readonly notes: string[];
   readonly pageCode: PageCode;
+  readonly outputDir: string;
 }
 
 export class LaneSession {
@@ -28,14 +29,17 @@ export class LaneSession {
   // The notes for the next result of the lane, e.g. a refused approval.
   readonly notes: string[];
   readonly pageCode: PageCode;
+  // The folder of the output files of the lane.
+  readonly outputDir: string;
   // The URL of the current page.
   pageUrl: string | undefined = undefined;
   readonly fillState: FillState = { attempts: new Set(), failed: new Set(), waitedUrl: undefined, loginClicked: new Set() };
 
-  constructor({ lane, client, notes, pageCode }: LaneSessionOptions) {
+  constructor({ lane, client, notes, pageCode, outputDir }: LaneSessionOptions) {
     this.lane = lane;
     this.client = client;
     this.notes = notes;
     this.pageCode = pageCode;
+    this.outputDir = outputDir;
   }
 }
