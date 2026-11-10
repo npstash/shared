@@ -68,7 +68,7 @@ flowchart TD
 flowchart TD
     C[MCP client] -->|MCP, stdio| F
     subgraph S[browser-automation-x-mcp]
-        L[Launcher<br/><i>run.sh / run.bat, playwright/src/setup/syslibs.ts</i>] -->|starts: run.sh --config-dir DIR| F[Server process<br/><i>Node.js, MCP SDK</i>]
+        L[Launcher<br/><i>run.sh, playwright/src/setup/syslibs.ts</i>] -->|starts: run.sh --config-dir DIR| F[Server process<br/><i>Node.js, MCP SDK</i>]
         F -->|MCP, in memory, one for each lane| M[Playwright MCP<br/><i>in the server process</i>]
         F -->|launches one for each lane| B[Chromium<br/><i>downloaded browser, lane profile</i>]
         M -->|CDP, pipe| B
@@ -228,7 +228,7 @@ the objects. No mutable state is at module level. The state of one lane for the 
 
 ### 5.2 Launcher
 
-- **`run.sh` / `run.bat`:** steps 1–4: Node.js (checksum), npm packages (when
+- **`run.sh`:** steps 1–4: Node.js (checksum), npm packages (when
   `package-lock.json` changes), Chromium (for each Playwright version), Linux libraries.
 - **`playwright/src/setup/syslibs.ts`:** `ldd` → soname → package (Debian rule and an exception table) →
   `apt-get download` → `dpkg-deb -x`, in rounds; private apt lists if the system has none; fonts;

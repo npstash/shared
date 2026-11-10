@@ -6,7 +6,7 @@
 # 3. links: link each skills/[claude/]<name>/ and <folder>/skills/[claude/]<name>/ into .claude/skills/. A parent
 #    setup gives --nested to a submodule: then only the parent's .claude/skills/ gets links.
 # The same verbs then run in each submodule.
-# Keep the same as setup.bat and as the copies in the other repositories.
+# Keep the same as the copies in the other repositories.
 set -eu
 cd "$(dirname "$0")"
 

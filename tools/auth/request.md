@@ -109,7 +109,7 @@ Decisions, all confirmed by the user:
 - **Backups** go to `.local_assets/` of the tool folder, not the vault home.
 - **Hook.** `.githooks/pre-commit` is committed in the vault repository. It uses only `sh`
   and `awk`, so it needs no Python and does not depend on where this tool is. Tests keep it
-  in agreement with `exposed_secrets()`. `setup.sh` / `setup.bat` turn it on per clone.
+  in agreement with `exposed_secrets()`. `setup.sh` turns it on per clone.
   `install-hook` and `check-staged` are gone.
 
 ## Clone keys

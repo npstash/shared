@@ -55,7 +55,7 @@ from typing import Mapping
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that create-vault puts next to a new vault
-SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # create-vault copies them too
+SETUP = [TOOL.parents[1] / "setup.sh"]   # create-vault copies it too
 RECIPIENTS = "recipients"             # public keys and wrapped master keys
 LOG = "access.log"                    # in the vault home, gitignored
 EDIT = "entry-*.json"                 # edit files in the vault home, gitignored

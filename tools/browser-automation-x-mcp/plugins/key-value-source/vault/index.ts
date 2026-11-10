@@ -1,5 +1,5 @@
 // Key-value-source "vault" (REQ-034 of sdd/SRS.md): the secrets of a vault (shared/tools/auth),
-// through its run.sh / run.bat.
+// through its run.sh.
 //
 //   "config": { "vault": "vault-<name>", "file": "<file in the config folder>" }
 //
@@ -47,7 +47,7 @@ export default class VaultSource implements KeyValueSource {
     this.vaultName = vault;
     this.file = pluginFile(context, 'file');
     const tool = process.env.BROWSER_AUTOMATION_X_MCP_VAULT_TOOL || VAULT_TOOL;
-    this.tool = process.platform === 'win32' ? tool.replace(/\.sh$/, '.bat') : tool;
+    this.tool = tool;
     // A missing file is a new empty file.
     if (mtimeOf(this.file) === undefined) writeObject(this.file, { hosts: {} });
   }
@@ -65,9 +65,8 @@ export default class VaultSource implements KeyValueSource {
   }
 
   private async vault(args: readonly string[]): Promise<string> {
-    const [command, prefix] = process.platform === 'win32' ? ['cmd', ['/c', this.tool]] : [this.tool, []];
     try {
-      const { stdout } = await run(command, [...prefix, '--vault', this.vaultName, ...args], { maxBuffer: 1024 * 1024, windowsHide: true });
+      const { stdout } = await run(this.tool, ['--vault', this.vaultName, ...args], { maxBuffer: 1024 * 1024 });
       return stdout;
     } catch (error) {
       // stderr of the vault tool has no secret values.

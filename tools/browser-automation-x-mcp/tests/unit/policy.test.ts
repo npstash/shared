@@ -439,10 +439,9 @@ describe('vault source', () => {
 
 // The fake vault cannot see a change of the real vault tool. This test compares the commands.
 describe('vault tool contract', () => {
-  const tool = path.resolve(TOOL_DIR, '..', 'auth', process.platform === 'win32' ? 'run.bat' : 'run.sh');
+  const tool = path.resolve(TOOL_DIR, '..', 'auth', 'run.sh');
   const help = (...args: string[]): string => {
-    const [command, prefix]: [string, string[]] = process.platform === 'win32' ? ['cmd', ['/c', tool]] : [tool, []];
-    return execFileSync(command, [...prefix, ...args], { encoding: 'utf8', windowsHide: true });
+    return execFileSync(tool, args, { encoding: 'utf8' });
   };
 
   test('the vault tool has the options and commands of the vault provider', { skip: !fs.existsSync(tool) && `no vault tool at ${tool}` }, () => {

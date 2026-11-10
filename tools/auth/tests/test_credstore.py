@@ -889,7 +889,7 @@ def test_the_api_needs_the_vault_home():
 
 def test_create_vault_writes_an_empty_vault(home):
     for name in ("master.enc.key", "admin.enc.key", "admin.pub", "vault.json", ".gitignore", ".gitattributes",
-                 ".githooks/pre-commit", "setup.sh", "setup.bat"):
+                 ".githooks/pre-commit", "setup.sh"):
         assert (home / name).is_file(), name
     assert {"clone.*.key", "access.log", "entry-*.json"} <= set((home / ".gitignore").read_text().splitlines())
     assert vault_doc(home) == {"format": 2, "entries": {}}

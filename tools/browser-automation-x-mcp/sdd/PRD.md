@@ -22,7 +22,7 @@ table of section 7. They have no GitHub Issues yet.
 
 - **Main users:** AI agents in Claude Code (VSCode extension, CLI, Desktop app) and in wrappers
   with the Claude Agent SDK. The person who configures the server.
-- **Personas / segments:** A developer on Windows or WSL. A wrapper that runs on Ubuntu Server or
+- **Personas / segments:** A developer on WSL or Linux. A wrapper that runs on Ubuntu Server or
   on GitHub runners.
 - **Key needs:** The same tools as Playwright MCP. No root and no OS installs. Form values from
   a vault, a file or the user, never from the agent. Control of dangerous tools and of hosts.
@@ -32,7 +32,7 @@ table of section 7. They have no GitHub Issues yet.
 
 | Metric | Current state | Target |
 | :-: | :-: | :-: |
-| Hosts where `run.sh test` passes without root | WSL Ubuntu 24.04, Windows 11 | Also Ubuntu 22.04/24.04 Server and minimal images (QAS-001) |
+| Hosts where `run.sh test` passes without root | WSL Ubuntu 24.04 | Also Ubuntu 22.04/24.04 Server and minimal images (QAS-001) |
 | Resolved form values in results or log | 0 in the tests | 0 (QAS-002) |
 | Calls of disabled tools that reach Playwright MCP | 0 in the tests | 0 (QAS-004) |
 
@@ -41,7 +41,7 @@ table of section 7. They have no GitHub Issues yet.
 ### In scope
 
 - A stdio MCP server that forwards the tools of Playwright MCP.
-- Launchers for Linux, macOS and Windows with a pinned Node.js, Chromium and missing Linux
+- A launcher for Linux and macOS with a pinned Node.js, Chromium and missing Linux
   libraries, all in the tool folder.
 - Tool switches in a committed config file.
 - An automatic fill and submit of the fields that plugins find on a page, with values from

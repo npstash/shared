@@ -86,7 +86,7 @@ describe('renderMode', () => {
   const display = { DISPLAY: ':0' };
 
   test('gives HEADLESS only from the setting', () => {
-    for (const platform of ['linux', 'win32', 'darwin'] as const) assert.equal(mode('HEADLESS', { platform }), 'HEADLESS');
+    for (const platform of ['linux', 'darwin'] as const) assert.equal(mode('HEADLESS', { platform }), 'HEADLESS');
     for (const value of [undefined, 'DEFAULT', 'HEADED', 'HEADED_INVISIBLE']) assert.notEqual(mode(value, display), 'HEADLESS');
   });
 
@@ -97,20 +97,18 @@ describe('renderMode', () => {
     assert.equal(mode('DEFAULT', { WAYLAND_DISPLAY: 'wayland-0' }), 'HEADED');
   });
 
-  test('gives HEADED by default on Windows and macOS', () => {
-    assert.equal(mode(undefined, { platform: 'win32' }), 'HEADED');
+  test('gives HEADED by default on macOS', () => {
     assert.equal(mode('DEFAULT', { platform: 'darwin' }), 'HEADED');
   });
 
   test('gives HEADED with a display, also on WSL, else HEADED_INVISIBLE', () => {
     assert.equal(mode('HEADED', { ...display, wsl: true }), 'HEADED');
-    assert.equal(mode('HEADED', { platform: 'win32' }), 'HEADED');
+    assert.equal(mode('HEADED', { platform: 'darwin' }), 'HEADED');
     assert.equal(mode('HEADED'), 'HEADED_INVISIBLE');
   });
 
   test('gives HEADED_INVISIBLE on Linux, else stops', () => {
     assert.equal(mode('HEADED_INVISIBLE', display), 'HEADED_INVISIBLE');
-    assert.throws(() => mode('HEADED_INVISIBLE', { platform: 'win32' }), /needs Xvfb/);
     assert.throws(() => mode('HEADED_INVISIBLE', { platform: 'darwin' }), /needs Xvfb/);
   });
 
@@ -198,7 +196,7 @@ describe('storage state', () => {
     assert.equal(filtered.origins[1].localStorage[0].value, '1');
   });
 
-  test('writes the file with mode 0600; a missing or damaged file gives an empty state', { skip: process.platform === 'win32' }, () => {
+  test('writes the file with mode 0600; a missing or damaged file gives an empty state', () => {
     const file = path.join(ASSETS_DIR, 'test-unit', 'state', 'state.json');
     fs.rmSync(path.dirname(file), { recursive: true, force: true });
     assert.deepEqual(loadState(file), { cookies: [], origins: [] });
@@ -304,7 +302,7 @@ describe('writeChromePrefs', () => {
 });
 
 describe('tmpDirForChromium', () => {
-  test('skips a folder with a socket path that is too long', { skip: process.platform === 'win32' }, async () => {
+  test('skips a folder with a socket path that is too long', async () => {
     const long = path.join(ASSETS_DIR, 'test-unit', 'x'.repeat(120));
     const short = path.join(ASSETS_DIR, 'test-unit', 'short');
     const expected = short.length + 45 <= 107 ? short : undefined;
@@ -312,7 +310,7 @@ describe('tmpDirForChromium', () => {
     assert.equal(await tmpDirForChromium([long]), undefined);
   });
 
-  test('gives the tool folder first if it can hold the socket', { skip: process.platform === 'win32' || TMP_DIR.length + 45 > 107 }, async () => {
+  test('gives the tool folder first if it can hold the socket', { skip: TMP_DIR.length + 45 > 107 }, async () => {
     assert.equal(await tmpDirForChromium(), TMP_DIR);
   });
 });

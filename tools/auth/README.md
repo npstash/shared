@@ -20,7 +20,7 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 | `entry-<ID>.json` | no | Edit file of one entry. See "Edit". |
 | `access.log` | no | One line for each secret given out, key operation and failed open. |
 | `.githooks/pre-commit` | yes | Stops a commit of an edit file, a key file and the log. Needs only `sh`. |
-| `setup.sh`, `setup.bat` | yes | Turn the hook on in a clone: `git config core.hooksPath .githooks`. |
+| `setup.sh` | yes | Turn the hook on in a clone: `git config core.hooksPath .githooks`. |
 
 ## Entries
 
@@ -202,3 +202,17 @@ Each call writes a line into `access.log`: the entry ID, the secrets, the key
 (`clone-key:<name>:<plain|provider>`) and the file name of the calling script.
 
 Tests: `run.sh test`. The hook tests need `sh` and `awk`.
+
+### Verified fake
+
+Use `credstore_fake` in the unit tests of the code that reads the vault (rule tests-and-ci). It has
+the read side of `credstore`: `get_credential`, `Store.get_credential` and `Credential`. It keeps
+the systems in memory and writes no files. Use `Store.set_system` to add the test data.
+
+```python
+import credstore_fake
+credstore_fake.Store(home).set_system("API 01", secrets={"token": "t"})
+```
+
+`tests/test_credstore_contract.py` runs each case against `credstore` and against the fake. When
+the read side of `credstore` changes, change the fake too.

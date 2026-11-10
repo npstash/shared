@@ -34,7 +34,7 @@ show the difference and ask the user.
 | `.gitattributes` | [templates/gitattributes](templates/gitattributes) |
 | `.kilo/kilo.jsonc` | [templates/kilo.jsonc](templates/kilo.jsonc) |
 | `.continueignore` | [templates/continueignore](templates/continueignore) |
-| `setup.sh`, `setup.bat` | copy of `shared/setup.sh` and `shared/setup.bat` |
+| `setup.sh` | copy of `shared/setup.sh` |
 | `.github/workflows/tests.yml` | copy of `shared/.github/workflows/tests.yml` |
 | `projects/`, `vaults/` | empty folders; add a `.gitkeep` |
 
@@ -46,7 +46,7 @@ show the difference and ask the user.
 
 ## 4. Finish
 
-1. Run `setup.sh` (or `setup.bat`).
+1. Run `setup.sh`.
 2. Give the list of the created items, and the items that the user must decide.
 3. To create a vault, tell the user to use the vault tool, `shared/tools/auth`. Do not create one.
 4. Commit only as the branching rule of the repository says.

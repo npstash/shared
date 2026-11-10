@@ -8,8 +8,8 @@ agents.
 
 ### Rules
 - **deliverables-only** — commit only what you cannot regenerate. @rules/deliverables-only.md
-- **per-project-runtimes** — runtime in the project folder, launched by `run.sh` / `run.bat`. @rules/per-project-runtimes.md
-- **tests-and-ci** — tests per project, `run.sh test`, CI finds them. @rules/tests-and-ci.md
+- **per-project-runtimes** — runtime in the project folder, launched by `run.sh`. @rules/per-project-runtimes.md
+- **tests-and-ci** — tests in `tests/`, only `.local_assets`, verified fakes, CI checks out the listed repositories. @rules/tests-and-ci.md
 - **credentials-from-vault** — secrets only from the vault, by the names that the user gives; `git` and `gh` can also use other sources. @rules/credentials-from-vault.md
 - **nothing-outside-repo** — write files only inside the repository. @rules/nothing-outside-repo.md
 - **simplified-english** — repository text in STE (ASD-STE100), brief. @rules/simplified-english.md
@@ -39,4 +39,4 @@ agents.
 - **claude/cowork-cloud-sessions** — in a Cowork cloud session use the GitHub REST API. @rules/claude/cowork-cloud-sessions.md
 
 ## Setup
-- [setup.sh](setup.sh) / [setup.bat](setup.bat) — check out submodules, turn on `.githooks/`, link skills. Each repository has a copy.
+- [setup.sh](setup.sh) — check out submodules, turn on `.githooks/`, link skills. Each repository has a copy.

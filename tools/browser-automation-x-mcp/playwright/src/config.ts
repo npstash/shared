@@ -155,11 +155,6 @@ const MAX_SOCKET_PATH = process.platform === 'darwin' ? 103 : 107;
 // path is too long, or if its file system cannot hold a socket, e.g. a Windows drive in WSL
 // (/mnt/c). Without a correct folder, Chromium stops with SIGABRT or SIGTRAP.
 export async function tmpDirForChromium(candidates: readonly string[] = [TMP_DIR, REPO_TMP_DIR]): Promise<string | undefined> {
-  if (process.platform === 'win32') {
-    const first = candidates[0];
-    if (first) fs.mkdirSync(first, { recursive: true });
-    return first;
-  }
   for (const dir of [...new Set(candidates)]) {
     if (dir.length + CHROMIUM_SOCKET_SUFFIX > MAX_SOCKET_PATH) continue;
     if (await holdsSocket(dir)) return dir;

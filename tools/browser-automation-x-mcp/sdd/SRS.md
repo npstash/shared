@@ -68,7 +68,7 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
 
 #### REQ-010 — Pinned Node.js runtime
 
-- **Trigger:** The user runs `run.sh` or `run.bat`.
+- **Trigger:** The user runs `run.sh`.
 - **Basic Flow:** The launcher shall download Node.js NODE_VERSION (v24.22.1) into the tool folder
   and check its SHA-256 checksum.
 - **Alternative Flow:** The runtime is in the tool folder → the launcher uses it.
@@ -782,7 +782,7 @@ The ask provider is removed.
 | --- | --- | --- | --- | --- |
 | APPROVAL_TIMEOUT | 15000 | ms | — | Maximum time of one approval of an approval plugin |
 | TOOL_TIMEOUT | 600000 | ms | — | Maximum time of one call without progress |
-| NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` / `run.bat` | Pinned Node.js runtime |
+| NODE_VERSION | v24.22.1 | — | `NODE_VERSION` in `run.sh` | Pinned Node.js runtime |
 | RENDER_MODE | DEFAULT | — | `RENDER_MODE` | `DEFAULT`, `HEADED`, `HEADED_INVISIBLE` or `HEADLESS` (REQ-015) |
 | BROWSER | chromium | — | — | The only browser |
 | SYSLIBS_ROUNDS | 10 | rounds | — | Maximum download rounds of the missing libraries |

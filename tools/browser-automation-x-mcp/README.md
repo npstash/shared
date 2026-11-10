@@ -23,7 +23,7 @@ MCP client (Claude Code) <-stdio-> server: one Playwright MCP connection for eac
 ## Structure
 
 ```
-run.sh run.bat                launcher of the server and its runtime
+run.sh                        launcher of the server and its runtime
 package.json                  Node.js packages; the dev packages are for the tests only
 tsconfig.json eslint.config.ts   type check and lint (static analysis)
 config/                       templates of the config files
@@ -40,7 +40,6 @@ sdd/                          documents of the tool
 ./run.sh install                           # make the runtime, install the browser, then stop
 ./run.sh --config-dir <DIR>                # start the server (MCP server on stdio)
 ./run.sh test [phase...]                   # run the test phases: all, or e.g. "unit"
-run.bat install                            # the same on Windows
 ```
 
 - Do `install` one time before you add the server to a client. The first install downloads
@@ -48,9 +47,9 @@ run.bat install                            # the same on Windows
 - `--config-dir` is necessary. A relative path is relative to the working folder. See
   [Config folder](#config-folder). The server takes no other argument: an other argument stops it
   with an error.
-- `run.sh` and `run.bat` download a pinned Node.js into `.local_assets/runtime/`. The Node.js of
+- `run.sh` downloads a pinned Node.js into `.local_assets/runtime/`. The Node.js of
   the system stays unchanged.
-- `run.sh` supports Linux and macOS (x64, arm64). `run.bat` supports Windows (x64, arm64).
+- `run.sh` supports Linux and macOS (x64, arm64).
 - stdout is the MCP channel. The launchers write their messages to stderr.
 
 ## Client setup
@@ -65,11 +64,8 @@ entry in `.kilo/kilo.jsonc`.
 | Claude Code runs in | `command` | `args` |
 | --- | --- | --- |
 | Linux, macOS, WSL | `<TOOL>/run.sh` | `["--config-dir", "<DIR>"]` |
-| Windows (native) | `cmd` | `["/c", "<TOOL>\\run.bat", "--config-dir", "<DIR>"]` |
-| Windows, browser in WSL | `wsl.exe` | `["<TOOL in WSL>/run.sh", "--config-dir", "<DIR>"]` |
 
-`<TOOL>` is the path of this folder. A client cannot start a `.bat` file directly on Windows. Use
-`cmd /c`.
+`<TOOL>` is the path of this folder.
 
 - **`.mcp.json` (project):** Claude Code asks for an approval at the first start, or
   `enabledMcpjsonServers` in `.claude/settings.json` approves it.
@@ -91,8 +87,6 @@ entry in `.kilo/kilo.jsonc`.
   Check with `claude mcp list`. In a session, `/mcp` shows the state.
 - **VSCode:** the extension uses the configuration of the CLI. If VSCode runs in WSL, run
   `claude mcp add` in the WSL terminal and use `run.sh`.
-- **Native Windows:** the root `.mcp.json` has `run.sh`. Add the server in the local scope, which
-  wins over the project scope: `claude mcp add --scope local browser-automation-x-mcp -- cmd /c <TOOL>\run.bat --config-dir <DIR>`.
 - **Desktop app (Code tab):** uses the configuration of Claude Code on the same computer.
 - **Agent SDK:** give the server in `mcp_servers` / `mcpServers` of the options, and allow
   `mcp__browser-automation-x-mcp__*`. Sessions can run at the same time: each one uses its own
@@ -120,7 +114,7 @@ a `client_ready` entry and a `tool_call` entry for `browser_navigate`.
 
 | Symptom | Cause and correction |
 | --- | --- |
-| The server does not start, or it fails at the first start | The install takes too long. Run `run.sh install` or `run.bat install` first. |
+| The server does not start, or it fails at the first start | The install takes too long. Run `run.sh install` first. |
 | `error while loading shared libraries` in the log | Linux: a library has no package. See [Linux: libraries and fonts](#linux-libraries-and-fonts). |
 | `unknown argument` | The server takes only `--config-dir`. Remove the other arguments. |
 | No window opens | On WSL and without a display, the default is `HEADED_INVISIBLE`. Set `RENDER_MODE=HEADED`. The window opens with the first lane and closes with the last lane. On WSLg it can open behind the editor. |
@@ -460,7 +454,7 @@ The server takes only `--config-dir`. It ignores each `PLAYWRIGHT_MCP_*` variabl
   the server uses `.local_assets/tmp/` of the first folder with `.git` above this tool (in a
   submodule: the submodule, e.g. `shared/`), else the temp folder of the OS. It logs
   `tmp_dir_fallback`.
-- On Windows and macOS, Playwright writes a registry of the open browsers into the cache folder of
+- On macOS, Playwright writes a registry of the open browsers into the cache folder of
   the user. The server cannot move it.
 
 ## Logs

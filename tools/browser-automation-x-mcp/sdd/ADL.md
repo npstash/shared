@@ -198,3 +198,4 @@ The log of the decisions that change the design. Format and rules:
 - 20261109-04 Nestor 6a9e379704ad A file with a filename of the agent stays in OUTPUT_DIR after the lane closes
 - 20261109-05 Nestor 6a9e379704ad For an empty snapshot, the server waits until the page settles and takes one more snapshot into the same file
 - 20261109-06 Nestor 6a9e379704ad The server writes the result files after the scrub of masked values
+- 20261110-01 Nestor 911895ab3a9e Support only Linux and macOS; remove the Windows launcher and the Windows code paths

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 export const TOOL_DIR: string = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ASSETS_DIR: string = path.join(TOOL_DIR, '.local_assets');
-export const PLATFORM: string = `${process.platform === 'win32' ? 'win' : process.platform}-${process.arch}`;
+export const PLATFORM: string = `${process.platform}-${process.arch}`;
 
 const require = createRequire(import.meta.url);
 export const VERSION: string = (require('../package.json') as { version: string }).version;

@@ -1,5 +1,5 @@
-// Run the test phases (section "Verification" of the SDD workflow). run.sh test and run.bat test
-// start this script.
+// Run the test phases (section "Verification" of the SDD workflow). run.sh test
+// starts this script.
 //   node tests/run-phases.ts            all phases, in order
 //   node tests/run-phases.ts <phase>... the given phases only, e.g. "unit"
 // A failure does not stop the run. The exit code is 1 if a test failed.
