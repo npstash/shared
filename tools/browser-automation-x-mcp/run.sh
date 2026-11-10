@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# Launcher of the browser tool facades. Each facade is an MCP server on stdio.
-#   run.sh <facade> [args]   start a facade, e.g. "run.sh playwright --isolated"
-#   run.sh install           make the runtime and install the browsers, then stop
-#   run.sh test              run the tests of the shared parts and of each facade
-# A facade is a folder with src/server.js (e.g. playwright/).
+# Launcher of the MCP server browser-automation-x-mcp on stdio.
+#   run.sh [args]     start the server, e.g. "run.sh --config-dir DIR"
+#   run.sh install    make the runtime and install the browser, then stop
+#   run.sh test [phase...]  run the test phases: all, or the given ones (static, unit, functional, online)
 # stdout is the MCP channel. Send all setup output to stderr.
 set -euo pipefail
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,16 +42,25 @@ export PATH="$node_dir/bin:$PATH"
 export npm_config_cache="$assets/npm-cache"
 export PLAYWRIGHT_BROWSERS_PATH="${PLAYWRIGHT_BROWSERS_PATH:-$assets/browsers/$platform}"
 
-# 2. Node.js packages in node_modules/, again when package-lock.json changes.
-if ! cmp -s "$dir/package-lock.json" "$dir/node_modules/.facade-lock" 2>/dev/null; then
+# 2. Node.js packages in node_modules/, again when package-lock.json changes. The dev packages
+#    (type check, lint) only for "run.sh test". A full install is also good for a start.
+lock_stamp="$dir/node_modules/.bax-lock"
+omit=(--omit=dev)
+if [[ "${1:-}" == "test" ]]; then
+    lock_stamp="$dir/node_modules/.bax-lock-dev"
+    omit=()
+fi
+if ! cmp -s "$dir/package-lock.json" "$lock_stamp" 2>/dev/null; then
     echo "run.sh: install the Node.js packages" >&2
-    (cd "$dir" && npm ci --no-audit --no-fund --loglevel=error) >&2
-    cp "$dir/package-lock.json" "$dir/node_modules/.facade-lock"
+    (cd "$dir" && npm ci ${omit[@]+"${omit[@]}"} --no-audit --no-fund --loglevel=error) >&2
+    rm -f "$dir/node_modules/.bax-lock" "$dir/node_modules/.bax-lock-dev"
+    cp "$dir/package-lock.json" "$lock_stamp"
+    [[ "$lock_stamp" == *-dev ]] && cp "$dir/package-lock.json" "$dir/node_modules/.bax-lock"
 fi
 
-# 3. Playwright facade: Chromium, again when the Playwright version changes.
+# 3. Chromium, again when the Playwright version changes.
 pw_version="$(node -p 'require(process.argv[1]).version' "$dir/node_modules/playwright-core/package.json")"
-stamp="$PLAYWRIGHT_BROWSERS_PATH/.facade-chromium-$pw_version"
+stamp="$PLAYWRIGHT_BROWSERS_PATH/.bax-chromium-$pw_version"
 if [[ ! -f "$stamp" ]]; then
     echo "run.sh: install Chromium for Playwright $pw_version" >&2
     deps=()
@@ -62,22 +70,17 @@ if [[ ! -f "$stamp" ]]; then
     touch "$stamp"
 fi
 
-# 4. Playwright facade, Linux: the libraries and fonts that Chromium needs and the host does not
-#    have, and Xvfb. No root. Change SYSLIBS_SET when syslibs.js downloads other packages.
+# 4. Linux: the libraries and fonts that Chromium needs and the host does not
+#    have, and Xvfb. No root. Change SYSLIBS_SET when syslibs.ts downloads other packages.
 SYSLIBS_SET="xvfb1"
 if [[ "$(uname -s)" == "Linux" ]]; then
     syslibs_stamp="$assets/syslibs/$platform/.ready-$pw_version-$SYSLIBS_SET"
     if [[ ! -f "$syslibs_stamp" ]]; then
-        node "$dir/playwright/src/setup/syslibs.js" >&2
+        node "$dir/playwright/src/setup/syslibs.ts" >&2
         mkdir -p "$(dirname "$syslibs_stamp")"
         touch "$syslibs_stamp"
     fi
 fi
-
-facades=()
-for server in "$dir"/*/src/server.js; do
-    facades+=("$(basename "$(dirname "$(dirname "$server")")")")
-done
 
 case "${1:-}" in
     install)
@@ -85,17 +88,9 @@ case "${1:-}" in
         ;;
     test)
         shift
-        patterns=("$dir/tests/*.test.js")
-        for facade in "${facades[@]}"; do patterns+=("$dir/$facade/tests/*.test.js"); done
-        exec node --test --test-concurrency=1 "$@" "${patterns[@]}"
+        exec node "$dir/tests/run-phases.ts" "$@"
         ;;
     *)
-        facade="${1:-}"
-        if [[ -z "$facade" || ! -f "$dir/$facade/src/server.js" ]]; then
-            echo "run.sh: give a facade: ${facades[*]}" >&2
-            exit 2
-        fi
-        shift
-        exec node "$dir/$facade/src/server.js" "$@"
+        exec node "$dir/playwright/src/server.ts" "$@"
         ;;
 esac

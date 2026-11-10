@@ -4,9 +4,8 @@
 
 ```
 AGENTS.md             root index; it imports the container indexes
-setup.sh setup.bat    set up a clone; copies of shared/setup.*
+setup.sh              set up a clone; a copy of shared/setup.sh
 .gitattributes .gitignore
-.continueignore       paths that Continue does not read
 .github/workflows/    CI; tests.yml is a copy of shared/.github/workflows/tests.yml
 .claude/              Claude Code config; skills/ holds only links that setup.sh makes
 .kilo/ .vscode/ .mcp.json   config of other agent tools and of the editor
@@ -19,7 +18,7 @@ projects/             projects and groups of projects; see "projects"
 
 - Put nothing else into the root. To add an item, ask the user and update this list.
 - Never put a skill directly into `.claude/skills/`.
-- Run `setup.sh` / `setup.bat` after each clone, and after you add or remove a skill.
+- Run `setup.sh` after each clone, and after you add or remove a skill.
 
 ## Containers
 
@@ -29,6 +28,7 @@ projects/             projects and groups of projects; see "projects"
   rules/<id>.md                   rule for all agents
   rules/<agent>/<id>.md           rule for one agent only (e.g. claude/)
   rules/<id>.<ext>                a file of a rule, e.g. reference code; the rule gives a link
+  rules/<id>/                     the files of a rule, e.g. templates; the rule gives a link
   skills/<name>/SKILL.md          skill; setup.sh links it to .claude/skills/<name>
   skills/<agent>/<name>/SKILL.md  skill for one agent only
   tools/<name>/                   tool; see "Tool and project folders"

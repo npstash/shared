@@ -157,3 +157,7 @@
 - 20261101-34 Nestor 912e5b60b971 push-enrol commits and pushes the untracked and changed files in recipients/ of each vault-* submodule of the repositories from the working folder upwards, and the submodule pointers in each repository on the walk; it runs only in a terminal
 - 20261101-35 Nestor 912e5b60b971 push-enrol commits only its own paths; it stops on a detached HEAD, a branch without upstream, or a repository behind its upstream with other changes; it rebases its commit on a newer upstream
 - 20261101-36 Nestor 912e5b60b971 The walk of push-enrol stops at a repository that does not hold the previous one as a submodule; push-enrol ignores deleted recipient files
+- 20261104-01 Nestor 598b2ac53d38 get-system finds a system by its name, its entry ID or its encrypted name; it looks for an entry ID first, then an encrypted name, then a name
+- 20261104-02 Nestor 598b2ac53d38 get-system with an entry ID or an encrypted name needs the passphrase and writes a get-system line with the entry ID to access.log
+- 20261104-03 Nestor 598b2ac53d38 list-systems prints the name, url, secret names and authority info of each system, as get-system does
+- 20261107-01 Nestor 88a4aad0d998 Remove aliases: alias_of and aliases are unknown fields of an entry

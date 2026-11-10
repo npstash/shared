@@ -1,6 +1,6 @@
 name: Tests
 
-# Keep the same in each repository: see the tests-and-ci rule.
+# Keep this file the same in each repository: see the rule tests-and-ci.
 
 on:
   push:
@@ -48,6 +48,43 @@ jobs:
     name: ${{ matrix.project }}
     steps:
       - uses: actions/checkout@v4
+
+      # The repositories that the tests of the item need: tests/repositories.txt (rule tests-and-ci).
+      # A submodule of .gitmodules, else a clone at the first path of its section in dependencies.txt.
+      - name: Check out the repositories of the tests
+        env:
+          ITEM: ${{ matrix.project }}
+          OWNER: ${{ github.repository_owner }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          list="$ITEM/tests/repositories.txt"
+          [ -f "$list" ] || exit 0
+          dependency_path() {
+            local dir="$ITEM" path
+            while :; do
+              if [ -f "$dir/dependencies.txt" ]; then
+                path=$(awk -v s="[$1]" '$0 == s {f = 1; next} /^\[/ {f = 0} f && NF && $1 !~ /^#/ {print $1; exit}' "$dir/dependencies.txt")
+                [ -n "$path" ] && { echo "$dir/$path"; return 0; }
+              fi
+              [ "$dir" = . ] && return 1
+              dir=$(dirname "$dir")
+            done
+          }
+          fail() { echo "::error::$ITEM: $1"; exit 1; }
+          while read -r name _; do
+            case "$name" in ''|'#'*) continue ;; esac
+            key=$(git config -f .gitmodules --get-regexp '^submodule\..*\.url$' 2>/dev/null \
+              | awk -v n="$name" '{u = $2; sub(/\.git$/, "", u); sub(/.*\//, "", u); if (u == n) {print $1; exit}}')
+            if [ -n "$key" ]; then
+              path=$(git config -f .gitmodules --get "${key%.url}.path")
+              git submodule update --init -- "$path" || fail "$name is not available. CI checks out only public repositories."
+            elif target=$(dependency_path "$name"); then
+              [ -d "$target/.git" ] || git clone --depth 1 "https://github.com/$OWNER/$name.git" "$target" \
+                || fail "$name is not available. CI checks out only public repositories."
+            else
+              fail "$name is not a submodule, and dependencies.txt has no section [$name]."
+            fi
+          done < "$list"
 
       - uses: actions/setup-python@v5
         with:

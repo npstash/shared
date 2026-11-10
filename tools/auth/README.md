@@ -20,17 +20,18 @@ Each vault is a repository `vault-<name>` in the folder `vaults/`.
 | `entry-<ID>.json` | no | Edit file of one entry. See "Edit". |
 | `access.log` | no | One line for each secret given out, key operation and failed open. |
 | `.githooks/pre-commit` | yes | Stops a commit of an edit file, a key file and the log. Needs only `sh`. |
-| `setup.sh`, `setup.bat` | yes | Turn the hook on in a clone: `git config core.hooksPath .githooks`. |
+| `setup.sh` | yes | Turn the hook on in a clone: `git config core.hooksPath .githooks`. |
 
 ## Entries
 
 To use an entry, a caller must know its exact name. Only `list-systems` lists the names: it runs
-only in a terminal and needs the passphrase.
+only in a terminal and needs the passphrase. `get-system` also finds a system by its entry ID or
+its encrypted name. This needs the passphrase too, and writes a line to `access.log`.
 
 - The entry ID is HMAC-SHA256 of the name. Its key comes from the master key.
 - Each entry is encrypted with AES-256-GCM. Its key comes from the master key and the name.
 - The name is also encrypted with the admin public key. Only the passphrase opens these names.
-  `rotate-master-key` and `list-systems` need them.
+  `rotate-master-key`, `list-systems` and `get-system` with an entry ID or an encrypted name need them.
 - `vault.json` shows no names, URLs or secrets. `openssl` cannot open an entry.
 
 ## Finding the vault
@@ -69,27 +70,6 @@ only in a terminal and needs the passphrase.
 - `sync` applies all files, or none.
 - To rename, use `rename-system` or `rename-secret`. To delete a system, use `delete-system`.
 
-## Aliases
-
-Give `"alias_of": "TARGET"` to a system to use the secrets of `TARGET`. The secrets of
-the alias add to the target secrets, or replace them. The alias keeps its own `url` and
-`authority_info`. `get-system` and `get-secret` show the resolved secrets.
-
-```json
-{
-  "name": "GitHub Enterprise",
-  "revision": "",
-  "url": "https://github.example.com",
-  "alias_of": "CORP LDAP",
-  "credentials": { "token": "t0ken" }
-}
-```
-
-- The target must exist and must not be an alias.
-- The entry of a target keeps the names of its aliases.
-- `set-system` refuses a secret that the alias takes from the target. Set it on the target.
-- `rename-system` and `delete-system` refuse a target that has aliases.
-
 ## Opening the vault
 
 1. A clone key: each `clone.<name>.key` in the vault home that has a
@@ -115,10 +95,11 @@ run.sh list-keyring-secrets              # key passphrases of this tool in the O
 run.sh delete-keyring-secret NAME ...    # delete them, and the key files they open
 run.sh delete-all-keyring-secrets        # delete all of them, and the key files they open
 run.sh push-enrol                        # commit and push new recipient files; see "Push"
-run.sh list-systems                      # names of all systems; only in a terminal, needs the passphrase
+run.sh list-systems                      # get-system for all systems; only in a terminal, needs the passphrase
 run.sh edit SYSTEM ...                   # write edit files; see "Edit"
 run.sh sync                              # apply the edit files
 run.sh get-system SYSTEM                 # url, secret names, authority info; no values
+                                         # SYSTEM: name, entry ID or encrypted name; the last two need the passphrase
 run.sh get-secret SYSTEM KEY             # print one secret value
 run.sh set-system SYSTEM [--url U] [--info LINE ...] [--secret KEY=VALUE ...]
 run.sh delete-system SYSTEM
@@ -221,3 +202,17 @@ Each call writes a line into `access.log`: the entry ID, the secrets, the key
 (`clone-key:<name>:<plain|provider>`) and the file name of the calling script.
 
 Tests: `run.sh test`. The hook tests need `sh` and `awk`.
+
+### Verified fake
+
+Use `credstore_fake` in the unit tests of the code that reads the vault (rule tests-and-ci). It has
+the read side of `credstore`: `get_credential`, `Store.get_credential` and `Credential`. It keeps
+the systems in memory and writes no files. Use `Store.set_system` to add the test data.
+
+```python
+import credstore_fake
+credstore_fake.Store(home).set_system("API 01", secrets={"token": "t"})
+```
+
+`tests/test_credstore_contract.py` runs each case against `credstore` and against the fake. When
+the read side of `credstore` changes, change the fake too.

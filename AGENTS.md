@@ -8,8 +8,8 @@ agents.
 
 ### Rules
 - **deliverables-only** — commit only what you cannot regenerate. @rules/deliverables-only.md
-- **per-project-runtimes** — runtime in the project folder, launched by `run.sh` / `run.bat`. @rules/per-project-runtimes.md
-- **tests-and-ci** — tests per project, `run.sh test`, CI finds them. @rules/tests-and-ci.md
+- **per-project-runtimes** — runtime in the project folder, launched by `run.sh`. @rules/per-project-runtimes.md
+- **tests-and-ci** — tests in `tests/`, only `.local_assets`, verified fakes, CI checks out the listed repositories. @rules/tests-and-ci.md
 - **credentials-from-vault** — secrets only from the vault, by the names that the user gives; `git` and `gh` can also use other sources. @rules/credentials-from-vault.md
 - **nothing-outside-repo** — write files only inside the repository. @rules/nothing-outside-repo.md
 - **simplified-english** — repository text in STE (ASD-STE100), brief. @rules/simplified-english.md
@@ -22,6 +22,7 @@ agents.
 - **submodule-dependencies** — find `shared`, a vault or other shareable submodules only with the reference code; no fixed paths. @rules/submodule-dependencies.md
 - **browser-automation** — for browser automation, use the `browser-automation-x-mcp` MCP server if it is available; mandatory. @rules/browser-automation.md
 - **browser-cookie-consent** — in browser automation, accept all cookies in a consent dialog; do not ask. @rules/browser-cookie-consent.md
+- **typed-code** — no untyped code: TypeScript, not JavaScript; type hints in Python; interfaces separate from implementations. @rules/typed-code.md
 - **repo-structure-template** — when the repo structure or a templated file changes, ask to update the create-repo-structure skill. @rules/repo-structure-template.md
 
 ### Skills
@@ -38,4 +39,4 @@ agents.
 - **claude/cowork-cloud-sessions** — in a Cowork cloud session use the GitHub REST API. @rules/claude/cowork-cloud-sessions.md
 
 ## Setup
-- [setup.sh](setup.sh) / [setup.bat](setup.bat) — check out submodules, turn on `.githooks/`, link skills. Each repository has a copy.
+- [setup.sh](setup.sh) — check out submodules, turn on `.githooks/`, link skills. Each repository has a copy.

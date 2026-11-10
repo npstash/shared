@@ -23,10 +23,6 @@ opens them, for the rotation of the master key. No command lists the entries.
 A clone key opens the vault. Else the passphrase does: the API parameter, or a prompt of
 the CLI in an interactive terminal. This tool never reads environment variables.
 
-A system with "alias_of" takes the secrets of its target. Its own secrets add to them or
-replace them. The target keeps the names of its aliases. get_credential() gives the
-resolved secrets.
-
     from credstore import get_credential          # PYTHONPATH must include this folder
     c = get_credential("jira", "vaults/vault-main"); c.secrets()["token"]
 """
@@ -59,7 +55,7 @@ from typing import Mapping
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
 TEMPLATES = TOOL / "templates"        # the files that create-vault puts next to a new vault
-SETUP = [TOOL.parents[1] / name for name in ("setup.sh", "setup.bat")]   # create-vault copies them too
+SETUP = [TOOL.parents[1] / "setup.sh"]   # create-vault copies it too
 RECIPIENTS = "recipients"             # public keys and wrapped master keys
 LOG = "access.log"                    # in the vault home, gitignored
 EDIT = "entry-*.json"                 # edit files in the vault home, gitignored
@@ -71,7 +67,7 @@ ID_LIMIT = 30                         # generated names: computer-user-repo, wit
 FORMAT = 2                            # the format of vault.json
 ID_HEX = 32                           # hex digits of an entry ID (128 bits)
 NAME_BYTES = 256                      # RSA-OAEP with SHA-256 and a 3072-bit key takes 318 bytes at most
-EDIT_FIELDS = ("name", "revision", "url", "authority_info", "alias_of", "credentials")
+EDIT_FIELDS = ("name", "revision", "url", "authority_info", "credentials")
 
 
 class CredentialError(RuntimeError):
@@ -90,8 +86,6 @@ class Credential:
     url: str | None = None
     authority_info: tuple[str, ...] = ()
     _secrets: dict[str, str] = field(default_factory=dict, repr=False)
-    alias_of: str | None = field(default=None, repr=False)  # the system that gives the secrets
-    aliases: tuple[str, ...] = field(default=(), repr=False)  # the systems that are aliases of this one
 
     def secrets(self) -> Mapping[str, str]:
         return MappingProxyType(self._secrets)
@@ -104,10 +98,6 @@ def _entry_doc(c: Credential) -> dict:
         doc["url"] = c.url
     if c.authority_info:
         doc["authority_info"] = list(c.authority_info)
-    if c.alias_of:
-        doc["alias_of"] = c.alias_of
-    if c.aliases:
-        doc["aliases"] = sorted(c.aliases)
     doc["credentials"] = dict(c._secrets)
     return doc
 
@@ -124,11 +114,11 @@ def _from_doc(doc, source: str) -> Credential:
     creds = doc.get("credentials", {})
     if not isinstance(creds, dict) or not all(isinstance(v, str) for v in creds.values()):
         raise CredentialError(f"{source}: credentials must be an object of strings")
-    url, alias = doc.get("url"), doc.get("alias_of")
-    if not isinstance(url or "", str) or not isinstance(alias or "", str):
-        raise CredentialError(f"{source}: url and alias_of must be strings")
+    url = doc.get("url")
+    if not isinstance(url or "", str):
+        raise CredentialError(f"{source}: url must be a string")
     return Credential(doc["name"], url or None, tuple(_strings(doc.get("authority_info", []), source, "authority_info")),
-                      dict(creds), alias or None, tuple(_strings(doc.get("aliases", []), source, "aliases")))
+                      dict(creds))
 
 
 def _write(path: Path, data: bytes) -> None:
@@ -869,29 +859,32 @@ class Store:
     def _drop(self, name: str) -> None:
         del self._entries()[self._id(name)]
 
-    def _resolve(self, c: Credential) -> Credential:
-        """An alias with the secrets of its target, then its own secrets on top."""
-        if c.alias_of is None:
-            return replace(c, aliases=())
-        target = self._get(c.alias_of)
-        if target is None or target.alias_of is not None:
-            raise CredentialError(
-                f"system {c.name!r} is an alias of {c.alias_of!r}, which is "
-                f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
-        return replace(c, _secrets={**target._secrets, **c._secrets}, alias_of=None, aliases=())
-
     def _names(self, admin) -> dict[str, str]:
         """ID -> name of each entry. Only the admin key (the passphrase) opens the names."""
-        names = {}
-        for eid, record in self._entries().items():
-            try:
-                name = admin.decrypt(b64decode(record["name"]), _oaep()).decode()
-            except (KeyError, ValueError) as exc:
-                raise CredentialError(f"the name of entry {eid} cannot be decrypted") from exc
-            if entry_id(self._key, name) != eid:
-                raise CredentialError(f"entry {eid} in {self.vault} is damaged")
-            names[eid] = name
-        return names
+        return {eid: self._name_of(admin, eid, record) for eid, record in self._entries().items()}
+
+    def _name_of(self, admin, eid: str, record: dict) -> str:
+        """The name of the entry `eid`, decrypted with the admin key and checked against the ID."""
+        try:
+            name = admin.decrypt(b64decode(record["name"]), _oaep()).decode()
+        except (KeyError, ValueError) as exc:
+            raise CredentialError(f"the name of entry {eid} cannot be decrypted") from exc
+        if entry_id(self._key, name) != eid:
+            raise CredentialError(f"entry {eid} in {self.vault} is damaged")
+        return name
+
+    def _lookup(self, key: str) -> str | None:
+        """The name of the entry with the ID or the encrypted name `key`, else None.
+
+        A match needs the passphrase: only the admin key opens the name."""
+        entries = self._entries()
+        eid = key if key in entries else next(
+            (e for e, record in entries.items() if record.get("name") == key), None)
+        if eid is None:
+            return None
+        name = self._name_of(_admin_key(self._admin_pem(self._confirm_passphrase())), eid, entries[eid])
+        _log(self.home, "get-system", eid, method=self.method)
+        return name
 
     # -- wrapping and backups --------------------------------------------------------------
 
@@ -1173,18 +1166,21 @@ class Store:
         return sorted(names.values())
 
     def get_system(self, system: str) -> Credential:
-        """A system, with no access log line. Use get_credential() or get_secret() to hand out secrets."""
-        return self._resolve(self._need(system))
+        """A system by its name, entry ID or encrypted name. Use get_credential() or get_secret() to hand out secrets.
+
+        An entry ID or an encrypted name needs the passphrase, and writes an access log line.
+        A name writes no log line."""
+        return self._need(self._lookup(system) or system)
 
     def get_credential(self, system: str) -> Credential:
         """A system with all its secrets. Logs each secret."""
-        c = self.get_system(system)
+        c = self._need(system)
         _log(self.home, "get", self._id(system), list(c.secrets()), self.method)
         return c
 
     def get_secret(self, system: str, key: str) -> str:
         """One secret value. Logs only this secret."""
-        c = self.get_system(system)
+        c = self._need(system)
         if key not in c.secrets():
             raise CredentialError(f"no secret {key!r} in system {system!r} "
                                   f"(known: {', '.join(c.secrets()) or 'none'})")
@@ -1213,7 +1209,7 @@ class Store:
             if c is None:
                 doc |= {"url": "", "authority_info": [], "credentials": {}}
             else:
-                doc |= {k: v for k, v in _entry_doc(c).items() if k not in ("name", "aliases")}
+                doc |= {k: v for k, v in _entry_doc(c).items() if k != "name"}
                 doc["credentials"] = {k: "" for k in c._secrets}
             _write(path, (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode())
         return paths
@@ -1246,7 +1242,7 @@ class Store:
                 raise CredentialError(f"system {name!r}: secret {key!r} is blank and the vault has no value "
                                       f"for it - fill it in {path.name}, or remove the key")
             secrets[key] = kept
-        return name, replace(new, _secrets=secrets, aliases=old.aliases if old else ())
+        return name, replace(new, _secrets=secrets)
 
     def sync(self) -> list[str]:
         """Apply each edit file of the vault home, then delete the files. Returns the system names.
@@ -1257,33 +1253,13 @@ class Store:
         files = sorted(self.home.glob(EDIT))
         if not files:
             raise CredentialError(f"no {EDIT} in {self.home}: run edit NAME first")
-        changed: dict[str, Credential] = {}   # the systems of the files, and the targets of their aliases
+        changed: dict[str, Credential] = {}
         names = []
         current = lambda n: changed[n] if n in changed else self._get(n)  # noqa: E731
         for path in files:
             name, new = self._from_edit(path, current)
             names.append(name)
-            old = current(name)
-            if old and old.alias_of and old.alias_of != new.alias_of:
-                target = current(old.alias_of)
-                if target:
-                    changed[target.name] = replace(target, aliases=tuple(a for a in target.aliases if a != name))
             changed[name] = new
-        for c in list(changed.values()):   # after all files: a target can be new in this sync
-            target = current(c.alias_of) if c.alias_of else None
-            if target and c.name not in target.aliases:
-                changed[target.name] = replace(target, aliases=(*target.aliases, c.name))
-        for c in changed.values():
-            if c.alias_of:
-                target = current(c.alias_of)
-                if target is None or target.alias_of is not None:
-                    raise CredentialError(
-                        f"system {c.name!r} is an alias of {c.alias_of!r}, which is "
-                        f"{'unknown' if target is None else 'an alias too'} - give a system that is not an alias")
-        for c in changed.values():
-            if c.alias_of and c.aliases:
-                raise CredentialError(f"system {c.name!r} cannot be an alias: "
-                                      f"{', '.join(c.aliases)} are aliases of it")
         updates = [c for c in changed.values() if c != self._get(c.name)]
         for c in updates:
             self._put(c)
@@ -1295,19 +1271,11 @@ class Store:
     def set_system(self, system: str, url: str | None = None, authority_info: list | None = None,
                    secrets: dict | None = None) -> Credential:
         old = self._get(system)
-        if old and old.alias_of:
-            target = self._get(old.alias_of)
-            inherited = set(target._secrets if target else ()) - set(old._secrets)
-            if inherited & set(secrets or {}):
-                raise CredentialError(f"system {system!r} is an alias of {old.alias_of!r}; "
-                                      f"set {', '.join(sorted(inherited & set(secrets)))} there")
         new = Credential(
             system,
             url if url is not None else (old.url if old else None),
             tuple(authority_info) if authority_info is not None else (old.authority_info if old else ()),
             {**(old._secrets if old else {}), **{k: v for k, v in (secrets or {}).items()}},
-            old.alias_of if old else None,
-            old.aliases if old else (),
         )
         if new != old:
             self._put(new)
@@ -1315,14 +1283,8 @@ class Store:
         return new
 
     def delete_system(self, system: str) -> None:
-        """Delete a system. Refused while it has aliases."""
-        c = self._need(system)
-        if c.aliases:
-            raise CredentialError(f"cannot delete {system!r}: {', '.join(c.aliases)} are aliases of it")
-        if c.alias_of:
-            target = self._get(c.alias_of)
-            if target:
-                self._put(replace(target, aliases=tuple(a for a in target.aliases if a != system)))
+        """Delete a system."""
+        self._need(system)
         eid = self._id(system)
         self._drop(system)
         self._save()
@@ -1333,12 +1295,6 @@ class Store:
         c = self._need(system)
         if self._get(new) is not None:
             raise CredentialError(f"system {new!r} already exists")
-        if c.aliases:
-            raise CredentialError(f"cannot rename {system!r}: {', '.join(c.aliases)} are aliases of it")
-        if c.alias_of:
-            target = self._get(c.alias_of)
-            if target:
-                self._put(replace(target, aliases=tuple(new if a == system else a for a in target.aliases)))
         self._drop(system)
         self._put(replace(c, name=new))
         self._save()
@@ -1477,6 +1433,13 @@ def _tty() -> bool:
     return sys.stdin is not None and sys.stdin.isatty()
 
 
+def _print_system(c: Credential) -> None:
+    """Name, url and secret names on one line, then one indented line for each authority info line."""
+    print(f"{c.name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
+    for line in c.authority_info:
+        print(f"  {line}")
+
+
 def _prompt_new_passphrase() -> str:
     if not _tty():
         raise CredentialError("a new passphrase must be typed in a terminal")
@@ -1569,12 +1532,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("delete-all-keyring-secrets", help="delete each key passphrase, and the key files they open")
     sub.add_parser("push-enrol", help="commit and push the new recipient files of each vault, and the submodule "
                                       "pointers above them; only in a terminal")
-    sub.add_parser("list-systems", help="print the names of all systems; only in a terminal, needs the passphrase")
+    sub.add_parser("list-systems", help="show all systems as get-system does; only in a terminal, needs the passphrase")
     p = sub.add_parser("edit", help="write an edit file for each system; secret values empty")
     p.add_argument("systems", nargs="+", metavar="SYSTEM")
     sub.add_parser("sync", help="apply the edit files to the vault, then delete them")
     p = sub.add_parser("get-system", help="show a system: url, secret names, authority info; no values")
-    p.add_argument("system")
+    p.add_argument("system", help="name, entry ID or encrypted name; an ID or an encrypted name needs the passphrase")
     p = sub.add_parser("get-secret", help="print one secret value")
     p.add_argument("system")
     p.add_argument("key")
@@ -1640,17 +1603,14 @@ def main(argv: list[str] | None = None) -> int:
             if not _tty():
                 raise CredentialError("list-systems runs only in a terminal: it needs the master passphrase")
             for name in store.list_systems():
-                print(name)
+                _print_system(store._need(name))
         elif a.cmd == "edit":
             for path in store.edit(a.systems):
                 print(path)
         elif a.cmd == "sync":
             print(f"synced {len(store.sync())} system(s); commit and push the vault home")
         elif a.cmd == "get-system":
-            c = store.get_system(a.system)
-            print(f"{c.name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
-            for line in c.authority_info:
-                print(f"  {line}")
+            _print_system(store.get_system(a.system))
         elif a.cmd == "get-secret":
             print(store.get_secret(a.system, a.key))
         elif a.cmd == "set-system":

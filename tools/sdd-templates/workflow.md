@@ -58,6 +58,13 @@ When you create `sdd/`, ask the user for the requirement format of SRS: EARS or 
 
 - GitHub Actions runs the tests. 
 - The SRS requirements and the QAS scenarios are test cases.
+- Run the tests in phases, in this order:
+  1. Static analysis: type check, lint.
+  2. Unit tests.
+  3. Functional tests: the SRS requirements.
+  4. QAS tests: the QAS scenarios.
+- Run all phases, also after a failure. Report each failure.
+- Give the folder of each phase in the deployment section of DESIGN.
 - Add manual test instructions into deployment section of DESIGN, or instructions file if it exists.
 
 ### 6. Review and merge

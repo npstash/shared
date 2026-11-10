@@ -1,5 +1,4 @@
 * text=auto eol=lf
-*.bat text eol=crlf
 
 # openssl enc and RSA-OAEP ciphertext
 master.enc.key binary

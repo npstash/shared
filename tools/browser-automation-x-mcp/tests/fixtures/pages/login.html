@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Login</title></head>
+<body>
+  <h1>Login</h1>
+  <form method="post" action="/login-again">
+    <p><label for="user">User</label> <input id="user" name="user" autocomplete="username"></p>
+    <p><label for="pass">Password</label> <input id="pass" name="pass" type="password"></p>
+    <p><button type="submit">Sign in</button></p>
+  </form>
+  <script>
+    // ?from=user: acts as the user: fills the fields with the values of the vault and signs in.
+    if (new URLSearchParams(location.search).get('from') === 'user') {
+      setTimeout(() => {
+        for (const [id, value] of [['user', 'fixture-user'], ['pass', 'Fixture-Pa55-word']]) {
+          const field = document.getElementById(id);
+          field.value = value;
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        document.querySelector('button[type="submit"]').click();
+      }, 1500);
+    }
+  </script>
+</body>
+</html>

@@ -2,21 +2,29 @@
   "name": "browser-automation-x-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "MCP facade for the Playwright MCP server, with logging.",
+  "description": "MCP server for browser automation.",
   "type": "module",
-  "main": "src/server.js",
+  "main": "playwright/src/server.ts",
   "bin": {
-    "browser-automation-x-mcp": "playwright/src/server.js"
+    "browser-automation-x-mcp": "playwright/src/server.ts"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "test": "node --test --test-concurrency=1 tests/"
+    "start": "node playwright/src/server.ts",
+    "test": "./run.sh test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
-    "@playwright/mcp": "0.0.83"
+    "@playwright/mcp": "0.0.83",
+    "tldts": "7.4.18"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "eslint": "10.13.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0"
   }
 }

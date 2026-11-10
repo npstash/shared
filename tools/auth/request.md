@@ -33,12 +33,6 @@ and the [ADL](ADL.md).
 21. The vault home is a command-line argument (`--vault-home`), never an environment variable. Without it, the tool uses `./vaults/vault-main`, then `vaults/vault-main` next to the script, and else stops.
 22. The Python API hands out secrets as an immutable map from a method (`credential.secrets()`); the credential is a class, not a dictionary.
 
-### Aliases
-
-22a. A system can be an alias of another system (`alias_of`). It takes the secrets of its target. Its own secrets add to them or replace them.
-22b. The target must exist and must not be an alias. `set` refuses an inherited secret; `rename` refuses a target with aliases.
-22c. `list` and `get` show the resolved secrets and do not mark aliases.
-
 ### Key rotation and local decryption
 
 23. `rotate-key`: new master key on demand, vault decrypted with the old key and re-encrypted with the new one, **same passphrase**.
@@ -115,7 +109,7 @@ Decisions, all confirmed by the user:
 - **Backups** go to `.local_assets/` of the tool folder, not the vault home.
 - **Hook.** `.githooks/pre-commit` is committed in the vault repository. It uses only `sh`
   and `awk`, so it needs no Python and does not depend on where this tool is. Tests keep it
-  in agreement with `exposed_secrets()`. `setup.sh` / `setup.bat` turn it on per clone.
+  in agreement with `exposed_secrets()`. `setup.sh` turns it on per clone.
   `install-hook` and `check-staged` are gone.
 
 ## Clone keys

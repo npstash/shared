@@ -13,7 +13,7 @@
   "mcp": {
     "browser-automation-x-mcp": {
       "type": "local",
-      "command": ["./shared/tools/browser-automation-x-mcp/run.sh", "playwright", "--config-dir", "local/configs/browser-automation-x-mcp"],
+      "command": ["./shared/tools/browser-automation-x-mcp/run.sh", "--config-dir", "local/configs/browser-automation-x-mcp"],
       "enabled": true,
       // Render mode of the browser.
       "environment": { "RENDER_MODE": "DEFAULT" },

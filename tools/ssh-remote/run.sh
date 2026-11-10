@@ -9,6 +9,8 @@ if ! cmp -s "$dir/requirements.txt" "$dir/.venv/requirements.txt" 2>/dev/null; t
     "$dir/.venv/bin/python" -m pip install --quiet -r "$dir/requirements.txt"
     cp "$dir/requirements.txt" "$dir/.venv/requirements.txt"
 fi
+# The bytecode caches of each Python of the runtime go into .local_assets/ (rule tests-and-ci).
+"$dir/.venv/bin/python" -c 'import pathlib, sys, sysconfig; pathlib.Path(sysconfig.get_paths()["purelib"], "local-assets-pycache.pth").write_text(f"import sys; sys.pycache_prefix = {sys.argv[1]!r}\n")' "$dir/.local_assets/pycache"
 if [[ "${1:-}" == "test" ]]; then
     shift
     # Dev dependencies stay out of the runtime venv until tests are actually asked for.

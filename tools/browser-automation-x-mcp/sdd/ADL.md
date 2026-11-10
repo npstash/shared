@@ -5,17 +5,17 @@ The log of the decisions that change the design. Format and rules:
 
 ## Log
 
-- 20261024-01 Nestor ac0028971533 Make the facade a 1:1 facade of the Playwright tool
+- 20261024-01 Nestor ac0028971533 Give the server the tools of the Playwright tool 1:1
 - 20261024-02 Nestor ac0028971533 Support Claude Code in VSCode, the CLI, the Desktop app and the Agent SDK
-- 20261024-03 Nestor ac0028971533 Log the facade to a gitignored log file
-- 20261024-04 Opus-5.5 ac0028971533 Implement the facade as a Node.js MCP stdio server that runs @playwright/mcp as a child process and forwards its tools
+- 20261024-03 Nestor ac0028971533 Log the server to a gitignored log file
+- 20261024-04 Opus-5.5 ac0028971533 Implement the server as a Node.js MCP stdio server that runs @playwright/mcp as a child process and forwards its tools
 - 20261024-05 Opus-5.5 ac0028971533 Forward roots, progress, cancellation and tool list changes between the client and Playwright MCP
-- 20261024-06 Opus-5.5 ac0028971533 Run the facade on a pinned Node.js runtime that the launcher downloads into the tool folder
+- 20261024-06 Opus-5.5 ac0028971533 Run the server on a pinned Node.js runtime that the launcher downloads into the tool folder
 - 20261024-07 Opus-5.5 ac0028971533 Use Chromium as the default browser and install it into the tool folder
 - 20261024-08 Opus-5.5 ac0028971533 Keep the persistent profiles, output files and temp files in the tool folder, with one profile for each browser and workspace
 - 20261024-09 Opus-5.5 ac0028971533 Keep the temp folder of the OS when the tool folder cannot hold Unix sockets
 - 20261024-10 Opus-5.5 ac0028971533 Write the log as JSON Lines with one entry for each tool call and each result
-- 20261024-11 Opus-5.5 ac0028971533 Redact typed text and form values in the log unless PLAYWRIGHT_FACADE_LOG_SECRETS is 1
+- 20261024-11 Opus-5.5 ac0028971533 Redact typed text and form values in the log unless BROWSER_AUTOMATION_X_MCP_LOG_SECRETS is 1
 - 20261024-12 Opus-5.5 ac0028971533 Close the browser at shutdown so that the persistent profile keeps its data
 - 20261024-13 Opus-5.5 ac0028971533 Skip a test on a public page when the page is not reachable
 - 20261025-01 Nestor af62c9453f22 Apply the SDD workflow to the tool
@@ -24,7 +24,7 @@ The log of the decisions that change the design. Format and rules:
 - 20261025-04 Nestor af62c9453f22 Download fonts into the tool folder when the host has no fonts
 - 20261025-05 Nestor af62c9453f22 Keep the pinned Node.js runtime that the launcher downloads
 - 20261025-06 Nestor af62c9453f22 Keep the stdio MCP proxy with the MCP SDK
-- 20261025-07 Nestor af62c9453f22 Switch each facade tool in a committed config file that lists all tools, with defaults written for missing tools
+- 20261025-07 Nestor af62c9453f22 Switch each tool of the server in a committed config file that lists all tools, with defaults written for missing tools
 - 20261025-08 Nestor af62c9453f22 Keep a disabled tool in the tool list and fail its calls with the reason
 - 20261025-09 Nestor af62c9453f22 Fill form values from generic placeholders through providers in the order of the config
 - 20261025-10 Nestor af62c9453f22 Give each fill provider its own folder and its own committed config file
@@ -32,12 +32,12 @@ The log of the decisions that change the design. Format and rules:
 - 20261025-12 Nestor af62c9453f22 Give the INI provider an [all] section and sections for host patterns
 - 20261025-13 Nestor af62c9453f22 Ask the user through MCP elicitation for the fields that the ask provider config lists
 - 20261025-14 Nestor af62c9453f22 Keep the deny-list and the allow-list in one committed file with two sections
-- 20261025-15 Nestor af62c9453f22 Block denied hosts in the facade only, not in Playwright MCP
+- 20261025-15 Nestor af62c9453f22 Block denied hosts in the server only, not in Playwright MCP
 - 20261025-16 Nestor af62c9453f22 Record each opened host in the allow-list unless the config turns recording off
 - 20261025-17 Opus-5.5 af62c9453f22 Disable browser_run_code_unsafe, browser_evaluate, browser_file_upload and browser_drop by default
 - 20261025-18 Opus-5.5 af62c9453f22 Write placeholders as {{name}} in browser_type text, browser_fill_form values and browser_select_option values
 - 20261025-19 Opus-5.5 af62c9453f22 Stop the whole call when one placeholder has no value
-- 20261025-20 Opus-5.5 af62c9453f22 Add the facade tool fill_values_list that gives the placeholder names for the current page
+- 20261025-20 Opus-5.5 af62c9453f22 Add the server tool fill_values_list that gives the placeholder names for the current page
 - 20261025-21 Opus-5.5 af62c9453f22 Replace each filled value with its placeholder in each result for the time of the session
 - 20261025-22 Opus-5.5 af62c9453f22 Give the vault system whose url is the longest prefix of the page URL when more systems match the host
 - 20261025-23 Opus-5.5 af62c9453f22 Give the most specific INI section: exact host, then longer pattern, then [all]
@@ -47,45 +47,45 @@ The log of the decisions that change the design. Format and rules:
 - 20261025-27 Opus-5.5 af62c9453f22 Check the target URL before a navigation and the page URL after each call, and open about:blank for a blocked page
 - 20261025-28 Opus-5.5 af62c9453f22 Use private apt package lists in the tool folder when the host has none, and delete them after the download
 - 20261026-01 Nestor 6c9479e96b5f Run the browser headless by default; PLAYWRIGHT_MCP_HEADLESS=false gives a window
-- 20261028-01 Nestor 14e8c70de325 Hold facades for more browser tools in this tool; plan a facade for the browser of the Claude desktop app
-- 20261028-02 Nestor 14e8c70de325 Give each facade its own folder and share the form-fill providers among all facades
-- 20261028-03 Opus-5.5 14e8c70de325 Share config/facade.ini, config/hosts.ini, the launcher, the runtime and the core code among all facades; keep tools.ini, the dangerous tools and the fill arguments in each facade
-- 20261028-04 Opus-5.5 14e8c70de325 Select the facade with the first argument of run.sh / run.bat
+- 20261028-01 Nestor 14e8c70de325 Hold servers for more browser tools in this tool; plan a server for the browser of the Claude desktop app
+- 20261028-02 Nestor 14e8c70de325 Give each browser tool its own folder and share the form-fill providers among all browser tools
+- 20261028-03 Opus-5.5 14e8c70de325 Share config/server.ini, config/hosts.ini, the launcher, the runtime and the core code among all browser tools; keep tools.ini, the dangerous tools and the fill arguments for each browser tool
+- 20261028-04 Opus-5.5 14e8c70de325 Select the browser tool with the first argument of run.sh / run.bat
 - 20261031-01 Nestor 6852177487b8 Keep the host list local in .local_assets/config/host-policy.ini; copy it once from the committed config/host-policy.template.ini
 - 20261031-02 Nestor 6852177487b8 Put the temp files of Chromium into the first folder that can hold its socket: .local_assets/tmp of the tool, then .local_assets/tmp of the repository root, then the temp folder of the OS
 - 20261031-03 Opus-5.5 6852177487b8 Remove the sub-vault option of the vault provider; the vault tool has no sub-vaults
 - 20261101-01 Nestor f426c130bb37 Scrub the filled values also from the text files that upstream writes in a call: the files that the result links, and the changed files of the output folder
 - 20261101-02 Nestor 88f93a9fc667 Stop the bubbles and prompts of Chrome with fixed settings in Default/Preferences of the persistent profile, written before each browser start; do not change the switches of Playwright
 - 20261101-03 Nestor 6fa20c67240a Run the browser headed by default; PLAYWRIGHT_MCP_HEADLESS takes true, false or xvfb
-- 20261101-04 Nestor 6fa20c67240a On Linux without a display, run the headed browser on Xvfb that the facade starts and stops
+- 20261101-04 Nestor 6fa20c67240a On Linux without a display, run the headed browser on Xvfb that the server starts and stops
 - 20261101-05 Nestor 6fa20c67240a Unpack Xvfb from Ubuntu packages into the tool folder without root, and patch its xkbcomp path to ./bin
 - 20261101-06 Opus-5.5 6fa20c67240a Let Xvfb listen only on the abstract socket, and select the first free display from :99
 - 20261101-07 Opus-5.5 6fa20c67240a Start no Xvfb with a config file and no PLAYWRIGHT_MCP_HEADLESS, or with --cdp-endpoint, --extension or --endpoint
 - 20261101-08 Nestor 6fa20c67240a Select the render mode with PLAYWRIGHT_RENDER_MODE = DEFAULT, HEADED_INVISIBLE, HEADED or HEADLESS; --headless and PLAYWRIGHT_MCP_HEADLESS have no effect and give no error
 - 20261101-09 Nestor 6fa20c67240a Resolve DEFAULT to HEADED_INVISIBLE on WSL and on Linux without a display, else to HEADED; resolve HEADED without a display to HEADED_INVISIBLE; never fall back to HEADLESS; stop with an error when Xvfb is necessary and not available
 - 20261101-10 Nestor 6fa20c67240a Apply the render mode also with a config file of Playwright MCP
-- 20261101-11 Nestor 6fa20c67240a Stop Xvfb with the parent-death signal of setpriv; record each Xvfb in .local_assets/xvfb/ and kill the Xvfb of each facade that does not run at each facade start; do not reuse Xvfb
-- 20261101-12 Nestor 2c0de445e142 Keep all config files of the facades in a config folder outside the tool, e.g. local/configs/browser-facade of the repository
-- 20261101-13 Nestor 2c0de445e142 The facade needs the argument --config-dir DIR; a relative path is relative to the working folder
-- 20261101-14 Nestor 2c0de445e142 The tool keeps a template of each config file; the facade copies a template to a missing file
-- 20261101-15 Nestor 2c0de445e142 The config folder is flat: facade.ini, host-policy.ini, <facade>-tools.ini, provider-<name>.ini
+- 20261101-11 Nestor 6fa20c67240a Stop Xvfb with the parent-death signal of setpriv; record each Xvfb in .local_assets/xvfb/ and kill the Xvfb of each server that does not run at each server start; do not reuse Xvfb
+- 20261101-12 Nestor 2c0de445e142 Keep all config files of the server in a config folder outside the tool, e.g. local/configs/browser-automation-x-mcp of the repository
+- 20261101-13 Nestor 2c0de445e142 The server needs the argument --config-dir DIR; a relative path is relative to the working folder
+- 20261101-14 Nestor 2c0de445e142 The tool keeps a template of each config file; the server copies a template to a missing file
+- 20261101-15 Nestor 2c0de445e142 The config folder is flat: server.ini, host-policy.ini, tools.ini, provider-<name>.ini
 - 20261101-16 Nestor 2c0de445e142 The host list is host-policy.ini in the config folder; .local_assets/config/host-policy.ini is removed
 - 20261101-17 Nestor 2c0de445e142 The vault provider selects a vault system only from [systems] of provider-vault.ini: <host or URL prefix> = <exact system name>; it does not search the vault
 - 20261101-18 Nestor 2c0de445e142 A [systems] key is a host or a URL prefix; a host also matches its subdomains; the longest URL prefix wins
 - 20261101-19 Nestor 2c0de445e142 provider-vault.ini gives the folder name of the vault in [vault] vault; it has no default
 - 20261101-20 Nestor 2c0de445e142 The vault provider finds the vault tool beside this tool; the config gives no paths
 - 20261101-21 Opus-5.5 2c0de445e142 The vault provider gets the secret names of a system with get-system and keeps them for the session
-- 20261101-22 Opus-5.5 2c0de445e142 BROWSER_FACADES_VAULT_TOOL gives a test double of the vault tool; the other config env variables are removed
-- 20261101-23 Nestor c3ec9df70bd3 Agents do not fill credentials or personal data; the facade fills the fields of configured pages and submits the form without a call of the agent
+- 20261101-22 Opus-5.5 2c0de445e142 BROWSER_AUTOMATION_X_MCP_VAULT_TOOL gives a test double of the vault tool; the other config env variables are removed
+- 20261101-23 Nestor c3ec9df70bd3 Agents do not fill credentials or personal data; the server fills the fields of configured pages and submits the form without a call of the agent
 - 20261101-24 Nestor c3ec9df70bd3 Remove the placeholders and the tool fill_values_list
 - 20261101-25 Nestor c3ec9df70bd3 Fill after each call whose result shows a page URL that fields.ini matches; wait for the fields first
 - 20261101-26 Nestor c3ec9df70bd3 Fill each set of visible fields of a form one time; when the same fields come back after the submit, do not fill them and log fill_failed
 - 20261101-27 Nestor c3ec9df70bd3 Submit with the submit selector of fields.ini, else requestSubmit() of the form of the last filled field, else Enter
 - 20261101-28 Nestor c3ec9df70bd3 Bind the fields to URL patterns in fields.ini of the config folder: [host/path] with <field name> = <CSS selector>; the providers give only the values
 - 20261101-29 Nestor c3ec9df70bd3 In a URL pattern, the host part is a host pattern and * in the path matches each sequence of characters, also /; scheme, port, query and fragment have no effect
-- 20261101-30 Nestor c3ec9df70bd3 Each provider has a mask option in [mask] of facade.ini; the facade replaces a masked value with *** in the results and the output files
+- 20261101-30 Nestor c3ec9df70bd3 Each provider has a mask option in [mask] of server.ini; the server replaces a masked value with *** in the results and the output files
 - 20261101-31 Nestor c3ec9df70bd3 The discovery mode writes the input fields of each page with a selector into .local_assets/discovered-fields.ini, one section for each URL pattern; a path segment that looks like an ID becomes *
-- 20261101-32 Nestor c3ec9df70bd3 Texts for the client do not name the facade, Playwright, the form fill or its providers; the server name is browser-automation-x-mcp
+- 20261101-32 Nestor c3ec9df70bd3 Texts for the client do not name upstream, Playwright, the form fill or its providers; the server name is browser-automation-x-mcp
 - 20261101-33 Nestor c3ec9df70bd3 The instructions of the server make the use of its tools mandatory for browser automation
 - 20261101-34 Nestor c3ec9df70bd3 Remove the name Playwright from the tool descriptions and the section "Ran Playwright code" from each result; keep all tools
 - 20261101-35 Nestor c3ec9df70bd3 The env variable RENDER_MODE selects the render mode
@@ -100,3 +100,102 @@ The log of the decisions that change the design. Format and rules:
 - 20261101-44 Opus-5.5 c3ec9df70bd3 Error results for the client do not give a config file or the reason pattern
 - 20261101-45 Opus-5.5 c3ec9df70bd3 The INI provider gives the values of [values]; the host sections and [all] are removed
 - 20261101-46 Opus-5.5 c3ec9df70bd3 The discovery mode makes a selector from autocomplete, then name, then an id that does not look generated, then the type, unique in its frame
+- 20261102-01 Nestor 6035b08cc87f The discovery mode records visible submit buttons and the fields of each page reached after a form submit
+- 20261103-01 Nestor 6035b08cc87f Use Playwright MCP as the only browser tool; remove the plan for more browser tools and for a server of the Claude desktop app browser
+- 20261103-02 Nestor 6035b08cc87f run.sh / run.bat start the server without an argument that selects a browser tool
+- 20261103-03 Nestor 6035b08cc87f Always use Chromium; ignore --browser and PLAYWRIGHT_MCP_BROWSER without an error and log them; give PLAYWRIGHT_MCP_BROWSER=chromium to upstream also with --config
+- 20261103-04 Nestor 6035b08cc87f The tool, its config and its documents describe it only as an MCP server for browser automation; Playwright is an implementation detail
+- 20261103-05 Nestor e78edede6674 Discovery runs on each visit and adds the new fields and buttons to the section of the page; it never removes a line
+- 20261103-06 Nestor e78edede6674 Discovery writes only discovered-fields.ini; a "; used:" comment marks each field and button that the user, the agent or the auto-fill used
+- 20261103-07 Nestor e78edede6674 In the discovery mode, the server records the fills, the button clicks and the submits in the browser, without values, and gets the records after each agent call and at shutdown
+- 20261103-08 Nestor e78edede6674 A fields.ini section can have more submit lines; the server clicks the first visible one
+- 20261103-09 Nestor e78edede6674 The last selector of a field is a label locator of Playwright, and of a button a role locator
+- 20261103-10 Nestor e78edede6674 The server checks and records the host of each page after an auto-submit before the next fill or discovery
+- 20261103-11 Nestor e78edede6674 Discovery waits DISCOVER_WAIT for a field or a button only after an auto-submit or a submit of the user
+- 20261103-12 Nestor e78edede6674 Each server start writes a .log file with lines of at most LOG_LINE_MAX characters for a person, and a .log.json file with all fields
+- 20261103-13 Nestor e78edede6674 The log files are in LOG_DIR/<client name of initialize>/mm-dd_hhmmss_<pid>; the newest LOG_KEEP pairs stay
+- 20261104-01 Nestor 598b2ac53d38 Give each agent a lane: an own browser context in one Chromium of the server; each upstream tool needs the parameter lane; browser_lane_open, browser_lane_close and browser_lanes; MAX_LANES 3, MAX_TABS_PER_LANE 5, LANE_IDLE 10 min
+- 20261104-02 Nestor 598b2ac53d38 Run Playwright MCP in the server process through createConnection, one connection for each lane; no upstream child process and no network port
+- 20261104-03 Nestor 598b2ac53d38 Keep the logins of the lanes in one storage-state file for each workspace in the tool folder, mode 0600; merge the state of a lane into the file when the lane closes; keep IndexedDB only for the hosts in [storage] indexeddb of server.ini
+- 20261104-04 Nestor 598b2ac53d38 Start Chromium and Xvfb with the first lane and stop them after the last lane
+- 20261104-05 Nestor 598b2ac53d38 The server takes only the argument --config-dir; an other argument stops the server; the server ignores and logs each PLAYWRIGHT_MCP_* variable
+- 20261104-06 Nestor 598b2ac53d38 Stop permission prompts with --deny-permission-prompts; write no Default/Preferences
+- 20261104-07 Nestor 598b2ac53d38 Put the temp files of Chromium into .local_assets/tmp of the tool, then into .local_assets/tmp of the first folder with .git above the tool, then into the temp folder of the OS
+- 20261104-08 Nestor 598b2ac53d38 Accept a filename of the agent only in the output folder; resolve a relative name against the output folder
+- 20261104-09 Nestor 598b2ac53d38 Mask the values of the Cookie, Set-Cookie, Authorization and Proxy-Authorization headers in the results and in the output files
+- 20261104-10 Nestor a5ea4caf7298 Give each lane its own Chromium with a persistent profile in .local_assets/lanes/<pid>-<lane id>: written with the Chrome settings before the start, deleted at the close; load the logins with setStorageState; one Xvfb for each server, from the first lane to the last lane
+- 20261104-11 Nestor a5ea4caf7298 Stop the bubbles of Chrome with the settings in Default/Preferences of the lane profile, and the permission prompts with --deny-permission-prompts
+- 20261104-12 Nestor a5ea4caf7298 A key press, click, scroll or input of the user in a lane is activity for LANE_IDLE
+- 20261104-13 Nestor a5ea4caf7298 A login = <locator> line of fields.ini is the login link of a page; before the fill, the server clicks the first visible one, one time for each lane and host, if a provider has a system for the host
+- 20261104-14 Nestor a5ea4caf7298 A login link is a role locator with the visible text of the link, case-insensitive, so that it does not match after the login
+- 20261104-15 Nestor a5ea4caf7298 The discovery mode records each click of the user or the agent on a link to an other page, and writes login = <locator> with the text and the target of the link into the section of the page
+- 20261104-16 Nestor a5ea4caf7298 The log of a recorded event gives the time of the event in the browser
+- 20261104-17 Nestor a5ea4caf7298 The config folder holds two JSON files: server.json (providers and tool switches) and sites.json (default access and sites); they replace server.ini, tools.ini, provider-<name>.ini, host-policy.ini and fields.ini
+- 20261104-18 Nestor a5ea4caf7298 server.json: providers is an array of { type, enabled, mask, <settings> } in the order of the fill; a provider without mask is masked; tools is { <tool>: { enabled } }
+- 20261104-19 Nestor a5ea4caf7298 sites.json: a site key is a host and covers each subdomain; a site has access, credentials (the vault system) and pages; a page key is a path pattern with fields, submit, login and optional credentials that win over the site
+- 20261104-20 Nestor a5ea4caf7298 Host access: a site with access deny wins over each other site, else the most specific site with an access, else defaultAccess
+- 20261104-21 Nestor a5ea4caf7298 Rename the ini provider to values
+- 20261104-22 Nestor a5ea4caf7298 The server never writes sites.json; only the discovery mode records opened hosts, into the discovery file
+- 20261104-23 Nestor a5ea4caf7298 Keep the IndexedDB of the sites of sites.json in the storage state
+- 20261104-24 Nestor a5ea4caf7298 The discovery file discovered-sites.json has the schema of sites.json, and found with the description and the used marks of each item
+- 20261104-25 Nestor a5ea4caf7298 Discovery writes the fields and buttons of a page at once when the page is ready and when a new one shows, without a call of the agent; the used marks go into the file at a submit, a click, a navigation or the close of the lane
+- 20261104-26 Nestor a5ea4caf7298 Save the storage state of a lane at each page load and at the close
+- 20261106-01 Nestor a5ea4caf7298 A provider has one kind: key-value (vault, values) with match(value), value (ask), or approval (approve-dialog, approve-https) that wraps one key-value provider in its "provider" key
+- 20261106-02 Nestor a5ea4caf7298 The first provider in the order of server.json that has the key gives the value; the mask of an approval provider is the mask of its wrapped entry
+- 20261106-03 Nestor a5ea4caf7298 Discovery writes only sites.json; remove the discovery file, found and the used marks
+- 20261106-04 Nestor a5ea4caf7298 Discovery writes each loaded host of an allowed site into sites.json at once, with "access": "allow"
+- 20261106-05 Nestor a5ea4caf7298 At a click or a submit, the page code gives the values of the fields of the user; the server gets the first key from the key-value providers in their order, then discards the values
+- 20261106-06 Nestor a5ea4caf7298 The vault provider matches a value only in the system of credentials.vault of the site or page
+- 20261106-07 Nestor a5ea4caf7298 A field of the user without a match gets the name from its attributes only if its selector has no key; only a new match changes a key
+- 20261106-08 Nestor a5ea4caf7298 The fields of a page in sites.json are { "<selector>": "<key>" }
+- 20261106-09 Nestor a5ea4caf7298 Discovery writes the button that the user clicks into submit; a submit without a button writes the submit button of the form, else "enter"; "enter" presses Enter in the last field
+- 20261106-10 Nestor a5ea4caf7298 At a submit with fields of the user, discovery writes the last link that the user followed into login of the page of the link
+- 20261106-11 Nestor a5ea4caf7298 The server reads sites.json again before each match and each write, and changes only its own entries
+- 20261106-12 Nestor a5ea4caf7298 In the discovery mode, the key-value providers and the wrapped providers of approval providers fill without approval, value providers do not fill, and the server does not submit
+- 20261106-13 Nestor a5ea4caf7298 One approval covers all keys of an approval provider in one fill; the request has the host, the keys and the client name, and no value and no URL
+- 20261106-14 Nestor a5ea4caf7298 A refusal, or no answer in APPROVAL_TIMEOUT, stops the fill; no later provider gives the keys
+- 20261106-15 Nestor a5ea4caf7298 approve-dialog asks through MCP elicitation; approve-https sends POST <address>/approve, pins the SHA-256 fingerprint of the certificate, sends no authentication, and refuses with an empty address or fingerprint
+- 20261106-16 Nestor 29c0c2f718c6 sites.json is a tree: a key of sites is a root domain of the Public Suffix List, also for private suffixes; an IP address or localhost stays; subdomains holds the nodes of the subdomains by their full host name
+- 20261106-17 Nestor 29c0c2f718c6 access and provider-config go down the tree and the nearest value wins, for provider-config for each provider type separately; pages apply only to the node of the exact host
+- 20261106-18 Nestor 29c0c2f718c6 A deny of a node wins over an allow of a node below it
+- 20261106-19 Nestor 29c0c2f718c6 provider-config replaces credentials and has one object for each provider type; the vault config is { vault, entry } and applies only to the vault provider with that vault
+- 20261106-20 Nestor 29c0c2f718c6 A page can have provider-config; it wins over the host only for that page
+- 20261106-21 Nestor 29c0c2f718c6 Discovery writes the root domain of a loaded host with "access": "allow", and writes the pages into the node of the exact host; a missing node goes into subdomains of the nearest node that covers the host
+- 20261106-22 Nestor 29c0c2f718c6 A site key that is not a root domain, a subdomains key outside its node, credentials, and a vault config without vault or entry are load errors
+- 20261106-23 Nestor 29c0c2f718c6 An approval provider is the approval of the entry of a key-value provider in server.json; "enabled": false in approval turns it off; an approval provider in providers is a load error
+- 20261106-24 Nestor 29c0c2f718c6 A refused approval adds the note "The user did not approve an action on this page." to the result of the call; the note does not name the form fill
+- 20261106-25 Nestor a514839531b7 browser_lane_open needs browserSession: normal loads and saves the storage state, fresh starts without it and merges its logins into it without a removal, isolated starts without it and saves nothing
+- 20261106-26 Nestor a514839531b7 The result of browser_lane_open and browser_lanes give the browser session; the agent tells the user the browser session; a "session" of the browser that the user asks for is the browser session
+- 20261107-01 Nestor fc2c70a7e4a7 A form of sites.json has no path: it applies on each page of its hosts where one of its fields is visible
+- 20261107-02 Nestor fc2c70a7e4a7 A node of sites.json has "forms" (each with "fields" and "submit") and "login"; "pages" and a form with "provider-config" are load errors
+- 20261107-03 Nestor fc2c70a7e4a7 "forms" and "login" go down the domain tree; the discovery writes them into the nearest node with a provider-config, else into the root domain
+- 20261107-04 Nestor fc2c70a7e4a7 The login link is clicked on each page of the host where it is visible, one time for each lane and host; after the fill, the server opens again the URL of the click, also after a failed login
+- 20261107-05 Nestor fc2c70a7e4a7 The server fills the form with the most visible fields; on a tie, the first form of the host, then of its parents, in file order
+- 20261107-06 Nestor fc2c70a7e4a7 The discovery adds the selectors of a new form to the recorded form that has one of its selectors; else it adds a new form
+- 20261107-07 Nestor fc2c70a7e4a7 The server waits FLOW_WAIT for a form field after a login click or a submit, else PEEK_WAIT one time for each URL
+- 20261107-08 Nestor fc2c70a7e4a7 A login flow that ends on a page without a visible form field logs fill_no_field with the URL, the wait and the selectors
+- 20261107-09 Nestor fc2c70a7e4a7 In the discovery mode, the server does not open again the URL of the login click
+- 20261108-01 Nestor 00b631b3ec05 Write the tool in TypeScript in strict mode; Node.js runs the .ts files with type stripping, without a build step
+- 20261108-02 Nestor 00b631b3ec05 Give each component an interface and a class; the constructors get the dependencies; one composition root makes the objects; no mutable state at module level
+- 20261108-03 Nestor 601f12a226c4 Replace the form-fill providers with plugins in plugins/<category>/<plugin>/, in the categories key-value-source, approval-plugin, dom-classifier, match-strategy and page-script
+- 20261108-04 Nestor 601f12a226c4 Plugins run in the server process and get only JSON data, their context and the services that the server gives; no server object and no Playwright object
+- 20261108-05 Nestor 601f12a226c4 A dom-classifier runs as page code against the live DOM; each field of its result is a fill candidate with a hint, and it gives the submit method with the fields that it serves
+- 20261108-06 Nestor 601f12a226c4 A match-strategy pairs the hint of a field with a key of a key-value-source; the first key-value-source in order with the key gives the value
+- 20261108-07 Nestor 601f12a226c4 The server replaces each value of a page-script message with all its keys; the Node code of a plugin never gets a value
+- 20261108-08 Nestor 601f12a226c4 The server marks the elements of the form fill and of agent calls with a ref; page scripts read the mark
+- 20261108-09 Nestor 601f12a226c4 The discovery is the dom-classifier discovery and the page-script discovery; the discovery file holds forms and login matchers in a host tree, and the recorder writes into the node of the root domain
+- 20261108-10 Nestor 601f12a226c4 Remove the discovery mode, DISCOVER and the ask provider
+- 20261108-11 Nestor 601f12a226c4 server.json has the plugin instances by category; an instance has name, plugin, description, enabled and config
+- 20261108-12 Nestor 601f12a226c4 hosts.json holds only the host access; recordHosts in server.json records the opened hosts
+- 20261108-13 Nestor 601f12a226c4 The vault system of a host is in the file of the vault instance
+- 20261108-14 Nestor 601f12a226c4 The server selects the submit method that serves the most fields with a key; without one, it fills and does not submit
+- 20261108-15 Nestor 601f12a226c4 The loop guard identifies a fill by the host and the sorted keys
+- 20261108-16 Nestor 601f12a226c4 The heuristic classifier gives login fields only with "fields": true; the default is false
+- 20261108-17 Nestor 601f12a226c4 Outside a login flow, the server waits until the page settles; it does no form fill after read-only tools
+- 20261109-01 Nestor 6a9e379704ad Each snapshot is in a file; an other text result is in a file only with more than RESULT_INLINE_MAX characters
+- 20261109-02 Nestor 6a9e379704ad The result gives the file as a link with the path, the line count and the character count; the other sections stay in the result
+- 20261109-03 Nestor 6a9e379704ad Each lane has an output folder in LANE_OUTPUT_DIR; the lane close and the cleanup at the server start delete it
+- 20261109-04 Nestor 6a9e379704ad A file with a filename of the agent stays in OUTPUT_DIR after the lane closes
+- 20261109-05 Nestor 6a9e379704ad For an empty snapshot, the server waits until the page settles and takes one more snapshot into the same file
+- 20261109-06 Nestor 6a9e379704ad The server writes the result files after the scrub of masked values
+- 20261110-01 Nestor 911895ab3a9e Support only Linux and macOS; remove the Windows launcher and the Windows code paths

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>User step</title></head>
+<body>
+  <h1>Sign in</h1>
+  <form method="post" action="/submit">
+    <label for="username">Username</label>
+    <input id="username" name="username" autocomplete="username">
+    <label for="note">Note</label>
+    <input id="note" name="note">
+    <button type="submit" id="send">Send</button>
+  </form>
+  <script>
+    // Acts as the user: fills the username and presses Send after the agent call ended.
+    if (location.search === '?user=1') {
+      setTimeout(() => {
+        const field = document.getElementById('username');
+        field.value = 'someone';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        document.getElementById('send').click();
+      }, 1500);
+    }
+  </script>
+</body>
+</html>

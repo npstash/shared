@@ -1,7 +1,3 @@
 # Normalise to LF in the repo and on checkout; core.autocrlf must not
-# rewrite shell scripts, which have to keep LF even on Windows/WSL.
+# rewrite shell scripts, which have to keep LF even on WSL.
 * text=auto eol=lf
-
-# Windows launchers are the one exception.
-*.bat text eol=crlf
-*.cmd text eol=crlf

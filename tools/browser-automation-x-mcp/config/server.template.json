@@ -1,0 +1,58 @@
+{
+  "recordHosts": false,
+  "plugins": {
+    "key-value-source": [
+      {
+        "name": "vault",
+        "plugin": "vault",
+        "description": "Secrets of the vault system that vault.json gives for each host",
+        "enabled": false,
+        "mask": true,
+        "config": { "vault": "", "file": "vault.json" }
+      },
+      {
+        "name": "values",
+        "plugin": "values",
+        "description": "Fixed values that are not secret, e.g. a name",
+        "enabled": true,
+        "mask": false,
+        "config": { "values": {} }
+      }
+    ],
+    "dom-classifier": [
+      {
+        "name": "discovery",
+        "plugin": "discovery",
+        "description": "The forms and the login links that the recorder learned, from discovery.json",
+        "enabled": true,
+        "config": { "file": "discovery.json" }
+      },
+      {
+        "name": "heuristic",
+        "plugin": "heuristic",
+        "description": "The submit methods of the forms; login fields by rules only with \"fields\": true",
+        "enabled": true,
+        "config": { "fields": false }
+      }
+    ],
+    "match-strategy": [
+      {
+        "name": "propagate",
+        "plugin": "propagate",
+        "description": "The hint of a field is its key, if a key-value-source has the key",
+        "enabled": true,
+        "config": {}
+      }
+    ],
+    "page-script": [
+      {
+        "name": "discovery-recorder",
+        "plugin": "discovery",
+        "description": "Records the forms that the user fills, and writes them into discovery.json",
+        "enabled": false,
+        "config": { "file": "discovery.json" }
+      }
+    ]
+  },
+  "tools": {}
+}
