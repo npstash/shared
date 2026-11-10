@@ -6,7 +6,6 @@
 AGENTS.md             root index; it imports the container indexes
 setup.sh              set up a clone; a copy of shared/setup.sh
 .gitattributes .gitignore
-.continueignore       paths that Continue does not read
 .github/workflows/    CI; tests.yml is a copy of shared/.github/workflows/tests.yml
 .claude/              Claude Code config; skills/ holds only links that setup.sh makes
 .kilo/ .vscode/ .mcp.json   config of other agent tools and of the editor

@@ -124,7 +124,7 @@ a `client_ready` entry and a `tool_call` entry for `browser_navigate`.
 
 The deny rules close this folder, the config folder and `.mcp.json` to the agents. Put them into
 `permissions.deny` of the root `.claude/settings.json`, and the matching settings into the config
-of the other agent tools (`.kilo/kilo.jsonc`, `.continue/`).
+of the other agent tools (`.kilo/kilo.jsonc`).
 
 - The output folder (`.local_assets/browser-automation-x-mcp/output/` of the working folder) stays
   open. The agents read the snapshots and the screenshots there.

@@ -1,5 +1,0 @@
-# Continue does not index or read these paths. Syntax of .gitignore.
-# Close the browser tool, its config and .mcp.json to the agent.
-shared/tools/browser-automation-x-mcp/
-local/configs/browser-automation-x-mcp/
-.mcp.json
