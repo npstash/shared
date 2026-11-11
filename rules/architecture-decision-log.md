@@ -20,7 +20,7 @@ Record its decisions in the ADL of the project.
     of the entries of that date in this `ADL.md`, from `01`. After `99`, add digits.
   - `name`: the git name of the user for a user decision. For an action that an agent
     took without input from the user, the model name, e.g. `Opus-5.5`. See
-    [agent-identity](agent-identity.md). An agent environment can set `user.name` to the
+    the rule agent-identity. An agent environment can set `user.name` to the
     agent; then use the name from the commits of the user.
   - `commit`: the 12-character ID of the last commit in the repository of the `ADL.md`
     at the time of the decision. For an entry from before the item moved to this

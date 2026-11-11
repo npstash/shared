@@ -3,46 +3,33 @@
 One file for each rule, so that you can copy a rule alone. A **container** is a folder
 with `rules/`, `skills/`, `tools/` and an index. This repository is one container.
 
-- `rules/<id>.md` — for all agents; index: [AGENTS.md](AGENTS.md).
-- `rules/<agent>/<id>.md` — for specific <agent> only; see [AGENTS.md](AGENTS.md).
+The rule rules-and-skills ([rules/rules-and-skills.md](rules/rules-and-skills.md)) gives the
+format of a rule, of an index line and of a skill.
 
 Cite a rule by its id, not by a number. Numbers collide between workspaces.
 
-## File format
-
-```markdown
----
-id: credentials-from-vault          # file name without .md (agent/ prefix for agent-only)
-summary: One line, also used in the index.
-applies-to: all-agents              # or: claude-code, cline-sr, kilo, etc.
-requires:                           # what to copy with the rule
-  - tools/auth
-related: [nothing-outside-repo]     # ids of rules that the text cites
----
-
-# Title
-
-Rule text.
-```
-
 ## How the tools load rules
 
-Each container `AGENTS.md` has a section per agent: Common, Cline SR, Claude Code, Kilo.
-- **Claude Code** follows `@` imports: root `AGENTS.md` → container
-  `AGENTS.md` → `@rules/<id>.md`. It does not load a rule without an index line.
-- **Cline SR** reads root `AGENTS.md` → container `AGENTS.md` → `@rules/<id>.md`.
-- **Kilo** does not follow `@` imports. `.kilo/kilo.jsonc` loads each `AGENTS.md` and
-  `rules/*.md`. The glob does not recurse, so it skips `claude/`, `cline/` and `kilo/`.
+The index [AGENTS.md](AGENTS.md) has a section for each agent. It is always in the context of
+the agent. A rule has one of three classes:
+
+- **Always**: the index imports the rule file with `@`.
+- **Triggered**: the index line gives the trigger and a link. The agent reads the file when the
+  trigger applies.
+- **Inline**: the index line is the complete rule.
+
+- **Claude Code** follows `@` imports: root `AGENTS.md` → container `AGENTS.md` → `@rules/<id>.md`.
+- **Kilo** does not follow `@` imports. `.kilo/kilo.jsonc` loads each `AGENTS.md` and `rules/*.md`.
+  Thus Kilo loads each rule file at the start. The glob does not recurse: it skips `rules/claude/`.
+
+To measure if agents follow a rule, use the skill `eval-rule` and the tool
+[rule-evals](tools/rule-evals/README.md).
 
 ## Skills
 
-Put a skill into `skills/<name>/SKILL.md` and add it to [AGENTS.md](AGENTS.md). Put a
-Claude Code-only skill into `skills/claude/<name>/SKILL.md` and add it to the "Claude Code"
-section of [AGENTS.md](AGENTS.md). Put a Cline SR-only skill into
-`skills/cline/<name>/SKILL.md` and add it to the "Cline SR" section of [AGENTS.md](AGENTS.md).
-Give the index line only the name and the link: the agent tools load the description from the
-frontmatter. Then run `setup.sh` of the repository root. It links the skill into
-`.claude/skills/`, where Claude Code and Kilo find it.
+Put a skill into `skills/<name>/SKILL.md` and add it to [AGENTS.md](AGENTS.md). Then run
+`setup.sh` of the repository root. It links the skill into `.claude/skills/`, where Claude Code
+and Kilo find it.
 
 ## Use in another workspace
 
@@ -50,5 +37,4 @@ frontmatter. Then run `setup.sh` of the repository root. It links the skill into
 2. Import `@shared/AGENTS.md` in the root `AGENTS.md`.
 3. Add `shared/AGENTS.md` and `shared/rules/*.md` to `instructions` in `.kilo/kilo.jsonc`.
 4. Copy [setup.sh](setup.sh) to the root, and run it.
-5. Do the `requires` of each rule. For the vault, add a vault home repository that
-   `tools/auth/run.sh create-vault` makes.
+5. For the vault, add a vault home repository that `tools/auth/run.sh create-vault` makes.

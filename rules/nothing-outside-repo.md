@@ -4,9 +4,7 @@ Create and change files only inside this repository. Do not write to home folder
 (`~/.config`, `~/.claude`, `~/.local`…), `/tmp`, Windows user folders (`C:\Users\…`,
 `.wslconfig`) or other OS locations.
 
-- Rules and preferences: `<container>/rules/<id>.md` (Claude Code only:
-  `<container>/rules/claude/<id>.md`), and an index line in the `AGENTS.md` of the
-  container. Never a memory store of a tool.
+- Rules and preferences: a rule (rule rules-and-skills). Never a memory store of a tool.
 - Tool config: the repository copy (e.g. `.kilo/kilo.jsonc`), not the user-level one.
 - Temp files, backups, scratch: `.local_assets/`.
 - You can read outside. If a write outside is necessary, first ask with the exact

@@ -40,5 +40,5 @@ For each error: stop and tell the user.
 | `--sudo needs --sudo-system NAME` | Ask the user for the exact name of the sudo system. |
 | `has no password` / `has no username` | Ask the user to fill the secret in the vault. |
 | `Authentication failed` | Ask the user to check the password in the vault. |
-| `no way to open the vault` | See the [credentials](../credentials/SKILL.md) skill. |
+| `no way to open the vault` | See the skill `credentials`. |
 | `sudo: ... incorrect password` | Ask the user to check the password of the sudo system. |

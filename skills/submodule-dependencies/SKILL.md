@@ -5,7 +5,7 @@ description: Find shared, a vault or another shareable submodule from a project 
 
 # Submodule dependencies
 
-Follow the rule [submodule-dependencies](../../rules/submodule-dependencies.md).
+Follow the rule submodule-dependencies.
 
 ## Lookup
 

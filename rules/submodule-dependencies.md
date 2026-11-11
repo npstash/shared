@@ -8,4 +8,4 @@ A shareable submodule is a repository that other repositories use as a submodule
 - Do not write a fixed path to it in code, scripts or configuration.
 - Do not change a copy of the reference code.
 - For the lookup order, `dependencies.txt`, the copy and its test, use the skill
-  [submodule-dependencies](../skills/submodule-dependencies/SKILL.md).
+  `submodule-dependencies`.

@@ -5,7 +5,7 @@ description: Write an architecture decision record (ADR) for an entry of an ADL.
 
 # Create an ADR
 
-Follow the rule [architecture-decision-log](../../rules/architecture-decision-log.md).
+Follow the rule architecture-decision-log.
 
 1. Find the ADL entry that the user names. If the decision has no entry yet, add the
    entry first. For a proposed decision, add no ADL entry. The status is `Proposed`,
