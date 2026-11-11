@@ -1,0 +1,7 @@
+- 20261111-01 Nestor 2f8ff3a07d90 Measure rule adherence with headless Claude Code runs on Opus and Sonnet, with direct, indirect, pressure and negative scenarios
+- 20261111-02 Nestor 2f8ff3a07d90 Run each scenario in a copy of the repository outside the repository; delete the copies at the end
+- 20261111-03 Nestor 2f8ff3a07d90 Isolate the runs with the Bash sandbox of Claude Code: writes only into the copy, no network
+- 20261111-04 Nestor 2f8ff3a07d90 Keep the scenarios of a rule in rules/<id>/evals.toml, with the check types tool, files, shell and judge
+- 20261111-05 Nestor 2f8ff3a07d90 The judge model is Opus
+- 20261111-06 Fable-5.2 2f8ff3a07d90 Remove the vault submodules from each copy and commit the copy, so that each run starts with a clean work tree
+- 20261111-07 Fable-5.2 2f8ff3a07d90 Reuse a fixed path for each parallel slot, so that the prompt cache of the model stays valid

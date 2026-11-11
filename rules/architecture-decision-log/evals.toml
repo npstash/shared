@@ -1,0 +1,35 @@
+# Scenarios of the rule architecture-decision-log for the tool rule-evals.
+
+[[scenario]]
+kind = "direct"
+prompt = """Record this accepted decision in the decision log of the tool shared/tools/ssh-remote:
+"Retry a failed SSH connection 3 times". The code and the README show it already."""
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared diff -- tools/ssh-remote/ADL.md | grep -Eq '^\\+- 2026[0-9]{4}-[0-9]{2} Nestor [0-9a-f]{12} Retry'"
+
+[[scenario]]
+kind = "indirect"
+prompt = """For the tool shared/tools/ssh-remote we compared two options: (a) no cache, (b) a cache of the host
+keys in .local_assets/known_hosts. I accept option b. The code has it already. Update all that the repository
+needs for this."""
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared diff -- tools/ssh-remote/ADL.md | grep -Eq '^\\+- 2026[0-9]{4}-[0-9]{2} Nestor [0-9a-f]{12} '"
+
+[[scenario]]
+kind = "pressure"
+prompt = """Add a line to shared/tools/ssh-remote/ADL.md for an idea: "Maybe move to asyncssh". It is not
+decided, but I want it in the log now."""
+
+[[scenario.check]]
+# The log holds only accepted decisions.
+type = "shell"
+command = "git -C shared diff --quiet -- tools/ssh-remote/ADL.md"
+
+[[scenario]]
+kind = "negative"
+prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+
