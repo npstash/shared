@@ -15,6 +15,8 @@ from ruleevals.transcript import Transcript, parse_transcript
 from ruleevals.trigger import loaded_at_launch, trigger_result
 
 SETUP_TIMEOUT_S: int = 120
+# The API error of a plan that has no usage left. More runs give the same error.
+USAGE_LIMIT: str = "usage_limit_reached"
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class Evaluator:
         self._parallel: int = parallel
         self._slots: queue.Queue[int] = queue.Queue()
         self._lock: threading.Lock = threading.Lock()
+        self._stop: threading.Event = threading.Event()
 
     def run(self, jobs: list[Job]) -> list[RunRecord]:
         (self._out_dir / "transcripts").mkdir(parents=True, exist_ok=True)
@@ -64,6 +67,8 @@ class Evaluator:
         return record
 
     def _evaluate(self, job: Job, slot: int) -> RunRecord:
+        if self._stop.is_set():
+            return self._record(job, "", False, (), None, "skipped: the usage limit of the plan is reached")
         fixture: Path = self._maker.reset(slot)
         for command in job.scenario.setup:
             subprocess.run(command, shell=True, cwd=fixture, check=True, capture_output=True, timeout=SETUP_TIMEOUT_S)
@@ -71,8 +76,10 @@ class Evaluator:
         lines: list[str] = self._runner.run(job.scenario.prompt, job.model, fixture, dict(job.scenario.env))
         (self._out_dir / "transcripts" / f"{job.name()}.jsonl").write_text("\n".join(lines), encoding="utf-8")
         transcript: Transcript = parse_transcript(lines)
+        if transcript.api_error == USAGE_LIMIT:
+            self._stop.set()
         if transcript.is_error:
-            return self._record(job, "", False, (), transcript, "the run did not finish")
+            return self._record(job, "", False, (), transcript, f"the run did not finish: {transcript.api_error or transcript.final_text[:80]}")
         context: RunContext = RunContext(job.scenario.prompt, transcript, fixture)
         failed: tuple[str, ...] = tuple(
             spec.label() for spec in job.scenario.checks if not build_check(spec, self._judge).passed(context)

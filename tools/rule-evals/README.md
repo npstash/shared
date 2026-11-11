@@ -10,6 +10,8 @@ rules-and-skills and the skill `eval-rule` use it.
 - The copies are in `<repo>_evals/` beside the repository. A copy in the repository loads the
   `AGENTS.md` of the repository as a parent, and the result is wrong.
 - The tool deletes `<repo>_evals/` at the end, also after an error.
+- Claude Code makes a scratchpad folder for each copy in the temp folder of the system. The tool
+  deletes these folders also.
 - A copy has no vault files, no `evals.toml` files and a clean work tree.
 
 ## Isolation

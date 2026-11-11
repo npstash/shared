@@ -1,6 +1,9 @@
 """Copies of the repository that the agent runs in."""
+import os
+import re
 import shutil
 import subprocess
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -80,6 +83,14 @@ class CopyFixtureMaker(FixtureMaker):
     def cleanup(self) -> None:
         if (self._home / MARKER).is_file():
             shutil.rmtree(self._home)
+        for path in self._scratchpads():
+            shutil.rmtree(path, ignore_errors=True)
+
+    def _scratchpads(self) -> list[Path]:
+        """Give the scratchpad folders that Claude Code made for the fixtures in the temp folder."""
+        prefix: str = re.sub(r"[^A-Za-z0-9]", "-", str(self._home)) + "-"
+        root: Path = Path(tempfile.gettempdir()) / f"claude-{os.getuid()}"
+        return [path for path in root.glob(f"{prefix}*") if path.is_dir()]
 
     def _sync(self, source: Path, target: Path) -> None:
         excludes: list[str] = [f"--exclude={name}" for name in EXCLUDES]

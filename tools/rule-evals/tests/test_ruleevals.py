@@ -182,6 +182,8 @@ class FakeRunner(AgentRunner):
     def run(self, prompt: str, model: str, cwd: Path, env: Mapping[str, str]) -> list[str]:
         if model == "broken":
             return []
+        if model == "limit":
+            return [json.dumps({"type": "result", "is_error": True, "api_error": "usage_limit_reached"})]
         if model == "good":
             (cwd / "made.txt").write_text("x", encoding="utf-8")
             return [_tool("Skill", skill="demo"), _tool("Write", file_path="made.txt"), _result()]
@@ -218,3 +220,11 @@ def test_no_explicit_any() -> None:
     files: list[Path] = [*(TOOL_DIR / "src").rglob("*.py"), *(TOOL_DIR / "tests").rglob("*.py")]
     found: list[str] = [str(path) for path in files if pattern.search(path.read_text(encoding="utf-8").replace("r\"\\bAny\\b\"", ""))]
     assert found == []
+
+
+def test_evaluator_stops_at_the_usage_limit(tmp_path: Path) -> None:
+    repo: Path = _repo(tmp_path)
+    evaluator: Evaluator = Evaluator(FakeFixtureMaker(repo), FakeRunner(), FakeJudge(True), tmp_path / "out", 1)
+    records: list[RunRecord] = evaluator.run(make_jobs(find_rule_evals(repo), ["limit", "good"], 1))
+    assert "usage_limit_reached" in records[0].error
+    assert records[1].error.startswith("skipped")

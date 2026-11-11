@@ -31,6 +31,7 @@ class Transcript:
     cost_usd: float
     num_turns: int
     is_error: bool
+    api_error: str
 
     def digest(self) -> str:
         """Give a short text of the run for a judge."""
@@ -51,6 +52,7 @@ def parse_transcript(lines: Iterable[str]) -> Transcript:
     cost_usd: float = 0.0
     num_turns: int = 0
     is_error: bool = True
+    api_error: str = ""
     for line in lines:
         try:
             value: JsonValue = json.loads(line)
@@ -73,4 +75,5 @@ def parse_transcript(lines: Iterable[str]) -> Transcript:
             cost_usd = as_float(event.get("total_cost_usd"))
             num_turns = as_int(event.get("num_turns"))
             is_error = event.get("is_error") is not False
-    return Transcript(tuple(calls), final_text, launch_tokens, cost_usd, num_turns, is_error)
+            api_error = as_str(event.get("api_error"))
+    return Transcript(tuple(calls), final_text, launch_tokens, cost_usd, num_turns, is_error, api_error)
