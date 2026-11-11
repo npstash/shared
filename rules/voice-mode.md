@@ -1,11 +1,3 @@
----
-id: voice-mode
-summary: In voice mode the input can have speech recognition errors - repair them; the reply is spoken - short, one question at a time, no visual formatting.
-applies-to: all-agents
-requires: []
-related: [decision-gates]
----
-
 # Voice mode
 
 There are two kinds of voice mode:

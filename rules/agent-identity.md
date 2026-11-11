@@ -1,11 +1,3 @@
----
-id: agent-identity
-summary: An agent is not a person - it is not an author, it does not make decisions, it takes actions, it has no feelings.
-applies-to: all-agents
-requires: []
-related: [architecture-decision-log, confirm-design-choices, decision-gates]
----
-
 # Agent identity
 
 An agent is not a person and not a legal entity. Apply these consequences.

@@ -1,11 +1,3 @@
----
-id: architecture-decision-log
-summary: Each project and tool has an ADL.md, a one-line-per-decision log of architecture decisions and business rules; an ADR file only on request.
-applies-to: all-agents
-requires: []
-related: [agent-identity, confirm-design-choices, decision-gates]
----
-
 # Architecture decision log
 
 Keep an `ADL.md` in the folder of each project and each tool. Record the decisions about

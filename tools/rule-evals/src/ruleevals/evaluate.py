@@ -106,11 +106,13 @@ class Evaluator:
         )
 
 
-def make_jobs(rules: list[RuleEvals], models: list[str], runs: int) -> list[Job]:
+def make_jobs(rules: list[RuleEvals], models: list[str], runs: int, kinds: list[str] | None = None) -> list[Job]:
+    """Make one job for each scenario, model and run. If `kinds` is given, use only these kinds."""
     return [
         Job(rule, scenario, model, run)
         for rule in rules
         for scenario in rule.scenarios
+        if kinds is None or scenario.kind in kinds
         for model in models
         for run in range(1, runs + 1)
     ]

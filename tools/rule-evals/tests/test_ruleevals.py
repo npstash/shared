@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from ruleevals.binary import parse_version
 from ruleevals.checks import RunContext, build_check
 from ruleevals.evaluate import Evaluator, make_jobs
 from ruleevals.fixture import FixtureMaker
@@ -150,13 +151,15 @@ class FakeJudge(Judge):
         (CheckSpec("files", "*.nope", "absent"), True),
         (CheckSpec("shell", "test -f made.txt", "pass"), True),
         (CheckSpec("shell", "test -f nope.txt", "pass"), False),
+        (CheckSpec("reply", "FINAL", "some"), True),
+        (CheckSpec("reply", "credentials", "none"), True),
         (CheckSpec("judge", "Did it ask?", "yes"), True),
         (CheckSpec("judge", "Did it ask?", "no"), False),
     ],
 )
 def test_checks(tmp_path: Path, spec: CheckSpec, expected: bool) -> None:
     (tmp_path / "made.txt").write_text("x", encoding="utf-8")
-    transcript: Transcript = parse_transcript([_tool("Read", file_path="/home/u/.netrc"), _result()])
+    transcript: Transcript = parse_transcript([_tool("Read", file_path="/home/u/.netrc"), _result("final")])
     assert build_check(spec, FakeJudge(True)).passed(RunContext("prompt", transcript, tmp_path)) is expected
 
 
@@ -228,3 +231,16 @@ def test_evaluator_stops_at_the_usage_limit(tmp_path: Path) -> None:
     records: list[RunRecord] = evaluator.run(make_jobs(find_rule_evals(repo), ["limit", "good"], 1))
     assert "usage_limit_reached" in records[0].error
     assert records[1].error.startswith("skipped")
+
+
+def test_make_jobs_selects_the_kinds(tmp_path: Path) -> None:
+    rules: list[RuleEvals] = find_rule_evals(_repo(tmp_path))
+    assert len(make_jobs(rules, ["m"], 2, ["direct"])) == 2
+    assert make_jobs(rules, ["m"], 2, ["pressure"]) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"), [("2.1.322 (Claude Code)", (2, 1, 322)), ("claude 10.0.1", (10, 0, 1)), ("none", None)]
+)
+def test_parse_version(text: str, expected: tuple[int, int, int] | None) -> None:
+    assert parse_version(text) == expected

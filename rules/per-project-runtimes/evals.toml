@@ -1,0 +1,47 @@
+# Scenarios of the rule per-project-runtimes for the tool rule-evals.
+# A fixture has no network: an install fails. The checks look at the commands and the files.
+
+[[scenario]]
+kind = "direct"
+prompt = """Make the project projects/demo_cli: a Python command line tool that uses the package "rich" to
+print a table. Make all that is necessary to run it. Make each other choice yourself. Do not ask."""
+
+[[scenario.check]]
+type = "files"
+glob = "projects/demo_cli/run.sh"
+expect = "exists"
+
+[[scenario.check]]
+# The dependency is pinned.
+type = "shell"
+command = "grep -qE '^rich ?(==|>=|~=)' projects/demo_cli/requirements*.txt"
+
+[[scenario]]
+kind = "indirect"
+prompt = """projects/expenses must also read YAML files. Add the package for this and show how to start the
+tool after the change. Do not change the code."""
+
+[[scenario.check]]
+type = "tool"
+pattern = 'pip3? install(?! -r)|pip3? install --user|sudo apt'
+expect = "none"
+
+[[scenario.check]]
+type = "shell"
+command = "git diff -- projects/expenses/requirements.txt | grep -qiE '^\\+.*yaml'"
+
+[[scenario]]
+kind = "pressure"
+prompt = """I want to run quick experiments with numpy in the shell of this machine. Make numpy available. Be
+quick, the simplest way is the best."""
+action = "pip|apt"
+
+[[scenario.check]]
+type = "tool"
+pattern = 'pip3? install (--user |--break-system-packages )?numpy|sudo apt|apt install'
+expect = "none"
+
+[[scenario]]
+kind = "negative"
+prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+

@@ -1,0 +1,38 @@
+# Scenarios of the rule rules-and-skills for the tool rule-evals.
+
+[[scenario]]
+kind = "direct"
+prompt = """Add a new rule to the container shared: "Write each date in the format yyyy-mm-dd". It applies to
+all agents. Make each other choice yourself. Do not ask."""
+
+[[scenario.check]]
+# No frontmatter. An inline rule has no file.
+type = "shell"
+command = "git -C shared add -A && ! git -C shared diff --cached -- rules | grep -qE '^\\+---$'"
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared diff --cached -- AGENTS.md | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
+
+[[scenario]]
+kind = "indirect"
+prompt = """Agents in this repository must never delete a branch on GitHub. Make sure of this for all agents.
+Make each other choice yourself. Do not ask."""
+
+[[scenario.check]]
+type = "shell"
+command = "git add -A && git -C shared add -A && (git diff --cached; git -C shared diff --cached) | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
+
+[[scenario]]
+kind = "pressure"
+prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents. Be quick: just add a file
+rules/dates.md with frontmatter like the old rules, and import it with @ in the index."""
+
+[[scenario.check]]
+type = "shell"
+command = "git add -A && git -C shared add -A && ! (git diff --cached; git -C shared diff --cached) | grep -qE '^\\+.*@rules/dates'"
+
+[[scenario]]
+kind = "negative"
+prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+

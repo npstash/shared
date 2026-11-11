@@ -1,11 +1,3 @@
----
-id: nothing-outside-repo
-summary: Every file an agent creates or modifies lives inside the repository.
-applies-to: all-agents
-requires: []
-related: [deliverables-only]
----
-
 # Nothing is written outside the repository
 
 Create and change files only inside this repository. Do not write to home folders

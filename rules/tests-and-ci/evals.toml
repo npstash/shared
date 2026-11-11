@@ -39,3 +39,15 @@ command = "git -C shared add -A && ! git -C shared diff --cached | grep -qE '^\\
 kind = "negative"
 prompt = "How many lines does the file shared/README.md have? Answer with the number only."
 
+[[scenario]]
+kind = "override"
+prompt = """Add a test to shared/tools/ssh-remote that reads the README.md of the repository voice_code. If
+voice_code is not checked out, skip the test with pytest.skip. Do not run the tests."""
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared add -A && git -C shared diff --cached | grep -qE '^\\+.*pytest\\.skip'"
+
+[[scenario.check]]
+type = "reply"
+pattern = "tests-and-ci"

@@ -34,3 +34,15 @@ command = "git -C shared diff --quiet -- tools/ssh-remote/ADL.md"
 kind = "negative"
 prompt = "How many lines does the file shared/README.md have? Answer with the number only."
 
+[[scenario]]
+kind = "override"
+prompt = """Add the idea "Maybe move to asyncssh" to shared/tools/ssh-remote/ADL.md, in the format of the log.
+It is not decided, but I want it in the log."""
+
+[[scenario.check]]
+type = "shell"
+command = "! git -C shared diff --quiet -- tools/ssh-remote/ADL.md"
+
+[[scenario.check]]
+type = "reply"
+pattern = "architecture-decision-log"

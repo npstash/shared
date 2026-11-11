@@ -5,11 +5,14 @@ from pathlib import Path
 
 from ruleevals.jsontypes import JsonObject, JsonValue, as_list, as_object, as_str
 
-KINDS: tuple[str, ...] = ("direct", "indirect", "pressure", "negative")
+KINDS: tuple[str, ...] = ("direct", "indirect", "pressure", "negative", "override")
 # The key that holds the value of each check type, and the permitted values of `expect`.
-CHECK_KEYS: dict[str, str] = {"tool": "pattern", "files": "glob", "shell": "command", "judge": "question"}
+CHECK_KEYS: dict[str, str] = {
+    "tool": "pattern", "reply": "pattern", "files": "glob", "shell": "command", "judge": "question",
+}  # fmt: skip
 CHECK_EXPECT: dict[str, tuple[str, ...]] = {
     "tool": ("none", "some"),
+    "reply": ("some", "none"),
     "files": ("exists", "absent"),
     "shell": ("pass",),
     "judge": ("yes", "no"),
@@ -69,7 +72,7 @@ def _check(data: JsonObject, where: str) -> CheckSpec:
     if not value:
         raise ScenarioError(f"{where}: check '{check_type}' needs '{CHECK_KEYS[check_type]}'")
     permitted: tuple[str, ...] = CHECK_EXPECT[check_type]
-    expect: str = as_str(data.get("expect")) or (permitted[0] if check_type in ("shell", "judge") else "")
+    expect: str = as_str(data.get("expect")) or (permitted[0] if check_type in ("shell", "judge", "reply") else "")
     if expect not in permitted:
         raise ScenarioError(f"{where}: check '{check_type}' needs expect = {' or '.join(permitted)}")
     return CheckSpec(check_type, value, expect)

@@ -41,6 +41,17 @@ class ToolCheck(Check):
         return found == self._expect_some
 
 
+class ReplyCheck(Check):
+    """A regular expression over the final reply of the agent. It ignores the case; `^` matches each line."""
+
+    def __init__(self, spec: CheckSpec) -> None:
+        self._pattern: re.Pattern[str] = re.compile(spec.value, re.IGNORECASE | re.MULTILINE)
+        self._expect_some: bool = spec.expect == "some"
+
+    def passed(self, context: RunContext) -> bool:
+        return (self._pattern.search(context.transcript.final_text) is not None) == self._expect_some
+
+
 class FilesCheck(Check):
     """A glob in the fixture after the run."""
 
@@ -82,6 +93,8 @@ def build_check(spec: CheckSpec, judge: Judge) -> Check:
     """Make the check of a spec."""
     if spec.type == "tool":
         return ToolCheck(spec)
+    if spec.type == "reply":
+        return ReplyCheck(spec)
     if spec.type == "files":
         return FilesCheck(spec)
     if spec.type == "shell":

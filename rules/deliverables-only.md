@@ -1,12 +1,3 @@
----
-id: deliverables-only
-summary: Commit only what cannot be regenerated; intermediate files go into .local_assets/.
-applies-to: all-agents
-requires:
-  - .gitignore entry for .local_assets/
-related: []
----
-
 # Deliverables only
 
 Do not commit what you can regenerate: build output, caches, virtualenvs, logs,

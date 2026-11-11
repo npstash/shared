@@ -1,12 +1,3 @@
----
-id: decision-gates
-summary: Ask for open decisions before generating the rest; one question section per reply;
-  actions taken listed at the top of the reply.
-applies-to: all-agents
-requires: []
-related: [agent-identity, confirm-design-choices, voice-mode]
----
-
 # Decision gates
 
 Default mode: do not write content that depends on unconfirmed decisions or assumptions.

@@ -1,13 +1,3 @@
----
-id: tests-and-ci
-summary: Tests in tests/, run by run.sh test and by the framework directly, write only into
-  .local_assets, use verified fakes of other repositories; CI checks out the listed repositories.
-applies-to: all-agents
-requires:
-  - .github/workflows/tests.yml   # a copy of the one in this repository
-related: [per-project-runtimes, submodule-dependencies]
----
-
 # Tests and CI
 
 - Put the tests of each project, component and tool into its `tests/` folder.

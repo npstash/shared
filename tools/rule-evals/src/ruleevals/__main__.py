@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from ruleevals.binary import AUTO, find_claude_binary
 from ruleevals.evaluate import Evaluator, make_jobs
 from ruleevals.fixture import WORKTREE, CopyFixtureMaker
 from ruleevals.report import read_records, render_report
@@ -34,7 +35,8 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--runs", type=int, default=3)
     evaluate.add_argument("--parallel", type=int, default=4)
     evaluate.add_argument("--judge-model", default="opus")
-    evaluate.add_argument("--claude-bin", default="claude")
+    evaluate.add_argument("--kinds", default="all", help="scenario kinds with commas, or all")
+    evaluate.add_argument("--claude-bin", default=AUTO, help=f"a path, or {AUTO}")
     evaluate.add_argument("--budget-usd", type=float, default=2.0, help="limit of one run")
     evaluate.add_argument("--timeout", type=int, default=900, help="seconds for one run")
     evaluate.add_argument("--repo", type=Path, default=None)
@@ -67,7 +69,10 @@ def main(argv: list[str]) -> int:
     repo: Path = repo_arg.resolve() if repo_arg else _repo_root()
     rules: list[RuleEvals] = _select(find_rule_evals(repo), args.rules)
     models: str = args.models
-    binary: str = args.claude_bin
+    claude_bin: str = args.claude_bin
+    binary: str = find_claude_binary() if claude_bin == AUTO else claude_bin
+    print(f"Claude Code: {binary}", flush=True)
+    kinds: str = args.kinds
     timeout: int = args.timeout
     maker: CopyFixtureMaker = CopyFixtureMaker(repo)
     try:
@@ -75,7 +80,7 @@ def main(argv: list[str]) -> int:
         runner: ClaudeCliRunner = ClaudeCliRunner(binary, out_dir / "settings.json", args.budget_usd, timeout)
         judge: ClaudeCliJudge = ClaudeCliJudge(binary, args.judge_model, maker.home, timeout)
         evaluator: Evaluator = Evaluator(maker, runner, judge, out_dir, args.parallel)
-        records = evaluator.run(make_jobs(rules, models.split(","), args.runs))
+        records = evaluator.run(make_jobs(rules, models.split(","), args.runs, None if kinds == "all" else kinds.split(",")))
     finally:
         if not args.keep:
             maker.cleanup()
