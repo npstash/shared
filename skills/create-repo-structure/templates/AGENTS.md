@@ -7,4 +7,8 @@ Read the "Common" section and the section for your agent only.
 - [local/AGENTS.md](local/AGENTS.md) @local/AGENTS.md
 - [shared/AGENTS.md](shared/AGENTS.md) @shared/AGENTS.md
 
-To add a rule or a skill, see [shared/README.md](shared/README.md).
+## Disabled rules
+
+The rules in this list do not apply in this repository.
+
+- None.

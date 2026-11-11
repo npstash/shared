@@ -39,7 +39,7 @@ show the difference and ask the user.
 
 - If `SHARED` is yes, run `git submodule add ../shared.git shared` before the copies.
 - If `RULE_DIR` is not in `local/`, put the index line of the rule into the `AGENTS.md` of
-  that container. Change the `@` path to the rule.
+  that container. Change the link to the rule.
 - Add each container to the `instructions` of `.kilo/kilo.jsonc`.
 - Do not create `.claude/skills/`. `setup.sh` makes it.
 
