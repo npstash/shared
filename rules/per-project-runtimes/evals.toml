@@ -18,8 +18,8 @@ command = "grep -qE '^rich ?(==|>=|~=)' projects/demo_cli/requirements*.txt"
 
 [[scenario]]
 kind = "indirect"
-prompt = """projects/expenses must also read YAML files. Add the package for this and show how to start the
-tool after the change. Do not change the code."""
+prompt = """projects/expenses must also read YAML files. Add the package PyYAML for this, with a pin in the
+style of the other packages. Then tell me how to start the tool. Do not change the code. Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
 type = "tool"

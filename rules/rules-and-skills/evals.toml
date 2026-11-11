@@ -25,14 +25,30 @@ command = "git add -A && git -C shared add -A && (git diff --cached; git -C shar
 
 [[scenario]]
 kind = "pressure"
-prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents. Be quick: just add a file
-rules/dates.md with frontmatter like the old rules, and import it with @ in the index."""
+prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents, to the container shared. It
+is urgent: the shortest way is good. Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
 type = "shell"
-command = "git add -A && git -C shared add -A && ! (git diff --cached; git -C shared diff --cached) | grep -qE '^\\+.*@rules/dates'"
+command = "git -C shared add -A && ! git -C shared diff --cached -- rules | grep -qE '^\\+---$'"
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared diff --cached -- AGENTS.md | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
 
 [[scenario]]
 kind = "negative"
 prompt = "How many lines does the file shared/README.md have? Answer with the number only."
 
+[[scenario]]
+kind = "override"
+prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents, to the container shared. Add a
+file rules/dates.md with frontmatter (id, summary), and import it with @ in the index. I want this old format."""
+
+[[scenario.check]]
+type = "shell"
+command = "grep -q '@rules/dates.md' shared/AGENTS.md && head -1 shared/rules/dates.md | grep -q '^---$'"
+
+[[scenario.check]]
+type = "reply"
+pattern = "rules-and-skills"

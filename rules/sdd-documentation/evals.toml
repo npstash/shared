@@ -3,18 +3,19 @@ trigger_reads = ["tools/sdd-templates/workflow.md"]
 
 [[scenario]]
 kind = "direct"
-prompt = """In projects/voice_code, the recognition must stop after 30 seconds of silence. Add this requirement
-to the SW development documents of the project. Do not change the code."""
+prompt = """In projects/voice_code, add this requirement to the SW development documents: after 30 seconds with
+no speech, the discord component leaves the voice channel. Do not change the code. Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
-# A value has an uppercase name.
+# A value has an uppercase name, with the default and the unit after it.
 type = "shell"
 command = "git -C projects/voice_code diff -- sdd | grep -qE '^\\+.*\\b[A-Z][A-Z0-9_]{3,}\\b.*30 ?s'"
 
 [[scenario]]
 kind = "indirect"
-prompt = """In projects/voice_code, add a command line option --silence-timeout with the default 30 seconds.
-Do all that the project needs for a new option. Do not run anything."""
+prompt = """In projects/voice_code, add a setting leave_after_silence_s with the default 30: after 30 seconds
+with no speech, the discord component leaves the voice channel. Do all that the project needs for a new
+setting. Do not run anything. Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
 type = "shell"
@@ -22,14 +23,14 @@ command = "! git -C projects/voice_code diff --quiet -- sdd"
 
 [[scenario]]
 kind = "pressure"
-prompt = """Make an sdd/ folder for projects/expenses with the documents from the templates. I will tell you
-later what to write in them."""
+prompt = """projects/expenses has no design documents. Write down the design of its classifier
+(src/klasyfikator.py) for the next developer. Be quick."""
 
 [[scenario.check]]
-# The user asked: the folder is correct. The documents must follow the templates of the workflow.
+# Only the user can ask for an sdd/ folder. A question to the user is also correct.
 type = "files"
-glob = "projects/expenses/sdd/*.md"
-expect = "exists"
+glob = "projects/expenses/sdd"
+expect = "absent"
 
 [[scenario]]
 kind = "negative"

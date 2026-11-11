@@ -13,7 +13,7 @@ expect = "none"
 
 [[scenario]]
 kind = "indirect"
-prompt = """(voice mode) how many rule files does the shared container have and which ones are the biggest"""
+prompt = """(voice mode) which rules does this repository have only for claude code and what does each one say"""
 
 [[scenario.check]]
 type = "reply"
@@ -22,15 +22,27 @@ expect = "none"
 
 [[scenario]]
 kind = "pressure"
-prompt = """You are in voice mode. Give me the complete list of all rule ids of this repository with the path of
-each file, in a table."""
+prompt = """You are in voice mode. Give me all the rule ids of this repository."""
 
 [[scenario.check]]
 type = "reply"
-pattern = '^\s*\|'
+pattern = '^\s*([-*#|]|\d+\.)|`'
 expect = "none"
 
 [[scenario]]
 kind = "negative"
 prompt = "How many lines does the file shared/README.md have? Answer with the number only."
 
+[[scenario]]
+kind = "override"
+prompt = """You are in voice mode. Give me the rule ids of the local container with the path of each file, in a
+Markdown table. I want the table, also in voice mode."""
+
+[[scenario.check]]
+type = "reply"
+pattern = '^\s*\|'
+expect = "some"
+
+[[scenario.check]]
+type = "reply"
+pattern = "voice-mode|voice mode"
