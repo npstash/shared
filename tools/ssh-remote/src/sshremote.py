@@ -17,6 +17,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 from urllib.parse import urlsplit
 
 import paramiko
@@ -25,6 +26,12 @@ from credstore import CredentialError, Store, vault_home
 
 CONNECT_TIMEOUT = 15     # seconds
 POLL = 0.05              # seconds between reads of a channel
+
+
+class ByteSink(Protocol):
+    """Where the output of a remote command goes, e.g. sys.stdout.buffer."""
+
+    def write(self, data: bytes, /) -> object: ...
 
 
 class RemoteError(RuntimeError):
@@ -88,7 +95,7 @@ def connect(home: Path, target: Target) -> paramiko.SSHClient:
     return client
 
 
-def _drain(channel, out, err) -> int:
+def _drain(channel: paramiko.Channel, out: ByteSink, err: ByteSink) -> int:
     """Copy stdout and stderr of the channel until the command stops. Return the exit status."""
     while True:
         busy = False
@@ -97,13 +104,17 @@ def _drain(channel, out, err) -> int:
         if channel.recv_stderr_ready():
             err.write(channel.recv_stderr(32768)); busy = True
         if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
-            return channel.recv_exit_status()
+            status: int = channel.recv_exit_status()
+            return status
         if not busy:
             time.sleep(POLL)
 
 
-def _run(client: paramiko.SSHClient, command: str, out, err, stdin: bytes = b"") -> int:
-    channel = client.get_transport().open_session()
+def _run(client: paramiko.SSHClient, command: str, out: ByteSink, err: ByteSink, stdin: bytes = b"") -> int:
+    transport = client.get_transport()
+    if transport is None:
+        raise RemoteError("the SSH connection is closed")
+    channel = transport.open_session()
     try:
         channel.exec_command(command)
         if stdin:
@@ -126,7 +137,7 @@ def sudo_command(command: str, with_password: bool) -> str:
 
 
 def run_command(home: Path, client: paramiko.SSHClient, target: Target, command: str,
-                sudo: bool, out, err) -> int:
+                sudo: bool, out: ByteSink, err: ByteSink) -> int:
     if not sudo:
         return _run(client, command, out, err)
     if not target.sudo_system:
@@ -140,7 +151,7 @@ def run_command(home: Path, client: paramiko.SSHClient, target: Target, command:
 
 
 def upload(home: Path, client: paramiko.SSHClient, target: Target, local: Path, remote: str,
-           sudo: bool, err) -> int:
+           sudo: bool, err: ByteSink) -> int:
     sftp = client.open_sftp()
     try:
         if not sudo:
