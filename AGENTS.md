@@ -4,7 +4,6 @@
 - **deliverables-only** — @rules/deliverables-only.md
 - **nothing-outside-repo** — @rules/nothing-outside-repo.md
 - **simplified-english** — @rules/simplified-english.md
-- **confirm-design-choices** — @rules/confirm-design-choices.md
 - **decision-gates** — @rules/decision-gates.md
 - **agent-identity** — @rules/agent-identity.md
 - **per-project-runtimes** — Never change a global runtime. When you make or change a runtime, dependencies or a `run.sh`: read [per-project-runtimes](rules/per-project-runtimes.md).
@@ -13,7 +12,7 @@
 - **voice-mode** — When the prompt is in voice mode: read [voice-mode](rules/voice-mode.md).
 - **architecture-decision-log** — When the user accepts an architecture decision or a business rule, or you change an `ADL.md` or an ADR: read [architecture-decision-log](rules/architecture-decision-log.md).
 - **sdd-documentation** — Make an `sdd/` folder only when the user asks. When you work in a project with an `sdd/` folder: read [sdd-documentation](rules/sdd-documentation.md).
-- **submodule-dependencies** — Write no fixed path to a submodule that other repositories also use, e.g. a vault. When code, a script or a configuration must find one: read [submodule-dependencies](rules/submodule-dependencies.md).
+- **submodule-dependencies** — Find a submodule that other repositories also use, e.g. a vault, only with a copy of [submodule-dependencies.py](rules/submodule-dependencies.py). Do not change the copy. Write no fixed path to such a submodule.
 - **typed-code** — Write no untyped code. Do not use `any` or `Any`. When you write or review code: read [typed-code](rules/typed-code.md).
 - **rules-and-skills** — When you add, change, move, disable or copy a rule or a skill: read [rules-and-skills](rules/rules-and-skills.md).
 - **browser-automation** — For browser automation, use the MCP server `browser-automation-x-mcp` if it is available; this is mandatory. In a cookie consent dialog, accept all cookies and do not ask. If the dialog asks for more, stop and ask.
