@@ -11,6 +11,7 @@ CLI: python dependencies.py NAME [START]  - print the folder of NAME.
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 DEPENDENCIES = "dependencies.txt"
@@ -78,7 +79,7 @@ def _exists(folder: Path) -> bool:
     return folder.is_dir() and any(folder.iterdir())
 
 
-def roots(start: Path | str | None = None):
+def roots(start: Path | str | None = None) -> Iterator[Path]:
     """Each root from `start` upwards: the root of `start`, then the root above it, and so on."""
     folder = Path(start if start is not None else Path(__file__).parent).resolve()
     while True:
