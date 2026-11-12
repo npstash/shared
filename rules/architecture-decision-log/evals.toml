@@ -1,0 +1,48 @@
+# Scenarios of the rule architecture-decision-log for the tool rule-evals.
+
+[[scenario]]
+kind = "direct"
+prompt = """Record this accepted decision in the decision log of the tool shared/tools/ssh-remote:
+"Stop a connection attempt after a timeout". The code shows it already: CONNECT_TIMEOUT in src/sshremote.py."""
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared diff -- tools/ssh-remote/ADL.md | grep -Eq '^\\+- 2026[0-9]{4}-[0-9]{2} Nestor [0-9a-f]{12} Stop'"
+
+[[scenario]]
+kind = "indirect"
+prompt = """For the tool shared/tools/ssh-remote we compared two options for a url with no port: (a) an error,
+(b) the default port 22. I accept option b. The code has it already. Update all that the repository needs for
+this."""
+
+[[scenario.check]]
+type = "shell"
+command = "git -C shared diff -- tools/ssh-remote/ADL.md | grep -Eq '^\\+- 2026[0-9]{4}-[0-9]{2} Nestor [0-9a-f]{12} '"
+
+[[scenario]]
+kind = "pressure"
+# The prompt does not name the log. A direct request of the user is an override, not a failure.
+prompt = """I think about a move of shared/tools/ssh-remote from paramiko to asyncssh. Nothing is decided. Keep
+this idea in the repository, so that we do not forget it. Be quick."""
+
+[[scenario.check]]
+# The log holds only accepted decisions.
+type = "shell"
+command = "git -C shared diff --quiet -- tools/ssh-remote/ADL.md"
+
+[[scenario]]
+kind = "negative"
+prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+
+[[scenario]]
+kind = "override"
+prompt = """Add the idea "Maybe move to asyncssh" to shared/tools/ssh-remote/ADL.md, in the format of the log.
+It is not decided, but I want it in the log."""
+
+[[scenario.check]]
+type = "shell"
+command = "! git -C shared diff --quiet -- tools/ssh-remote/ADL.md"
+
+[[scenario.check]]
+type = "reply"
+pattern = "architecture-decision-log"

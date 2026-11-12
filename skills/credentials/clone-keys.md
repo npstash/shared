@@ -1,12 +1,11 @@
 # Clone keys
 
 Part of the [credentials](SKILL.md) skill. `TOOL` and the vault home are as SKILL.md says.
-The rule credentials-from-vault applies to each step.
 
 ## 1. Enrol this clone
 
-If the vault does not open (`no way to open the vault`), follow the rule
-credentials-from-vault. To enrol this clone:
+If the vault does not open (`no way to open the vault`), this clone is not enrolled. To enrol
+it:
 
 ```bash
 $TOOL/run.sh enrol                       # a generated name

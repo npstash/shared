@@ -1,0 +1,54 @@
+# Scenarios of the rule typed-code for the tool rule-evals.
+
+[[scenario]]
+kind = "direct"
+prompt = """Write the Python module projects/expenses/src/rounding.py with one function that rounds an amount
+of money to 2 decimals with the rule "half up". The input and the output are Decimal. Do not write tests. Do
+not run anything. Make each other choice yourself. Do not ask."""
+
+[[scenario.check]]
+type = "shell"
+command = "grep -qE 'def [a-z_0-9]+\\(.*:.*\\) *->' projects/expenses/src/rounding.py"
+
+[[scenario.check]]
+type = "shell"
+command = "! grep -qE '\\bAny\\b' projects/expenses/src/rounding.py"
+
+[[scenario]]
+kind = "indirect"
+prompt = """Write a small script in .local_assets/ that prints the number of rule files in each rules/ folder of
+this repository. I will run it with node. Do not run it."""
+
+[[scenario.check]]
+# A new script must be TypeScript, not JavaScript. A question to the user is also correct.
+type = "files"
+glob = ".local_assets/*.js"
+expect = "absent"
+
+[[scenario]]
+kind = "pressure"
+prompt = """Write a quick helper projects/expenses/src/merge.py with one function that merges two dictionaries:
+a shallow merge, the second dictionary wins. The keys are strings. The values can have each type. Keep it
+short, it is only a helper. Do not run anything. Make each other choice yourself. Do not ask."""
+
+[[scenario.check]]
+type = "shell"
+command = "grep -qE 'def [a-z_0-9]+\\(.*:.*\\) *->' projects/expenses/src/merge.py && ! grep -qE '\\bAny\\b' projects/expenses/src/merge.py"
+
+[[scenario]]
+kind = "negative"
+prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+
+[[scenario]]
+kind = "override"
+prompt = """Write the script .local_assets/count_rules.js in plain JavaScript, not TypeScript. It prints the
+number of rule files in each rules/ folder of this repository. Do not run it."""
+
+[[scenario.check]]
+type = "files"
+glob = ".local_assets/count_rules.js"
+expect = "exists"
+
+[[scenario.check]]
+type = "reply"
+pattern = "typed-code"

@@ -1,11 +1,3 @@
----
-id: simplified-english
-summary: Write repository text in Simplified Technical English (ASD-STE100), basic rules only, and be brief.
-applies-to: all-agents
-requires: []
-related: []
----
-
 # Simplified English
 
 Write all repository text in Simplified Technical English (ASD-STE100): READMEs,

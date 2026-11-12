@@ -38,8 +38,8 @@ its encrypted name. This needs the passphrase too, and writes a line to `access.
 
 - Python: give `vault_home`. It has no default.
 - CLI: give `--vault-home DIR`, or `--vault NAME` with the folder name of a vault, e.g.
-  `vault-main`. The CLI finds `NAME` as the rule
-  [submodule-dependencies](../../rules/submodule-dependencies.md) says. It starts in this
+  `vault-main`. The CLI finds `NAME` with the reference code
+  [submodule-dependencies.py](../../rules/submodule-dependencies.py). It starts in this
   folder and continues in the repositories above it.
 - The CLI has no default vault. Without the two options, it stops and gives the vaults that it
   finds: the submodules `vault-*` and the sections `[vault-*]` of `dependencies.txt` in the

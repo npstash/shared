@@ -1,11 +1,3 @@
----
-id: claude/cowork-cloud-sessions
-summary: In a Cowork cloud session reach GitHub over REST - GraphQL is blocked.
-applies-to: claude-code
-requires: []
-related: []
----
-
 # Cowork cloud sessions
 
 Applies only in a Cowork **cloud** sandbox: `systemd-detect-virt` gives `docker`, and no

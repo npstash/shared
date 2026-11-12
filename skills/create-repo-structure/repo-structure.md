@@ -1,58 +1,31 @@
 # Repository structure
 
-## Root
+This rule gives the place of each kind of content. If content fits no place, ask the user where
+to put it. Do not make a new place yourself.
 
-```
-AGENTS.md             root index; it imports the container indexes
-setup.sh              set up a clone; a copy of shared/setup.sh
-.gitattributes .gitignore
-.github/workflows/    CI; tests.yml is a copy of shared/.github/workflows/tests.yml
-.claude/              Claude Code config; skills/ holds only links that setup.sh makes
-.kilo/ .vscode/ .mcp.json   config of other agent tools and of the editor
-.local_assets/        repo-wide scratch; gitignored
-local/                container: only this repository uses it
-shared/               container; submodule <owner>/shared; other repositories use it too
-vaults/               the vaults: submodules vaults/vault-<name> (<owner>/vault-<name>); not a container
-projects/             projects and groups of projects; see "projects"
-```
-
-- Put nothing else into the root. To add an item, ask the user and update this list.
-- Never put a skill directly into `.claude/skills/`.
-- Run `setup.sh` after each clone, and after you add or remove a skill.
+| Content | Place |
+|---|---|
+| Rule, skill or tool for this repository only | `local/` |
+| Rule, skill or tool that other repositories also use | `shared/`, the submodule `<owner>/shared` |
+| Config of the tool or project `<name>` for this repository | `local/configs/<name>/` |
+| Vault | `vaults/vault-<name>/`, a submodule `<owner>/vault-<name>` |
+| Project | `projects/`; see "Projects" |
 
 ## Containers
 
+`local/` and `shared/` are the containers. Each container has the same structure:
+
 ```
 <container>/
-  AGENTS.md                       index of rules and skills; one section for each agent
-  rules/<id>.md                   rule for all agents
-  rules/<agent>/<id>.md           rule for one agent only (e.g. claude/)
-  rules/<id>.<ext>                a file of a rule, e.g. reference code; the rule gives a link
-  rules/<id>/                     the files of a rule, e.g. templates; the rule gives a link
-  skills/<name>/SKILL.md          skill; setup.sh links it to .claude/skills/<name>
-  skills/<agent>/<name>/SKILL.md  skill for one agent only
-  tools/<name>/                   tool; see "Tool and project folders"
-  configs/<name>/                 only in local/: config of the tool or project <name>, for this repository
+  AGENTS.md        index of the rules and skills
+  rules/           rules
+  skills/<name>/   skill
+  tools/<name>/    tool
 ```
 
-- Omit a folder that has no content.
-- Add an index line for each rule and skill to the section of its agent in `AGENTS.md`.
-- Do not index tools in `AGENTS.md`. A rule or a skill gives a link to a tool if necessary.
-- Put the config of a tool or a project that this repository uses into `local/configs/<name>/`.
-  Do not index configs in `AGENTS.md`.
-- Do not add a `CLAUDE.md`. Claude Code reads `AGENTS.md`.
-- A container that is a submodule also holds the root files of its repository.
-- The user decides the container and the folder of each rule, tool and skill.
+Ask the user for the container of a new tool.
 
-## vaults
-
-- Each vault is a submodule `vaults/vault-<name>` of the repository `<owner>/vault-<name>`.
-- `vault-main` is the main vault.
-- A project with its own vault uses `vault-<project>`.
-- A vault holds only the files of the vault. See the vault tool, `shared/tools/auth`.
-- Change a vault only with the vault tool.
-
-## projects
+## Projects
 
 ```
 projects/<project>/                          a project
@@ -61,23 +34,10 @@ projects/<project>/components/<component>/   a component of a project
 ```
 
 - A project is one task. It can contain deliverables.
-- A project can be a submodule with its own repository `<owner>/<project>`. It follows the
-  same rules.
-- A group is a category of projects. It contains only projects.
-- Do not put a group into a group.
-- The user decides if a folder is a group or a project.
-- A project with code also follows "Tool and project folders".
-
-### Components
-
-- A component is a part of a project, e.g. a C4 container or a C4 component.
-- Use a component only in its project. A component is not independent.
-- A component follows the rules of a project.
-- Do not put a component into a component.
-
-## Tool and project folders
-
-- Put generated files into gitignored folders: `.venv/`, `.local_assets/`, `node_modules/`, caches.
-- Python: put the source into `src/`.
-- Other languages: follow the convention of the language.
-- Add other folders only as the tool or project needs them (e.g. `docs/`, `config/`, `data/`).
+- A group is a category of projects. It contains only projects. Do not put a group into a group.
+- Ask the user if a new folder is a project or a group.
+- A project can be a submodule with its own repository, `<owner>/<project>`. It follows the same rules.
+- A component is a part of a project, e.g. a C4 container or a C4 component. It is not
+  independent: use it only in its project.
+- A component follows the rules of a project. Do not put a component into a component.
+- In a Python tool or project, put the source into `src/`.
