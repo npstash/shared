@@ -28,6 +28,14 @@ JUDGE_SYSTEM: str = (
 )
 
 
+def parse_answer(text: str) -> bool:
+    """Give True for an answer that starts with YES. Ignore Markdown marks before the word."""
+    answer: str = text.upper().lstrip(" *_#>`\n\t")
+    if not answer.startswith(("YES", "NO")):
+        raise RuntimeError(f"the judge gave no YES or NO: {answer[:200]}")
+    return answer.startswith("YES")
+
+
 class AgentRunner(ABC):
     """Runs an agent in a fixture."""
 
@@ -105,7 +113,4 @@ class ClaudeCliJudge(Judge):
             value: JsonValue = json.loads(done.stdout)
         except json.JSONDecodeError as error:
             raise RuntimeError(f"the judge gave no JSON: {done.stdout[:200]} {done.stderr[:200]}") from error
-        answer: str = as_str(as_object(value).get("result")).strip().upper()
-        if not answer.startswith(("YES", "NO")):
-            raise RuntimeError(f"the judge gave no YES or NO: {answer[:200]}")
-        return answer.startswith("YES")
+        return parse_answer(as_str(as_object(value).get("result")))

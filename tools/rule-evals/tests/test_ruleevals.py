@@ -13,7 +13,7 @@ from ruleevals.checks import RunContext, build_check
 from ruleevals.evaluate import Evaluator, make_jobs
 from ruleevals.fixture import FixtureMaker
 from ruleevals.report import RunRecord, read_records, render_report
-from ruleevals.runner import AgentRunner, Judge
+from ruleevals.runner import AgentRunner, Judge, parse_answer
 from ruleevals.scenario import CheckSpec, RuleEvals, ScenarioError, find_rule_evals
 from ruleevals.transcript import Transcript, parse_transcript
 from ruleevals.trigger import LATE, LOADED, NO, YES, loaded_at_launch, trigger_result
@@ -244,3 +244,13 @@ def test_make_jobs_selects_the_kinds(tmp_path: Path) -> None:
 )
 def test_parse_version(text: str, expected: tuple[int, int, int] | None) -> None:
     assert parse_version(text) == expected
+
+
+@pytest.mark.parametrize(("text", "expected"), [("YES. It asked.", True), ("**Yes.** It asked.", True), ("no", False)])
+def test_parse_answer(text: str, expected: bool) -> None:
+    assert parse_answer(text) is expected
+
+
+def test_parse_answer_needs_yes_or_no() -> None:
+    with pytest.raises(RuntimeError):
+        parse_answer("Maybe.")
