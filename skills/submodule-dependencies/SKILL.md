@@ -1,11 +1,9 @@
 ---
 name: submodule-dependencies
-description: Find shared, a vault or another shareable submodule from a project or a tool (rule submodule-dependencies) - the lookup order, dependencies.txt, the copy of the reference code and its test. Use when code or a script must find such a submodule, when a project or a tool gets its first such dependency, or when a lookup fails.
+description: Find shared, a vault or another shareable submodule from a project or a tool - the lookup order, dependencies.txt, the copy of the reference code and its test. Use when code or a script must find such a submodule, when a project or a tool gets its first such dependency, or when a lookup fails.
 ---
 
 # Submodule dependencies
-
-Follow the rule submodule-dependencies.
 
 ## Lookup
 

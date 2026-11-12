@@ -7,7 +7,7 @@ description: Get a username, password, token or other secret for an external sys
 
 The only source of secrets is the [vault tool](../../tools/auth/README.md). Design:
 [clone-keys.md](../../tools/auth/docs/clone-keys.md). Never take a secret from the
-environment of the machine (rule credentials-from-vault).
+environment of the machine.
 
 - `TOOL` is `tools/auth` next to the `skills/` folder of this skill. The skill folder can
   be a link, so resolve it: `TOOL="$(realpath <skill folder>)/../../tools/auth"`.
@@ -16,9 +16,8 @@ environment of the machine (rule credentials-from-vault).
   `run.sh`. The commands below leave it out. Use the vault that the user gives. If the user gives
   none, ask. Without an option, the CLI stops and gives the vaults that it finds.
 
-The rule credentials-from-vault tells which commands, commits and pushes need the
-confirmation of the user. It also gives the forbidden sources of secrets. It applies to each
-step below.
+The rule of the repository about credentials tells which commands, commits and pushes need
+the confirmation of the user. It applies to each step below.
 
 ## 1. What you can do, and what the user does
 
@@ -80,7 +79,7 @@ For each error: stop and ask. Do not use an env var or a file of the machine ins
 
 | Error | Cause | Action |
 | --- | --- | --- |
-| `no way to open the vault` | No clone key of this clone opens the vault. | Stop (rule credentials-from-vault). See [clone-keys.md](clone-keys.md). |
+| `no way to open the vault` | No clone key of this clone opens the vault. | Stop. See [clone-keys.md](clone-keys.md). |
 | `... is still enrolled ...` | `delete-private-clone-key` before the push of `unenrol`. | Commit and push the vault home first. |
 | `more than one recipient` | This clone has more key files in the vault home. | Show the names and ask which one. |
 | `Skipped keys: ...` | A key file is from another machine, or its keyring entry is missing. | Tell the user. Enrol again with a new name if the user agrees. |

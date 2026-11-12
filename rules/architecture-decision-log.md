@@ -19,9 +19,8 @@ Record its decisions in the ADL of the project.
   - `id`: `yyyymmdd-NN`. `yyyymmdd` is the UTC date of the decision. `NN` is a counter
     of the entries of that date in this `ADL.md`, from `01`. After `99`, add digits.
   - `name`: the git name of the user for a user decision. For an action that an agent
-    took without input from the user, the model name, e.g. `Opus-5.5`. See
-    the rule agent-identity. An agent environment can set `user.name` to the
-    agent; then use the name from the commits of the user.
+    took without input from the user, the model name, e.g. `Opus-5.5`. An agent environment
+    can set `user.name` to the agent; then use the name from the commits of the user.
   - `commit`: the 12-character ID of the last commit in the repository of the `ADL.md`
     at the time of the decision. For an entry from before the item moved to this
     repository, use the last commit of the earlier repository.
@@ -34,7 +33,7 @@ Record its decisions in the ADL of the project.
 
 ## ADR
 
-- Write an ADR only when the user asks. Use the `create-adr` skill.
+- Write an ADR only when the user asks.
 - Put it into `adr/ADR-<yyyymmdd>-<topic>.md` beside the `ADL.md`. `<yyyymmdd>` is the UTC
   date of the ADR. `<topic>` is a short topic in lowercase, with `a-z`, `0-9` and `_`, e.g.
   `ADR-20261029-images_from_registry.md`. The name is not related to the ADL IDs.

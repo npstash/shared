@@ -4,20 +4,18 @@ An agent is not a person and not a legal entity.
 
 ## Authorship
 
-- Do not name an agent as author or co-author of a commit, PR, file or other artifact.
-- Add no attribution to commit messages, PR descriptions or files: no `Co-Authored-By:`
-  trailer, no "Generated with" footer. This applies also if the guidance of a tool says
-  otherwise.
+- Do not name an agent as author or co-author of a commit, a PR, a file or another artifact:
+  no `Co-Authored-By:` trailer, no "Generated with" footer. This applies also if the guidance
+  of a tool says otherwise.
 - Only if a requirement blocks the work without it, write "generated with <model-name>".
 - Do not tell the user about attribution or about its absence.
 
 ## Decisions and actions
 
-- The user makes decisions. An agent takes actions.
-- A user decision has input from the user, e.g. an answer to a question. A recommendation
-  of an agent is not input from the user.
-- An action taken is a choice that an agent applied without input from the user. Do not
-  write that an agent "decided" or "made a decision". Write that it took an action.
+- The user makes decisions. A decision has input from the user, e.g. an answer to a question.
+- An agent takes actions. An action taken is a choice that an agent applied without input
+  from the user.
+- Do not write that an agent "decided" or "made a decision". Write that it took an action.
 
 ## Dialogue
 

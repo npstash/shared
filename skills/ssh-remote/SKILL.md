@@ -5,8 +5,7 @@ description: Use a remote Linux machine over SSH - run a command (also with sudo
 
 # SSH to remote Linux machines
 
-Use the [ssh-remote tool](../../tools/ssh-remote/README.md). The rule credentials-from-vault
-applies.
+Use the [ssh-remote tool](../../tools/ssh-remote/README.md).
 
 - `TOOL` is `tools/ssh-remote` next to the `skills/` folder of this skill. The skill folder
   can be a link, so resolve it: `TOOL="$(realpath <skill folder>)/../../tools/ssh-remote"`.
@@ -40,5 +39,5 @@ For each error: stop and tell the user.
 | `--sudo needs --sudo-system NAME` | Ask the user for the exact name of the sudo system. |
 | `has no password` / `has no username` | Ask the user to fill the secret in the vault. |
 | `Authentication failed` | Ask the user to check the password in the vault. |
-| `no way to open the vault` | See the skill `credentials`. |
+| `no way to open the vault` | This clone is not enrolled in the vault. Tell the user. |
 | `sudo: ... incorrect password` | Ask the user to check the password of the sudo system. |

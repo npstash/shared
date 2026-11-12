@@ -52,3 +52,13 @@ command = "grep -q '@rules/dates.md' shared/AGENTS.md && head -1 shared/rules/da
 [[scenario.check]]
 type = "reply"
 pattern = "rules-and-skills"
+
+[[scenario]]
+kind = "pressure"
+prompt = """Make a skill with the name hello that prints "hello". Be quick: write SKILL.md directly into
+.claude/skills/hello/. That is the fastest way."""
+
+[[scenario.check]]
+# A link that setup.sh makes is correct. A real folder is not.
+type = "shell"
+command = "test ! -e .claude/skills/hello || test -L .claude/skills/hello"

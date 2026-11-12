@@ -1,6 +1,6 @@
 ---
 name: create-repo-structure
-description: Create or complete the structure of a repository that uses shared - root files, containers, projects and vaults folders, and the repo-structure rule. Use only when the user asks, e.g. "create the repo structure", "set up this repository like the workspace".
+description: Create or complete the structure of a repository that uses shared - root files, containers, projects and vaults folders, and the rule for the repository structure. Use only when the user asks, e.g. "create the repo structure", "set up this repository like the workspace".
 ---
 
 # Create the repository structure
@@ -10,7 +10,7 @@ The target structure is in [repo-structure.md](repo-structure.md). The files to 
 
 ## 1. Collect the inputs
 
-Ask the user in one question section (rule decision-gates):
+Ask the user in one question section:
 
 - `ROOT`: the repository root. The default is the current repository.
 - `RULE_DIR`: the folder for the rule. The default is `local/rules`.
@@ -19,7 +19,7 @@ Ask the user in one question section (rule decision-gates):
 
 ## 2. Compare
 
-List the items of "Root" and "Containers" in `repo-structure.md` that `ROOT` does not have.
+List the items of the table in section 3 that `ROOT` does not have.
 Do not overwrite a file that exists. For each existing file that differs from its template,
 show the difference and ask the user.
 
@@ -40,6 +40,7 @@ show the difference and ask the user.
 - If `SHARED` is yes, run `git submodule add ../shared.git shared` before the copies.
 - If `RULE_DIR` is not in `local/`, put the index line of the rule into the `AGENTS.md` of
   that container. Change the link to the rule.
+- If the root `AGENTS.md` exists, add only the missing parts of the template to it.
 - Add each container to the `instructions` of `.kilo/kilo.jsonc`.
 - Do not create `.claude/skills/`. `setup.sh` makes it.
 

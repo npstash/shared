@@ -1,6 +1,6 @@
 ---
 name: eval-rule
-description: Measure if agents detect the trigger of a rule and follow the rule, with headless Claude Code runs (rule rules-and-skills). Use when you add a rule, or change the core, the trigger or the class of a rule, or when the user asks, e.g. "eval the rule X", "test the trigger of X".
+description: Measure if agents detect the trigger of a rule and follow the rule, with headless Claude Code runs. Use when you add a rule, or change the core, the trigger or the class of a rule, or when the user asks, e.g. "eval the rule X", "test the trigger of X".
 ---
 
 # Evaluate a rule
@@ -35,7 +35,8 @@ Show the scenarios to the user. Get the confirmation before the first run.
 ## 2. Run
 
 1. Get the confirmation of the user for each run. Give the number of runs. The tool writes
-   copies beside the repository and deletes them at the end (rule nothing-outside-repo).
+   copies beside the repository and deletes them at the end. This is a write outside the
+   repository.
 2. Run the baseline with the rule as it was: `run.sh eval --label <id>-base --rules <id>
    --ruleset <git-ref>`. For a new rule, use the commit before the rule.
 3. Run the new rule: `run.sh eval --label <id>-new --rules <id> --ruleset worktree`.

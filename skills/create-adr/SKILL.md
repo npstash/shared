@@ -1,11 +1,9 @@
 ---
 name: create-adr
-description: Write an architecture decision record (ADR) for an entry of an ADL.md (rule architecture-decision-log). Use only when the user asks, e.g. "write an ADR for X", "create ADR", "/create-adr".
+description: Write an architecture decision record (ADR) for an entry of an ADL.md. Use only when the user asks, e.g. "write an ADR for X", "create ADR", "/create-adr".
 ---
 
 # Create an ADR
-
-Follow the rule architecture-decision-log.
 
 1. Find the ADL entry that the user names. If the decision has no entry yet, add the
    entry first. For a proposed decision, add no ADL entry. The status is `Proposed`,

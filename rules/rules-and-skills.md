@@ -1,10 +1,21 @@
 # Rules and skills
 
-A rule is a constraint. A skill is a procedure. The user decides the container of each one.
+A rule is a constraint. A skill is a procedure. A container is a folder with `rules/`,
+`skills/` and the index `AGENTS.md`. Ask the user for the container of a new rule or skill.
 
-A container is a folder with `rules/`, `skills/` and an index `AGENTS.md`. The rule
-repo-structure of the repository names the containers. Do not name a container in
-another rule or in a skill.
+## Content
+
+The set of rules and skills can change at any time. Each rule and each skill must be correct
+alone.
+
+- Do not name another rule or skill in a rule, an index line or a skill. Name the subject,
+  e.g. "the vault tool".
+- Do not name a container. Only the rule for the repository structure names the containers.
+- Give each instruction in one rule only. Before you add an instruction, search the other
+  rules for its subject. If two rules give the same instruction, keep it in the rule of its subject.
+- Write only instructions that change what an agent does. Do not describe what an agent
+  knows or finds without the rule.
+- Give a relative link only to a tool or a file of the same container.
 
 ## Class
 
@@ -16,38 +27,41 @@ Give each rule one class.
 
 Use "always" only if the other classes are not possible.
 
-## Rule file
-
-- Write one file for each rule: `rules/<id>.md`. The id is the file name.
-- Put a rule for one agent into `rules/<agent>/<id>.md`.
-- Write the complete rule in the file. Write no frontmatter.
-- Put the other files of a rule into `rules/<id>/`, e.g. the eval scenarios `evals.toml`.
-- If a rule needs a tool or a file of its container, give a relative link to it in the rule text.
-- Refer to another rule or skill by its id or name. Do not write a path to it.
-
 ## Index line
 
-Put the line into the index of the container of the rule, in the section of its agent.
+The index has one list of rules. Each agent reads each line.
 
 - Inline: `- **<id>** — <rule>`
 - Triggered: `- **<id>** — <core>. When <trigger>: read [<id>](rules/<id>.md).`
 - Always: `- **<id>** — @rules/<id>.md`
 
-- Core: each prohibition that an agent can break before it reads the file. Omit it if there is none.
+- Core: each prohibition that an agent can break before it reads the file. Omit it if there
+  is none. Do not repeat the core in the file.
 - Trigger: an event that an agent can observe. Do not use a judgement as a trigger.
-- Do not write `@` in a triggered line. `@` loads the file at the start of each session.
-- Write the core and the trigger only in the index line.
+- For a rule of one agent, start the trigger with the agent: "When you are <agent> and …".
+- `@` loads the file at the start of each session. Use it only in an "always" line.
+- Do not add a `CLAUDE.md`. Claude Code reads `AGENTS.md`.
+
+## Rule file
+
+- Write one file for each rule: `rules/<id>.md`, or `rules/<agent>/<id>.md` for a rule of one
+  agent. The id is the file name.
+- Write no frontmatter.
+- Put the other files of a rule into `rules/<id>/`.
 
 ## Skills
 
 - Put a skill into `skills/<name>/SKILL.md`, or `skills/<agent>/<name>/SKILL.md` for one agent.
-- The `description` in the frontmatter is the trigger. Write the index line with the name and the link only.
-- Run `setup.sh` after you add or remove a skill.
+- The `description` in the frontmatter is the trigger. Write the index line with the name and
+  the link only.
+- Never put a skill into `.claude/skills/`. `setup.sh` makes the links there. Run it after you
+  add or remove a skill.
 
 ## Add, change or merge
 
-- For a new rule, and for a changed core or trigger, use the skill `eval-rule`.
 - Merge two rules when they have the same subject and the same trigger.
+- For a new rule, and for a changed core or trigger, write eval scenarios into
+  `rules/<id>/evals.toml`. Run them only with the confirmation of the user.
 
 ## Disable
 
@@ -56,6 +70,5 @@ To disable a rule in one repository, add its id to "Disabled rules" in the root
 
 ## Move, rename or copy
 
-- Update the index line and each reference to the rule.
+- Update the index line.
 - To copy a rule to another repository, copy the file, the folder `rules/<id>/` and the index line.
-- The rule repo-structure-template applies.
