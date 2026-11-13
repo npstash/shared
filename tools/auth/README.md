@@ -197,7 +197,7 @@ keeps old vault files. Change those secrets at the source if necessary.
 
 ## Python
 
-Add the `src` folder of this tool to `PYTHONPATH` (`shared/tools/auth/src` from the workspace
+Add the `src` folder of this tool to `PYTHONPATH` (`maya/tools/auth/src` from the workspace
 root):
 
 ```python

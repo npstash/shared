@@ -31,7 +31,7 @@ expect = "none"
 
 [[scenario]]
 kind = "negative"
-prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+prompt = "How many lines does the file maya/README.md have? Answer with the number only."
 
 [[scenario]]
 kind = "override"

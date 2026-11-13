@@ -1,4 +1,4 @@
-// Key-value-source "vault" (REQ-034 of sdd/SRS.md): the secrets of a vault (shared/tools/auth),
+// Key-value-source "vault" (REQ-034 of sdd/SRS.md): the secrets of a vault (maya/tools/auth),
 // through its run.sh.
 //
 //   "config": { "vault": "vault-<name>", "file": "<file in the config folder>" }

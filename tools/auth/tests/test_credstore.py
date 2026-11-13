@@ -887,15 +887,15 @@ def test_cli_get_logs_only_the_secret_it_prints(two: Path, capsys: pytest.Captur
 
 def test_cli_finds_a_vault_in_the_roots_above_the_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = tmp_path / "ws"
-    shared = workspace / "shared"
-    (shared / "tools" / "auth" / "src").mkdir(parents=True)
-    (shared / "tools" / "auth" / "src" / "dependencies.py").write_text((cs.TOOL / "src" / "dependencies.py").read_text())
-    (shared / ".git").write_text("gitdir: x\n")
+    maya_agent_kit = workspace / "maya"
+    (maya_agent_kit / "tools" / "auth" / "src").mkdir(parents=True)
+    (maya_agent_kit / "tools" / "auth" / "src" / "dependencies.py").write_text((cs.TOOL / "src" / "dependencies.py").read_text())
+    (maya_agent_kit / ".git").write_text("gitdir: x\n")
     (workspace / ".git").mkdir()
-    (workspace / ".gitmodules").write_text('[submodule "shared"]\n\tpath = shared\n\turl = ../shared.git\n'
+    (workspace / ".gitmodules").write_text('[submodule "maya"]\n\tpath = maya\n\turl = ../maya-agent-kit.git\n'
                                            '[submodule "vaults/vault-x"]\n\tpath = vaults/vault-x\n\turl = ../vault-x.git\n')
     (workspace / "dependencies.txt").write_text("[vault-y]\n../vault-y\n[vault-gone]\n../vault-gone\n[other]\n../o\n")
-    monkeypatch.setattr(cs, "TOOL", shared / "tools" / "auth")
+    monkeypatch.setattr(cs, "TOOL", maya_agent_kit / "tools" / "auth")
     load = cs._dependencies
 
     def only_tmp_path() -> ModuleType:   # tmp_path can be in a repository: keep the search in tmp_path
@@ -911,7 +911,7 @@ def test_cli_finds_a_vault_in_the_roots_above_the_tool(tmp_path: Path, monkeypat
     monkeypatch.setattr(cs, "_dependencies", only_tmp_path)
     (workspace / "vaults" / "vault-x" / "recipients").mkdir(parents=True)
     (tmp_path / "vault-y" / "recipients").mkdir(parents=True)
-    assert cs.find_vault("vault-x") == workspace / "vaults" / "vault-x"     # the root above shared
+    assert cs.find_vault("vault-x") == workspace / "vaults" / "vault-x"     # the root above maya
     assert cs.find_vault("vault-y") == tmp_path / "vault-y"
     with pytest.raises(cs.CredentialError, match="vault-main is not found(.|\n)*--vault-home"):
         cs.find_vault("vault-main")

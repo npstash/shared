@@ -1,6 +1,6 @@
 ---
 name: submodule-dependencies
-description: Find shared, a vault or another shareable submodule from a project or a tool - the lookup order, dependencies.txt, the copy of the reference code and its test. Use when code or a script must find such a submodule, when a project or a tool gets its first such dependency, or when a lookup fails.
+description: Find maya-agent-kit, a vault or another shareable submodule from a project or a tool - the lookup order, dependencies.txt, the copy of the reference code and its test. Use when code or a script must find such a submodule, when a project or a tool gets its first such dependency, or when a lookup fails.
 ---
 
 # Submodule dependencies
@@ -17,7 +17,7 @@ description: Find shared, a vault or another shareable submodule from a project 
    submodule. Do steps 2 and 3 there. Continue to the last root.
 5. Else, stop with an error. The error gives the roots and the folders that the lookup tried.
 
-Thus `shared` needs no `dependencies.txt` for a vault: the repository that uses `shared` has the
+Thus `maya-agent-kit` needs no `dependencies.txt` for a vault: the repository that uses it has the
 vault as a submodule.
 
 ## dependencies.txt
@@ -30,14 +30,17 @@ vault as a submodule.
 - Lines that start with `#` are comments.
 
 ```
-[shared]
-../../shared
-../shared
-./shared
+[maya-agent-kit]
+../../maya
+../maya
+../maya-agent-kit
+./maya
+./maya-agent-kit
 ```
 
-The three paths are for these layouts: the repository is a submodule in `projects/` of a
-workspace; `shared` is a clone next to the repository; `shared` is a clone in the repository.
+The paths are for these layouts: the repository is a submodule in `projects/` of a
+workspace; `maya-agent-kit` is a clone next to the repository; it is a clone in the repository.
+A clone can have the folder name `maya` or `maya-agent-kit`.
 
 ## Reference code
 
@@ -48,7 +51,7 @@ The reference code is [submodule-dependencies.py](../../rules/submodule-dependen
 - Give `start`: the folder of the project or the tool. The default is the folder of the copy.
   It is not correct when the copy is installed as a package into a virtual environment.
 - Scripts use the CLI: `python dependencies.py <name> [<start>]` writes the folder.
-- Use only the standard library in the copy. A project can use it before it finds `shared`.
+- Use only the standard library in the copy. A project can use it before it finds `maya-agent-kit`.
 - To change the code, change the reference code, then copy the code again into each project and tool.
-- Add a test that compares the copy with the reference code. Skip it if `shared` is not found.
+- Add a test that compares the copy with the reference code. Skip it if `maya-agent-kit` is not found.
   For an example, see the tests of [tools/auth](../../tools/auth/tests/test_dependencies.py).

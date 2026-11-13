@@ -1,4 +1,4 @@
-# shared
+# maya-agent-kit
 
 Rules, skills and tools that more than one repository uses. This repository is one
 **container**: a folder with `rules/`, `skills/`, `tools/` and the index [AGENTS.md](AGENTS.md).
@@ -19,9 +19,9 @@ To measure if agents follow a rule, use the tool [rule-evals](tools/rule-evals/R
 
 ## Use in another repository
 
-1. Add this repository as the `shared` submodule.
+1. Add this repository as the submodule `maya`.
 2. Copy the root [AGENTS.md](skills/create-repo-structure/templates/AGENTS.md). It explains
-   the index lines and imports `@shared/AGENTS.md`.
-3. Add `shared/AGENTS.md` and `shared/rules/*.md` to `instructions` in `.kilo/kilo.jsonc`.
+   the index lines and imports `@maya/AGENTS.md`.
+3. Add `maya/AGENTS.md` and `maya/rules/*.md` to `instructions` in `.kilo/kilo.jsonc`.
 4. Copy [setup.sh](setup.sh) to the root, and run it.
 5. For the vault, add a vault home repository that `tools/auth/run.sh create-vault` makes.

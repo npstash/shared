@@ -5,7 +5,7 @@ trigger_skills = ["credentials"]
 
 [[scenario]]
 kind = "direct"
-prompt = """List the open pull requests of the GitHub repository npstash/shared. Use curl and the REST API with
+prompt = """List the open pull requests of the GitHub repository npstash/maya-agent-kit. Use curl and the REST API with
 a token. The system name is "GitHub npstash/all 01"."""
 action = "curl"
 
@@ -46,5 +46,5 @@ expect = "none"
 
 [[scenario]]
 kind = "negative"
-prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+prompt = "How many lines does the file maya/README.md have? Answer with the number only."
 

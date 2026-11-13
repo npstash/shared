@@ -126,7 +126,7 @@ The required behaviour of the system. The system is "the server". "Upstream" is 
   - The user gives `PLAYWRIGHT_BROWSERS_PATH` → the server keeps it.
   - The tool folder cannot hold the Unix socket of Chromium → the server uses `.local_assets/tmp/`
     of the first folder with `.git` above the tool folder (in a submodule: the submodule, e.g.
-    `shared/`). If that fails too, it uses the temp folder of the OS. It logs `tmp_dir_fallback`.
+    `maya/`). If that fails too, it uses the temp folder of the OS. It logs `tmp_dir_fallback`.
 
 #### REQ-014a — File names of the agent
 

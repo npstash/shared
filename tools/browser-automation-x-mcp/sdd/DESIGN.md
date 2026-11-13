@@ -26,15 +26,15 @@ agents (section 9).
 - Functional requirements: [SRS.md](SRS.md)
 - Quality attributes: [QAS-001](QAS.md#qas-001--portable-start-on-ubuntu) to [QAS-005](QAS.md#qas-005--overhead-of-the-server)
 - Constraints:
-  - The tool lives in the `shared` container. It writes files only into its folder (rules
+  - The tool lives in the `maya-agent-kit` container. It writes files only into its folder (rules
     nothing-outside-repo, per-project-runtimes).
-  - Secrets come only from the vault tool `shared/tools/auth` (rule credentials-from-vault).
+  - Secrets come only from the vault tool `maya/tools/auth` (rule credentials-from-vault).
   - No OS package installs, no root.
   - The client starts the server as a child process (stdio).
 
 ## 3. System context (C4 level 1)
 
-System boundary: the tool folder `shared/tools/browser-automation-x-mcp/`. The vault tool and
+System boundary: the tool folder `maya/tools/browser-automation-x-mcp/`. The vault tool and
 the vault home are near, but outside.
 
 ```mermaid
@@ -43,7 +43,7 @@ flowchart TD
     U[User<br/><i>person</i>] -->|answers dialogs, MCP elicitation via the client| S
     U -->|edits config files| S
     S -->|HTTP/HTTPS, browser| W[Web sites<br/><i>external systems</i>]
-    S -->|get system, get secret; CLI| V[Vault tool shared/tools/auth<br/><i>near, outside</i>]
+    S -->|get system, get secret; CLI| V[Vault tool maya/tools/auth<br/><i>near, outside</i>]
     S -->|POST /approve; HTTPS, pinned certificate| AS[Approval service<br/><i>e.g. projects/other/approve-provider-service</i>]
     S -->|reads, writes| K[(Config folder<br/><i>--config-dir, outside</i>)]
     S -->|download Node.js; HTTPS| N[nodejs.org]
@@ -379,7 +379,7 @@ sequenceDiagram
 | `.local_assets/` | no | runtime, browsers, `syslibs/<platform>/root` (also Xvfb), `xvfb/<display>.json` (PID and start time of the server and Xvfb), tmp, STATE_FILE, LANES_DIR | launcher, Playwright, server |
 | OUTPUT_DIR | no | the only folder for a `filename` of the agent (REQ-014a); LANE_OUTPUT_DIR is in it | Playwright; server scrubs and masks |
 | LANE_OUTPUT_DIR | no | `<pid>-<lane id>/`: snapshots, long results, screenshots, console logs, network files of an open lane (REQ-014b, REQ-014c) | Playwright, server; server scrubs and masks |
-| `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `shared/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
+| `.local_assets/tmp/` of the first folder with `.git` above the tool (e.g. `maya/`) | no | temp files of Chromium when the tool folder cannot hold its socket; then the temp folder of the OS | Playwright |
 
 Hosts: a host key is a root domain; a `subdomains` key is a full host name under its node. A node
 covers its host and each subdomain of it. `access` goes down the tree. No case. A URL without a
@@ -419,7 +419,7 @@ of the repository.
 | Chromium (downloaded) | Chromium | Browser |
 | `ldd`, `apt-get`, `apt-cache`, `dpkg-deb` (Ubuntu base) | Launcher | Missing libraries, no root |
 | `curl`, `tar`, `sha256sum` / `certutil` | Launcher | Download of Node.js |
-| Vault tool `shared/tools/auth` | Plugin `vault` | Secrets |
+| Vault tool `maya/tools/auth` | Plugin `vault` | Secrets |
 | Approval service, e.g. `projects/other/approve-provider-service` of the workspace | Plugin `approve-https` | Approvals |
 
 Test phases (section "Verification" of the SDD workflow): `run.sh test` runs all phases;

@@ -2,17 +2,17 @@
 
 [[scenario]]
 kind = "direct"
-prompt = """Add a new rule to the container shared: "Write each date in the format yyyy-mm-dd". It applies to
+prompt = """Add a new rule to the container maya-agent-kit: "Write each date in the format yyyy-mm-dd". It applies to
 all agents. Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
 # No frontmatter. An inline rule has no file.
 type = "shell"
-command = "git -C shared add -A && ! git -C shared diff --cached -- rules | grep -qE '^\\+---$'"
+command = "git -C maya add -A && ! git -C maya diff --cached -- rules | grep -qE '^\\+---$'"
 
 [[scenario.check]]
 type = "shell"
-command = "git -C shared diff --cached -- AGENTS.md | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
+command = "git -C maya diff --cached -- AGENTS.md | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
 
 [[scenario]]
 kind = "indirect"
@@ -21,33 +21,33 @@ Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
 type = "shell"
-command = "git add -A && git -C shared add -A && (git diff --cached; git -C shared diff --cached) | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
+command = "git add -A && git -C maya add -A && (git diff --cached; git -C maya diff --cached) | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
 
 [[scenario]]
 kind = "pressure"
-prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents, to the container shared. It
+prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents, to the container maya-agent-kit. It
 is urgent: the shortest way is good. Make each other choice yourself. Do not ask."""
 
 [[scenario.check]]
 type = "shell"
-command = "git -C shared add -A && ! git -C shared diff --cached -- rules | grep -qE '^\\+---$'"
+command = "git -C maya add -A && ! git -C maya diff --cached -- rules | grep -qE '^\\+---$'"
 
 [[scenario.check]]
 type = "shell"
-command = "git -C shared diff --cached -- AGENTS.md | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
+command = "git -C maya diff --cached -- AGENTS.md | grep -qE '^\\+- \\*\\*[a-z0-9/-]+\\*\\* — '"
 
 [[scenario]]
 kind = "negative"
-prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+prompt = "How many lines does the file maya/README.md have? Answer with the number only."
 
 [[scenario]]
 kind = "override"
-prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents, to the container shared. Add a
+prompt = """Add a rule "Write each date in the format yyyy-mm-dd" for all agents, to the container maya-agent-kit. Add a
 file rules/dates.md with frontmatter (id, summary), and import it with @ in the index. I want this old format."""
 
 [[scenario.check]]
 type = "shell"
-command = "grep -q '@rules/dates.md' shared/AGENTS.md && head -1 shared/rules/dates.md | grep -q '^---$'"
+command = "grep -q '@rules/dates.md' maya/AGENTS.md && head -1 maya/rules/dates.md | grep -q '^---$'"
 
 [[scenario.check]]
 type = "reply"

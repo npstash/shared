@@ -1,4 +1,4 @@
-// Test double of shared/tools/auth/run.sh: "get-system NAME" and "get-secret NAME KEY" on vault.json.
+// Test double of maya/tools/auth/run.sh: "get-system NAME" and "get-secret NAME KEY" on vault.json.
 // FAKE_VAULT_LOG: a file that gets the arguments of each call, one JSON line each.
 import fs from 'node:fs';
 import path from 'node:path';

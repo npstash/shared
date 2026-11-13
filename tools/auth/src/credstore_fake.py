@@ -1,6 +1,6 @@
 """Verified fake of the read side of credstore, for the unit tests of the users of the vault.
 
-Rule tests-and-ci of shared: the submodule supplies the test double of its API.
+Rule tests-and-ci of maya-agent-kit: the submodule supplies the test double of its API.
 tests/test_credstore_contract.py runs the same cases against this fake and against credstore
 with a throwaway vault.
 

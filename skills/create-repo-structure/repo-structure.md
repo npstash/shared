@@ -6,14 +6,14 @@ to put it. Do not make a new place yourself.
 | Content | Place |
 |---|---|
 | Rule, skill or tool for this repository only | `local/` |
-| Rule, skill or tool that other repositories also use | `shared/`, the submodule `<owner>/shared` |
+| Rule, skill or tool that other repositories also use | `maya/`, the submodule `<owner>/maya-agent-kit` |
 | Config of the tool or project `<name>` for this repository | `local/configs/<name>/` |
 | Vault | `vaults/vault-<name>/`, a submodule `<owner>/vault-<name>` |
 | Project | `projects/`; see "Projects" |
 
 ## Containers
 
-`local/` and `shared/` are the containers. Each container has the same structure:
+`local/` and `maya/` are the containers. Each container has the same structure:
 
 ```
 <container>/

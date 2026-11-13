@@ -104,7 +104,7 @@ Decisions, all confirmed by the user:
   it; the default lookup is `./vaults/vault-main`, then `vaults/vault-main` next to the script.
   If both exist, the working directory wins.
 - **`init` replaces `keygen`.** It writes the key, an example `credentials.json` with blank
-  secrets, the files in `templates/` and the setup scripts of `shared`. It stops if a vault
+  secrets, the files in `templates/` and the setup scripts of `maya-agent-kit`. It stops if a vault
   exists already. `rotate-key` covers a new key.
 - **Backups** go to `.local_assets/` of the tool folder, not the vault home.
 - **Hook.** `.githooks/pre-commit` is committed in the vault repository. It uses only `sh`

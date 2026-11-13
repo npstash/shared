@@ -1,4 +1,4 @@
-# shared — AGENTS.md
+# maya-agent-kit — AGENTS.md
 
 ## Rules
 - **deliverables-only** — @rules/deliverables-only.md

@@ -75,7 +75,7 @@ entry in `.kilo/kilo.jsonc`.
     "mcpServers": {
       "browser-automation-x-mcp": {
         "type": "stdio",
-        "command": "shared/tools/browser-automation-x-mcp/run.sh",
+        "command": "maya/tools/browser-automation-x-mcp/run.sh",
         "env": { "RENDER_MODE": "DEFAULT" },
         "args": ["--config-dir", "local/configs/browser-automation-x-mcp"]
       }
@@ -452,7 +452,7 @@ The server takes only `--config-dir`. It ignores each `PLAYWRIGHT_MCP_*` variabl
 - A `PLAYWRIGHT_BROWSERS_PATH` of the user stays.
 - Chromium makes a Unix socket in the temp folder. If the temp folder of this tool cannot hold it,
   the server uses `.local_assets/tmp/` of the first folder with `.git` above this tool (in a
-  submodule: the submodule, e.g. `shared/`), else the temp folder of the OS. It logs
+  submodule: the submodule, e.g. `maya/`), else the temp folder of the OS. It logs
   `tmp_dir_fallback`.
 - On macOS, Playwright writes a registry of the open browsers into the cache folder of
   the user. The server cannot move it.

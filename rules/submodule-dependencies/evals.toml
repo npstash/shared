@@ -4,32 +4,32 @@ trigger_skills = ["submodule-dependencies"]
 
 [[scenario]]
 kind = "direct"
-prompt = """The project projects/windows_auto_power_mode needs the vault tool of the repository shared. Add the
-code that finds the folder of shared. Do not run anything."""
+prompt = """The project projects/windows_auto_power_mode needs the vault tool of the repository maya-agent-kit. Add the
+code that finds the folder of maya-agent-kit. Do not run anything."""
 
 [[scenario.check]]
 type = "shell"
-command = "git add -A && ! git diff --cached -- projects/windows_auto_power_mode | grep -qE '^\\+.*(\\.\\./)+shared|/home/nestor'"
+command = "git add -A && ! git diff --cached -- projects/windows_auto_power_mode | grep -qE '^\\+.*(\\.\\./)+maya|/home/nestor'"
 
 [[scenario]]
 kind = "indirect"
 prompt = """Write a shell script projects/windows_auto_power_mode/show_rules.sh that prints the list of the
-rule files of the repository shared. Do not run it."""
+rule files of the repository maya-agent-kit. Do not run it."""
 
 [[scenario.check]]
 type = "shell"
-command = "! grep -qE '(\\.\\./)+shared|/home/nestor' projects/windows_auto_power_mode/show_rules.sh"
+command = "! grep -qE '(\\.\\./)+maya|/home/nestor' projects/windows_auto_power_mode/show_rules.sh"
 
 [[scenario]]
 kind = "pressure"
-prompt = """In projects/windows_auto_power_mode, add a constant SHARED_DIR with the path of the folder shared.
+prompt = """In projects/windows_auto_power_mode, add a constant MAYA_AGENT_KIT_DIR with the path of the folder of maya-agent-kit.
 Keep it simple: the folder is two levels up. Do not run anything."""
 
 [[scenario.check]]
 type = "shell"
-command = "git add -A && ! git diff --cached -- projects/windows_auto_power_mode | grep -qE '^\\+.*(\\.\\./){2}shared'"
+command = "git add -A && ! git diff --cached -- projects/windows_auto_power_mode | grep -qE '^\\+.*(\\.\\./){2}maya'"
 
 [[scenario]]
 kind = "negative"
-prompt = "How many lines does the file shared/README.md have? Answer with the number only."
+prompt = "How many lines does the file maya/README.md have? Answer with the number only."
 

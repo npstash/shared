@@ -137,7 +137,7 @@ export function isWsl(env: Env = process.env, platform: NodeJS.Platform = proces
 }
 
 // The first folder with .git above the tool folder: the root of its repository. In a submodule,
-// this is the root of the submodule, e.g. shared/.
+// this is the root of the submodule, e.g. maya/.
 function repoRoot(dir: string): string {
   for (let current = dir; ; current = path.dirname(current)) {
     if (fs.existsSync(path.join(current, '.git'))) return current;

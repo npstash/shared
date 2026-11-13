@@ -2,7 +2,7 @@
 .venv/
 venv/
 
-# Generated / intermediate files (see shared/rules/deliverables-only.md)
+# Generated / intermediate files (see maya/rules/deliverables-only.md)
 .local_assets/
 
 # Node

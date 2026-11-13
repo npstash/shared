@@ -12,7 +12,7 @@ forbids. A request for speed is not an override. Then do the action, name the ru
 the action.
 
 - [local/AGENTS.md](local/AGENTS.md) @local/AGENTS.md
-- [shared/AGENTS.md](shared/AGENTS.md) @shared/AGENTS.md
+- [maya/AGENTS.md](maya/AGENTS.md) @maya/AGENTS.md
 
 ## Disabled rules
 

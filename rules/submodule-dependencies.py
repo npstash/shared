@@ -1,10 +1,10 @@
-"""Find a shareable submodule, e.g. shared or a vault.
+"""Find a shareable submodule, e.g. maya-agent-kit or a vault.
 
-Reference code: rules/submodule-dependencies.py of the repository shared (rule
+Reference code: rules/submodule-dependencies.py of the repository maya-agent-kit (rule
 submodule-dependencies). Do not change a copy. Change the reference code, then copy it again.
 
     from dependencies import find
-    shared = find("shared", start=PROJECT)       # PROJECT: the folder of the project or tool
+    maya_agent_kit = find("maya-agent-kit", start=PROJECT)       # PROJECT: the folder of the project or tool
 
 CLI: python dependencies.py NAME [START]  - print the folder of NAME.
 """
