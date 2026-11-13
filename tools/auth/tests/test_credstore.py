@@ -199,6 +199,31 @@ def test_edit_of_a_new_system_writes_an_empty_entry(home: Path) -> None:
                                             "authority_info": [], "credentials": {}}
 
 
+def test_edit_of_a_system_without_url_and_authority_info_writes_empty_fields(home: Path) -> None:
+    store = cs.Store(home, PW)
+    store.set_system("bare", secrets={"token": "t"})
+    path = store.edit(["bare"])[0]
+    doc = json.loads(path.read_text())
+    assert doc == {"name": "bare", "revision": doc["revision"], "url": "", "authority_info": [],
+                   "credentials": {"token": ""}}
+    before = (home / "vault.json").read_bytes()
+    store.sync()
+    assert (home / "vault.json").read_bytes() == before          # the empty fields change nothing
+
+
+def test_get_system_shows_each_field_with_a_label(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = cs.Store(home, PW)
+    store.set_system("bare", secrets={"user": "u", "token": "t"})
+    store.set_system("full", url="https://x", authority_info=["read", "write"], secrets={"token": "t"})
+    store.enrol("here", None)
+    capsys.readouterr()
+    assert cs.main(["--vault-home", str(home), "get-system", "bare"]) == 0
+    assert capsys.readouterr().out == "bare\n  url:            -\n  secrets:        token, user\n  authority info: -\n"
+    assert cs.main(["--vault-home", str(home), "get-system", "full"]) == 0
+    assert capsys.readouterr().out == ("full\n  url:            https://x\n  secrets:        token\n"
+                                       "  authority info: read\n                  write\n")
+
+
 def test_edit_refuses_an_existing_edit_file(home: Path) -> None:
     cs.Store(home, PW).edit([SYS])
     with pytest.raises(cs.CredentialError, match="exists already"):
@@ -315,7 +340,7 @@ def test_list_systems_needs_a_terminal_and_the_passphrase(home: Path, monkeypatc
     assert "list-systems runs only in a terminal" in capsys.readouterr().err
     monkeypatch.setattr(cs, "_tty", lambda: True)
     assert cs.main(["--vault-home", str(home), "list-systems"]) == 0 and asked == ["Master passphrase: "]
-    assert capsys.readouterr().out == "a\thttps://g\ttoken\n  scope line\nb\thttps://g\ttoken\n  scope line\n"
+    assert capsys.readouterr().out == "a\nb\n"                 # only the names
 
 
 def test_get_system_by_entry_id_or_encrypted_name_needs_the_passphrase(home: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -339,7 +364,7 @@ def test_get_system_by_entry_id_or_encrypted_name_needs_the_passphrase(home: Pat
     monkeypatch.setattr(cs, "_tty", lambda: True)
     capsys.readouterr()
     assert cs.main(["--vault-home", str(home), "get-system", eid]) == 0 and asked == ["Master passphrase: "]
-    assert capsys.readouterr().out == f"{SYS}\thttps://g\ttoken\n  scope\n"
+    assert capsys.readouterr().out == f"{SYS}\n  url:            https://g\n  secrets:        token\n  authority info: scope\n"
 
 
 def test_set_system_adds_and_updates(home: Path) -> None:
@@ -417,7 +442,7 @@ def test_cli(home: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert run("get-secret", SYS, "pat") == 0
     assert capsys.readouterr().out == "t\n"
     assert run("get-system", SYS) == 0
-    assert capsys.readouterr().out == f"{SYS}\thttps://g\tpat\n  scope\n"
+    assert capsys.readouterr().out == f"{SYS}\n  url:            https://g\n  secrets:        pat\n  authority info: scope\n"
     assert run("edit", SYS, "new") == 0
     paths = capsys.readouterr().out.splitlines()
     assert [Path(p).parent for p in paths] == [home, home]

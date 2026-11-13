@@ -49,7 +49,7 @@ its encrypted name. This needs the passphrase too, and writes a line to `access.
 ## Edit
 
 1. `run.sh edit NAME ...` writes an edit file `entry-<ID>.json` for each system into the
-   vault home, and prints its path. A new system gets a file with empty fields.
+   vault home, and prints its path. The file has each field. A field without a value is empty.
 2. Change the file. Do not change `name` and `revision`.
 3. `run.sh sync` applies each edit file, then deletes it. Commit the vault home.
 
@@ -69,6 +69,15 @@ its encrypted name. This needs the passphrase too, and writes a line to `access.
 - If the entry changed after `edit`, `sync` refuses the file. Run `edit` again.
 - `sync` applies all files, or none.
 - To rename, use `rename-system` or `rename-secret`. To delete a system, use `delete-system`.
+
+`get-system` shows each field on a labelled line. `-` is an empty field:
+
+```text
+NUC15 SUDO
+  url:            -
+  secrets:        password, username
+  authority info: -
+```
 
 ## Opening the vault
 
@@ -95,7 +104,7 @@ run.sh list-keyring-secrets              # key passphrases of this tool in the O
 run.sh delete-keyring-secret NAME ...    # delete them, and the key files they open
 run.sh delete-all-keyring-secrets        # delete all of them, and the key files they open
 run.sh push-enrol                        # commit and push new recipient files; see "Push"
-run.sh list-systems                      # get-system for all systems; only in a terminal, needs the passphrase
+run.sh list-systems                      # the names of all systems; only in a terminal, needs the passphrase
 run.sh edit SYSTEM ...                   # write edit files; see "Edit"
 run.sh sync                              # apply the edit files
 run.sh get-system SYSTEM                 # url, secret names, authority info; no values

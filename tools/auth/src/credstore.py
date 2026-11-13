@@ -1213,7 +1213,7 @@ class Store:
     def edit(self, systems: list[str]) -> list[Path]:
         """Write an edit file for each system: all fields, secret values empty. Returns the paths.
 
-        A new system gets a file with no fields. sync applies the files.
+        Each file has each field. A field without a value is empty. sync applies the files.
         """
         if not systems:
             raise CredentialError("give one or more system names")
@@ -1226,11 +1226,10 @@ class Store:
             record = self._entries().get(self._id(system))
             doc: Doc = {"name": system, "revision": _revision(record) if record else ""}
             c = self._get(system)
-            if c is None:
-                doc |= {"url": "", "authority_info": [], "credentials": {}}
-            else:
-                doc |= {k: v for k, v in _entry_doc(c).items() if k != "name"}
-                doc["credentials"] = {k: "" for k in c._secrets}
+            # Each field is in the file, also an empty one.
+            doc |= {"url": (c.url or "") if c else "",
+                    "authority_info": list(c.authority_info) if c else [],
+                    "credentials": {k: "" for k in c._secrets} if c else {}}
             _write(path, (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode())
         return paths
 
@@ -1456,10 +1455,15 @@ def _tty() -> bool:
 
 
 def _print_system(c: Credential) -> None:
-    """Name, url and secret names on one line, then one indented line for each authority info line."""
-    print(f"{c.name}\t{c.url or '-'}\t{','.join(c.secrets()) or '-'}")
-    for line in c.authority_info:
-        print(f"  {line}")
+    """The name, then one labelled line for the url, the secret names and each authority info line. "-" is empty."""
+    pad = " " * len("  authority info: ")
+    info = list(c.authority_info) or ["-"]
+    print(c.name)
+    print(f"  url:            {c.url or '-'}")
+    print(f"  secrets:        {', '.join(c.secrets()) or '-'}")
+    print(f"  authority info: {info[0]}")
+    for line in info[1:]:
+        print(f"{pad}{line}")
 
 
 def _prompt_new_passphrase() -> str:
@@ -1554,7 +1558,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("delete-all-keyring-secrets", help="delete each key passphrase, and the key files they open")
     sub.add_parser("push-enrol", help="commit and push the new recipient files of each vault, and the submodule "
                                       "pointers above them; only in a terminal")
-    sub.add_parser("list-systems", help="show all systems as get-system does; only in a terminal, needs the passphrase")
+    sub.add_parser("list-systems", help="print the names of all systems; only in a terminal, needs the passphrase")
     p = sub.add_parser("edit", help="write an edit file for each system; secret values empty")
     p.add_argument("systems", nargs="+", metavar="SYSTEM")
     sub.add_parser("sync", help="apply the edit files to the vault, then delete them")
@@ -1625,7 +1629,7 @@ def main(argv: list[str] | None = None) -> int:
             if not _tty():
                 raise CredentialError("list-systems runs only in a terminal: it needs the master passphrase")
             for name in store.list_systems():
-                _print_system(store._need(name))
+                print(name)
         elif a.cmd == "edit":
             for path in store.edit(a.systems):
                 print(path)
