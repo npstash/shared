@@ -7,6 +7,14 @@
   abstract class, then a class that implements it. An exposed interface is an API that another
   component, project or process uses. An internal class needs no interface.
 
+## Same code for the type checker and the run
+
+- Python: do not use `TYPE_CHECKING`. Import each name of an annotation with a usual import.
+- If this import makes an import cycle, move the types into a separate module.
+- If this import loads a package that is optional at run time, use a `Protocol` or `object`.
+- Outside of tests, do not use `assert` to narrow a type. `python -O` removes each `assert`.
+  Use `if not isinstance(...): raise ...`.
+
 ## Checks
 
 - Check the types with a type checker, e.g. `tsc --noEmit` in strict mode.
