@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 
@@ -24,7 +25,7 @@ class Vault:
     passphrase: str | None
 
     def store(self) -> credstore.Store | credstore_fake.Store:
-        return self.module.Store(self.home, self.passphrase)
+        return cast("credstore.Store | credstore_fake.Store", self.module.Store(self.home, self.passphrase))
 
 
 @pytest.fixture(autouse=True)

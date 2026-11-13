@@ -44,13 +44,18 @@ import socket
 import subprocess
 import sys
 from base64 import b64decode, b64encode
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from secrets import token_bytes
-from types import MappingProxyType
+from types import FrameType, MappingProxyType, ModuleType
 from typing import Mapping
+
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+Doc = dict[str, object]   # a JSON object
 
 TOOL = Path(__file__).resolve().parents[1]   # tools/auth; this file is in src/
 BACKUPS = TOOL / ".local_assets"      # key operations copy the files here first
@@ -91,9 +96,9 @@ class Credential:
         return MappingProxyType(self._secrets)
 
 
-def _entry_doc(c: Credential) -> dict:
+def _entry_doc(c: Credential) -> Doc:
     """The plaintext of an entry in vault.json."""
-    doc: dict = {"name": c.name}
+    doc: Doc = {"name": c.name}
     if c.url is not None:
         doc["url"] = c.url
     if c.authority_info:
@@ -102,13 +107,13 @@ def _entry_doc(c: Credential) -> dict:
     return doc
 
 
-def _strings(value, source: str, what: str) -> list[str]:
+def _strings(value: object, source: str, what: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise CredentialError(f"{source}: {what} must be a list of strings")
     return value
 
 
-def _from_doc(doc, source: str) -> Credential:
+def _from_doc(doc: object, source: str) -> Credential:
     if not isinstance(doc, dict) or not isinstance(doc.get("name"), str):
         raise CredentialError(f"{source}: the entry is malformed")
     creds = doc.get("credentials", {})
@@ -253,7 +258,7 @@ def _fit(fields: list[str], limit: int) -> list[str]:
     return [f[:cap] for f in fields if f[:cap]]
 
 
-def _auto_name(info: dict[str, str], taken) -> str:
+def _auto_name(info: dict[str, str], taken: Callable[[str], bool]) -> str:
     """auto-<computer>-<user>-<repo>-<yyyymmdd>[-N], for a clone that enrols with no user input.
 
     Only the identification fields count for ID_LIMIT. taken(name) tells a used name."""
@@ -267,9 +272,15 @@ def _auto_name(info: dict[str, str], taken) -> str:
     return name
 
 
+class _CaseParser(configparser.ConfigParser):
+    """A parser that keeps the case of the keys."""
+
+    def optionxform(self, optionstr: str) -> str:
+        return optionstr
+
+
 def _write_info(path: Path, info: dict[str, str]) -> None:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.optionxform = str
+    parser = _CaseParser(interpolation=None)
     parser["clone"] = {k: v.replace("\n", " ") for k, v in info.items()}
     buffer = io.StringIO()
     parser.write(buffer)
@@ -349,7 +360,7 @@ def _unseal(master: str, name: str, eid: str, data: str) -> bytes:
         raise CredentialError(f"entry {eid} cannot be decrypted - wrong key or damaged vault.json") from exc
 
 
-def _revision(record: dict) -> str:
+def _revision(record: dict[str, str]) -> str:
     """Changes with each write of the entry. An edit file keeps it, sync compares it."""
     return sha256(record["data"].encode()).hexdigest()[:16]
 
@@ -369,20 +380,18 @@ def _new_master_key() -> str:
     return b64encode(token_bytes(32)).decode()  # 256 bits, one line, safe for `openssl -pass file:`
 
 
-def _oaep():
+def _oaep() -> padding.OAEP:
     """RSA-OAEP with SHA-256, as `openssl pkeyutl -pkeyopt rsa_oaep_md:sha256` reads it."""
     from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.asymmetric import padding
     return padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
 
 
-def _public_pem(private) -> bytes:
+def _public_pem(private: rsa.RSAPrivateKey) -> bytes:
     from cryptography.hazmat.primitives import serialization as s
     return private.public_key().public_bytes(s.Encoding.PEM, s.PublicFormat.SubjectPublicKeyInfo)
 
 
-def _load_public(path: Path):
-    from cryptography.hazmat.primitives.asymmetric import rsa
+def _load_public(path: Path) -> rsa.RSAPublicKey:
     from cryptography.hazmat.primitives.serialization import load_pem_public_key
     try:
         key = load_pem_public_key(path.read_bytes())
@@ -433,7 +442,7 @@ class KeyringProvider(Provider):
     SERVICE = "credstore"
 
     @staticmethod
-    def _backends() -> list:
+    def _backends() -> list[object]:
         """The usable backends: no fail, null or plaintext-file backend."""
         try:
             import keyring
@@ -442,7 +451,7 @@ class KeyringProvider(Provider):
             return []
         backend = keyring.get_keyring()
         found = backend.backends if isinstance(backend, chainer.ChainerBackend) else [backend]
-        usable = []
+        usable: list[object] = []
         for b in found:
             module = type(b).__module__
             if module.startswith(("keyring.backends.fail", "keyring.backends.null", "keyrings.alt.file")):
@@ -482,6 +491,9 @@ class KeyringProvider(Provider):
                 from contextlib import closing
 
                 import secretstorage
+                from keyring.backends.SecretService import Keyring as SecretServiceKeyring
+                if not isinstance(b, SecretServiceKeyring):
+                    continue
                 user = b.schemes[b.scheme]["username"]
                 with closing(secretstorage.dbus_init()) as conn:
                     for item in secretstorage.search_items(conn, b._query(self.SERVICE)):
@@ -524,7 +536,7 @@ def _key_provider(path: Path) -> str | None:
     return first[len(PROVIDER_LINE):].strip().decode() if first.startswith(PROVIDER_LINE.encode()) else None
 
 
-def _read_private(path: Path, name: str):
+def _read_private(path: Path, name: str) -> tuple[rsa.RSAPrivateKey, str]:
     """The private key of a key file, and how it was opened: 'plain' or the provider name."""
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
     data, password, how = path.read_bytes(), None, "plain"
@@ -539,12 +551,15 @@ def _read_private(path: Path, name: str):
             raise CredentialError(f"provider {how!r} has no key passphrase for {name!r}")
         data, password = rest, value.encode()
     try:
-        return load_pem_private_key(data, password), how
+        key = load_pem_private_key(data, password)
     except (ValueError, TypeError) as exc:
         raise CredentialError(f"{path.name} cannot be read") from exc
+    if not isinstance(key, rsa.RSAPrivateKey):
+        raise CredentialError(f"{path.name} is not an RSA key")
+    return key, how
 
 
-def _write_private(path: Path, name: str, private, provider: Provider | None) -> None:
+def _write_private(path: Path, name: str, private: rsa.RSAPrivateKey, provider: Provider | None) -> None:
     """Mode 600. With a provider, encrypted with a new key passphrase that the provider keeps."""
     from cryptography.hazmat.primitives import serialization as s
     if provider is None:
@@ -597,7 +612,7 @@ def _caller() -> str:
     """The file name of the caller. No path, arguments or function."""
     if not _CLI:
         here = Path(__file__).resolve()
-        frame = sys._getframe(1)
+        frame: FrameType | None = sys._getframe(1)
         while frame is not None and Path(frame.f_code.co_filename).resolve() == here:
             frame = frame.f_back
         return Path(frame.f_code.co_filename).name if frame is not None else Path(sys.argv[0]).name
@@ -624,12 +639,14 @@ def _caller() -> str:
 LOG_HEADER = "\t".join(["time", "event", "vault", "system", "secrets", "method", "caller"])
 
 
-def _log(home: Path, event: str, system: str = "", secrets=(), method: str = "") -> None:
+def _log(home: Path, event: str, system: str = "", secrets: Iterable[str] = (), method: str = "") -> None:
     """One tab-separated line. The system and the caller are in quotes: they can hold spaces.
 
     The system column holds the entry ID, never the name, or a recipient name. The vault
     column is always "main": it stays for the format of existing logs."""
-    clean = lambda s: re.sub(r"[\t\r\n\"]", " ", s)  # noqa: E731
+    def clean(s: str) -> str:
+        return re.sub(r"[\t\r\n\"]", " ", s)
+
     line = "\t".join([datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), event, "main",
                       f'"{clean(system)}"', clean(",".join(secrets)), method, f'"{clean(_caller())}"'])
     path = home / LOG
@@ -647,9 +664,11 @@ def _log(home: Path, event: str, system: str = "", secrets=(), method: str = "")
 
 # -- the store ------------------------------------------------------------------------------
 
-def _dependencies():
+def _dependencies() -> ModuleType:
     """dependencies.py of this tool, the copy of the reference code of the rule submodule-dependencies."""
     spec = importlib.util.spec_from_file_location("credstore_dependencies", TOOL / "src" / "dependencies.py")
+    if spec is None or spec.loader is None:
+        raise CredentialError(f"cannot load {TOOL / 'src' / 'dependencies.py'}")
     dependencies = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dependencies)
     return dependencies
@@ -659,7 +678,7 @@ def find_vault(name: str) -> Path:
     """The folder of the vault `name`, e.g. vault-main, found from the folder of this tool."""
     dependencies = _dependencies()
     try:
-        return dependencies.find(name, start=TOOL)
+        return Path(dependencies.find(name, start=TOOL))
     except dependencies.DependencyError as exc:
         raise CredentialError(f"{exc}\ngive the vault home with --vault-home DIR") from None
 
@@ -667,7 +686,7 @@ def find_vault(name: str) -> Path:
 def known_vaults() -> list[str]:
     """The names vault-* in .gitmodules and dependencies.txt of each root above this tool."""
     dependencies = _dependencies()
-    names = set()
+    names: set[str] = set()
     for root in dependencies.roots(TOOL):
         try:
             sections = dependencies.dependencies(root)
@@ -689,12 +708,15 @@ def vault_home(vault: str | None = None, home: Path | str | None = None) -> Path
                           + (", ".join(known_vaults()) or "none"))
 
 
-def _admin_key(pem: bytes):
+def _admin_key(pem: bytes) -> rsa.RSAPrivateKey:
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
     try:
-        return load_pem_private_key(pem, None)
+        key = load_pem_private_key(pem, None)
     except (ValueError, TypeError) as exc:
         raise CredentialError("admin.enc.key holds a damaged admin key") from exc
+    if not isinstance(key, rsa.RSAPrivateKey):
+        raise CredentialError("admin.enc.key holds a damaged admin key")
+    return key
 
 
 class Store:
@@ -719,7 +741,7 @@ class Store:
         self.method = ""                   # how the vault was opened, for the access log
         self._passphrase = passphrase
         self._key: str | None = None       # the master key, once loaded
-        self._records: dict[str, dict] | None = None   # the entries of vault.json, once read
+        self._records: dict[str, dict[str, str]] | None = None   # the entries of vault.json, once read
 
     # -- opening ------------------------------------------------------------------------
 
@@ -802,7 +824,7 @@ class Store:
 
     # -- entries --------------------------------------------------------------------------
 
-    def _entries(self) -> dict[str, dict]:
+    def _entries(self) -> dict[str, dict[str, str]]:
         """ID -> {"name", "data"} of vault.json. Nothing is decrypted."""
         if self._records is None:
             if not self.vault.is_file():
@@ -833,7 +855,7 @@ class Store:
         if record is None:
             return None
         try:
-            c = _from_doc(json.loads(_unseal(self._key, name, eid, record["data"])), f"entry {eid}")
+            c = _from_doc(json.loads(_unseal(self._load_key(), name, eid, record["data"])), f"entry {eid}")
         except (KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise CredentialError(f"entry {eid} in {self.vault} is damaged") from exc
         if c.name != name:
@@ -854,22 +876,22 @@ class Store:
             name_blob = old["name"] if old else b64encode(
                 _load_public(self.admin_pub).encrypt(c.name.encode(), _oaep())).decode()
         plain = json.dumps(_entry_doc(c), sort_keys=True).encode()
-        self._entries()[eid] = {"name": name_blob, "data": _seal(self._key, c.name, eid, plain)}
+        self._entries()[eid] = {"name": name_blob, "data": _seal(self._load_key(), c.name, eid, plain)}
 
     def _drop(self, name: str) -> None:
         del self._entries()[self._id(name)]
 
-    def _names(self, admin) -> dict[str, str]:
+    def _names(self, admin: rsa.RSAPrivateKey) -> dict[str, str]:
         """ID -> name of each entry. Only the admin key (the passphrase) opens the names."""
         return {eid: self._name_of(admin, eid, record) for eid, record in self._entries().items()}
 
-    def _name_of(self, admin, eid: str, record: dict) -> str:
+    def _name_of(self, admin: rsa.RSAPrivateKey, eid: str, record: dict[str, str]) -> str:
         """The name of the entry `eid`, decrypted with the admin key and checked against the ID."""
         try:
             name = admin.decrypt(b64decode(record["name"]), _oaep()).decode()
         except (KeyError, ValueError) as exc:
             raise CredentialError(f"the name of entry {eid} cannot be decrypted") from exc
-        if entry_id(self._key, name) != eid:
+        if entry_id(self._load_key(), name) != eid:
             raise CredentialError(f"entry {eid} in {self.vault} is damaged")
         return name
 
@@ -923,7 +945,6 @@ class Store:
     def _new_admin_key(self, passphrase: str) -> None:
         """A new admin key pair: admin.pub, and admin.enc.key encrypted with the passphrase."""
         from cryptography.hazmat.primitives import serialization as s
-        from cryptography.hazmat.primitives.asymmetric import rsa
         private = rsa.generate_private_key(public_exponent=65537, key_size=KEY_BITS)
         _write(self.admin_enc, encrypt(private.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8,
                                                              s.NoEncryption()), passphrase))
@@ -976,7 +997,7 @@ class Store:
         for c, name_blob in systems:
             self._put(c, name_blob)
         self._save()
-        self._wrap_all(self._key)
+        self._wrap_all(self._load_key())
         _log(self.home, "rotate-master-key", method=self.method)
         return backup
 
@@ -1012,7 +1033,6 @@ class Store:
         if path.exists():
             private, _ = _read_private(path, name)
         else:
-            from cryptography.hazmat.primitives.asymmetric import rsa
             if provider == "auto":
                 provider = next(iter(available_providers()), None)
             private = rsa.generate_private_key(public_exponent=65537, key_size=KEY_BITS)
@@ -1204,7 +1224,7 @@ class Store:
         _ensure_ignored(self.home)
         for system, path in zip(systems, paths):
             record = self._entries().get(self._id(system))
-            doc: dict = {"name": system, "revision": _revision(record) if record else ""}
+            doc: Doc = {"name": system, "revision": _revision(record) if record else ""}
             c = self._get(system)
             if c is None:
                 doc |= {"url": "", "authority_info": [], "credentials": {}}
@@ -1214,7 +1234,7 @@ class Store:
             _write(path, (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode())
         return paths
 
-    def _from_edit(self, path: Path, current) -> tuple[str, Credential]:
+    def _from_edit(self, path: Path, current: Callable[[str], Credential | None]) -> tuple[str, Credential]:
         """The system of an edit file, merged with its stored values. Checks the name and the revision."""
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
@@ -1255,7 +1275,9 @@ class Store:
             raise CredentialError(f"no {EDIT} in {self.home}: run edit NAME first")
         changed: dict[str, Credential] = {}
         names = []
-        current = lambda n: changed[n] if n in changed else self._get(n)  # noqa: E731
+        def current(n: str) -> Credential | None:
+            return changed[n] if n in changed else self._get(n)
+
         for path in files:
             name, new = self._from_edit(path, current)
             names.append(name)
@@ -1268,8 +1290,8 @@ class Store:
             path.unlink()
         return names
 
-    def set_system(self, system: str, url: str | None = None, authority_info: list | None = None,
-                   secrets: dict | None = None) -> Credential:
+    def set_system(self, system: str, url: str | None = None, authority_info: list[str] | None = None,
+                   secrets: dict[str, str] | None = None) -> Credential:
         old = self._get(system)
         new = Credential(
             system,
@@ -1386,7 +1408,7 @@ def push_enrol_plan(start: Path | str | None = None) -> list[PushStep]:
             if name.startswith("vault-") and vault not in commits and (vault / ".git").exists():
                 files = _new_recipient_files(vault)
                 if files:
-                    names[vault] = sorted({RECIPIENT_FILE.match(Path(f).name)[1] for f in files})
+                    names[vault] = sorted({m[1] for m in (RECIPIENT_FILE.match(Path(f).name) for f in files) if m})
                     commits[vault] = (files, "Enrol " + ", ".join(names[vault]))
     for root in roots:
         moved = [(name, rel, (root / rel).resolve()) for name, rel in dependencies.submodules(root).items()]
