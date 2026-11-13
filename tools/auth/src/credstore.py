@@ -51,11 +51,9 @@ from hashlib import sha256
 from pathlib import Path
 from secrets import token_bytes
 from types import FrameType, MappingProxyType, ModuleType
-from typing import TYPE_CHECKING, Mapping
+from typing import Mapping
 
-if TYPE_CHECKING:   # cryptography and keyring are imported where they are used
-    from cryptography.hazmat.primitives.asymmetric import padding, rsa
-    from keyring.backend import KeyringBackend
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 Doc = dict[str, object]   # a JSON object
 
@@ -385,7 +383,6 @@ def _new_master_key() -> str:
 def _oaep() -> padding.OAEP:
     """RSA-OAEP with SHA-256, as `openssl pkeyutl -pkeyopt rsa_oaep_md:sha256` reads it."""
     from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.asymmetric import padding
     return padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None)
 
 
@@ -395,7 +392,6 @@ def _public_pem(private: rsa.RSAPrivateKey) -> bytes:
 
 
 def _load_public(path: Path) -> rsa.RSAPublicKey:
-    from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives.serialization import load_pem_public_key
     try:
         key = load_pem_public_key(path.read_bytes())
@@ -446,7 +442,7 @@ class KeyringProvider(Provider):
     SERVICE = "credstore"
 
     @staticmethod
-    def _backends() -> list[KeyringBackend]:
+    def _backends() -> list[object]:
         """The usable backends: no fail, null or plaintext-file backend."""
         try:
             import keyring
@@ -455,7 +451,7 @@ class KeyringProvider(Provider):
             return []
         backend = keyring.get_keyring()
         found = backend.backends if isinstance(backend, chainer.ChainerBackend) else [backend]
-        usable: list[KeyringBackend] = []
+        usable: list[object] = []
         for b in found:
             module = type(b).__module__
             if module.startswith(("keyring.backends.fail", "keyring.backends.null", "keyrings.alt.file")):
@@ -542,7 +538,6 @@ def _key_provider(path: Path) -> str | None:
 
 def _read_private(path: Path, name: str) -> tuple[rsa.RSAPrivateKey, str]:
     """The private key of a key file, and how it was opened: 'plain' or the provider name."""
-    from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
     data, password, how = path.read_bytes(), None, "plain"
     first, _, rest = data.partition(b"\n")
@@ -714,7 +709,6 @@ def vault_home(vault: str | None = None, home: Path | str | None = None) -> Path
 
 
 def _admin_key(pem: bytes) -> rsa.RSAPrivateKey:
-    from cryptography.hazmat.primitives.asymmetric import rsa
     from cryptography.hazmat.primitives.serialization import load_pem_private_key
     try:
         key = load_pem_private_key(pem, None)
@@ -951,7 +945,6 @@ class Store:
     def _new_admin_key(self, passphrase: str) -> None:
         """A new admin key pair: admin.pub, and admin.enc.key encrypted with the passphrase."""
         from cryptography.hazmat.primitives import serialization as s
-        from cryptography.hazmat.primitives.asymmetric import rsa
         private = rsa.generate_private_key(public_exponent=65537, key_size=KEY_BITS)
         _write(self.admin_enc, encrypt(private.private_bytes(s.Encoding.PEM, s.PrivateFormat.PKCS8,
                                                              s.NoEncryption()), passphrase))
@@ -1040,7 +1033,6 @@ class Store:
         if path.exists():
             private, _ = _read_private(path, name)
         else:
-            from cryptography.hazmat.primitives.asymmetric import rsa
             if provider == "auto":
                 provider = next(iter(available_providers()), None)
             private = rsa.generate_private_key(public_exponent=65537, key_size=KEY_BITS)
